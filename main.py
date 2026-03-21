@@ -695,7 +695,15 @@ def watchlist():
 
 @app.route("/watchlist/data")
 def watchlist_data():
-    tickers = load_watchlist()
+    raw_tickers = request.args.get("tickers", "").strip()
+    if raw_tickers:
+        tickers = []
+        for ticker in raw_tickers.split(","):
+            clean = ticker.upper().strip()
+            if clean and clean not in tickers:
+                tickers.append(clean)
+    else:
+        tickers = load_watchlist()
     snapshots = []
 
     for ticker in tickers:

@@ -516,6 +516,7 @@ let lastTicker = null;
 let watchlist = [];
 let watchlistData = [];
 let isLoading = false;
+const WATCHLIST_STORAGE_KEY = "trading-app-watchlist";
 const intradayEtFormatter = new Intl.DateTimeFormat("en-US", {
   timeZone: "America/New_York",
   month: "numeric",
@@ -550,6 +551,27 @@ function setChartMeta(ticker, sourceLabel){
 
 function isSavedTicker(ticker){
   return watchlist.includes(ticker);
+}
+
+function loadLocalWatchlist(){
+  try{
+    const raw = localStorage.getItem(WATCHLIST_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed)
+      ? parsed.map(t => String(t).toUpperCase().trim()).filter(Boolean)
+      : [];
+  }catch(err){
+    console.log("Local watchlist read failed", err);
+    return [];
+  }
+}
+
+function saveLocalWatchlist(){
+  try{
+    localStorage.setItem(WATCHLIST_STORAGE_KEY, JSON.stringify(watchlist));
+  }catch(err){
+    console.log("Local watchlist save failed", err);
+  }
 }
 
 function formatEtLabel(unixSeconds){
@@ -792,19 +814,35 @@ document.addEventListener("click", (e)=>{
 });
 
 async function loadWatchlist(){
+  watchlist = loadLocalWatchlist();
+
   try{
-    const res = await fetch("/watchlist");
-    watchlist = await res.json();
+    if(!watchlist.length){
+      const res = await fetch("/watchlist");
+      const serverWatchlist = await res.json();
+      if(Array.isArray(serverWatchlist) && serverWatchlist.length){
+        watchlist = serverWatchlist.map(t => String(t).toUpperCase().trim()).filter(Boolean);
+        saveLocalWatchlist();
+      }
+    }
     await loadWatchlistData();
     renderWatch();
   }catch(err){
     console.log("Watchlist load failed", err);
+    await loadWatchlistData();
+    renderWatch();
   }
 }
 
 async function loadWatchlistData(){
+  if(!watchlist.length){
+    watchlistData = [];
+    return;
+  }
+
   try{
-    const res = await fetch("/watchlist/data");
+    const params = new URLSearchParams({ tickers: watchlist.join(",") });
+    const res = await fetch(`/watchlist/data?${params.toString()}`);
     watchlistData = await res.json();
   }catch(err){
     console.log("Watchlist data load failed", err);
@@ -813,38 +851,48 @@ async function loadWatchlistData(){
 }
 
 async function addWatch(t){
+  const normalized = t.toUpperCase();
+  if(!watchlist.includes(normalized)){
+    watchlist = [...watchlist, normalized];
+    saveLocalWatchlist();
+  }
+
   try{
-    const res = await fetch("/watchlist", {
+    await fetch("/watchlist", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ticker: t })
+      body: JSON.stringify({ ticker: normalized })
     });
-    watchlist = await res.json();
-    await loadWatchlistData();
-    renderWatch();
-    if(lastTicker === t){
-      updateWatchButton(t);
-    }
   }catch(err){
     console.log("Watchlist add failed", err);
+  }
+
+  await loadWatchlistData();
+  renderWatch();
+  if(lastTicker === normalized){
+    updateWatchButton(normalized);
   }
 }
 
 async function removeWatch(t){
+  const normalized = t.toUpperCase();
+  watchlist = watchlist.filter(item => item !== normalized);
+  saveLocalWatchlist();
+  watchlistData = watchlistData.filter(item => item.ticker !== normalized);
+
   try{
-    const res = await fetch("/watchlist", {
+    await fetch("/watchlist", {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ticker: t })
+      body: JSON.stringify({ ticker: normalized })
     });
-    watchlist = await res.json();
-    watchlistData = watchlistData.filter(item => item.ticker !== t);
-    renderWatch();
-    if(lastTicker === t){
-      updateWatchButton(t);
-    }
   }catch(err){
     console.log("Watchlist remove failed", err);
+  }
+
+  renderWatch();
+  if(lastTicker === normalized){
+    updateWatchButton(normalized);
   }
 }
 

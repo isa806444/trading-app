@@ -160,12 +160,125 @@ def get_et_session_key(unix_seconds):
     return dt.strftime("%Y-%m-%d")
 
 
+def get_market_session_name(unix_seconds):
+    dt = datetime.fromtimestamp(unix_seconds, tz=DEMO_TIMEZONE)
+    minutes = (dt.hour * 60) + dt.minute
+    if minutes < 570:
+        return "Premarket"
+    if minutes < 960:
+        return "Regular Hours"
+    return "After Hours"
+
+
+def get_current_market_status():
+    now = datetime.now(tz=DEMO_TIMEZONE)
+    if now.weekday() >= 5:
+        return "Closed"
+
+    minutes = (now.hour * 60) + now.minute
+    if 240 <= minutes < 570:
+        return "Premarket"
+    if 570 <= minutes < 960:
+        return "Regular Hours"
+    if 960 <= minutes < 1200:
+        return "After Hours"
+    return "Closed"
+
+
 def build_quote_from_candles(candles):
     return {
         "price": round(candles[-1]["close"], 2),
         "open": round(candles[0]["open"], 2),
         "high": round(max(c["high"] for c in candles), 2),
         "low": round(min(c["low"] for c in candles), 2)
+    }
+
+
+def calculate_ema(values, period):
+    if not values:
+        return []
+
+    multiplier = 2 / (period + 1)
+    ema_values = []
+    ema = values[0]
+
+    for index, value in enumerate(values):
+        if index == 0:
+            ema = value
+        else:
+            ema = (value - ema) * multiplier + ema
+        ema_values.append(round(ema, 4))
+
+    return ema_values
+
+
+def calculate_vwap(candles):
+    cumulative_pv = 0.0
+    cumulative_volume = 0.0
+    vwap_values = []
+
+    for candle in candles:
+        typical_price = (candle["high"] + candle["low"] + candle["close"]) / 3
+        volume = candle.get("volume") or 0
+        cumulative_pv += typical_price * volume
+        cumulative_volume += volume
+        if cumulative_volume <= 0:
+            vwap_values.append(round(candle["close"], 4))
+        else:
+            vwap_values.append(round(cumulative_pv / cumulative_volume, 4))
+
+    return vwap_values
+
+
+def calculate_rsi(values, period=14):
+    if not values:
+        return []
+
+    rsi_values = [None]
+    gains = []
+    losses = []
+    avg_gain = None
+    avg_loss = None
+
+    for index in range(1, len(values)):
+        delta = values[index] - values[index - 1]
+        gain = max(delta, 0)
+        loss = abs(min(delta, 0))
+        gains.append(gain)
+        losses.append(loss)
+
+        if index < period:
+            rsi_values.append(None)
+            continue
+
+        if index == period:
+            avg_gain = sum(gains[-period:]) / period
+            avg_loss = sum(losses[-period:]) / period
+        else:
+            avg_gain = ((avg_gain * (period - 1)) + gain) / period
+            avg_loss = ((avg_loss * (period - 1)) + loss) / period
+
+        if avg_loss == 0:
+            rsi = 100
+        else:
+            rs = avg_gain / avg_loss
+            rsi = 100 - (100 / (1 + rs))
+
+        rsi_values.append(round(rsi, 2))
+
+    while len(rsi_values) < len(values):
+        rsi_values.append(None)
+
+    return rsi_values
+
+
+def build_chart_indicators(candles):
+    closes = [c["close"] for c in candles]
+    return {
+        "ema9": calculate_ema(closes, 9),
+        "ema20": calculate_ema(closes, 20),
+        "vwap": calculate_vwap(candles),
+        "rsi14": calculate_rsi(closes, 14),
     }
 
 
@@ -398,27 +511,52 @@ def get_skew_signal(value):
     return "Calmer tail-risk pricing"
 
 
-def build_trade_signal(change, bias, strategy, skew_value=None):
-    if change >= 1.0:
+def build_trade_signal(change, bias, strategy, candles, skew_value=None):
+    closes = [c["close"] for c in candles]
+    ema9 = calculate_ema(closes, 9)
+    ema20 = calculate_ema(closes, 20)
+    vwap = calculate_vwap(candles)
+    rsi = calculate_rsi(closes, 14)
+
+    last_close = closes[-1] if closes else 0
+    prev_close = closes[-2] if len(closes) > 1 else last_close
+    last_ema9 = ema9[-1] if ema9 else last_close
+    last_ema20 = ema20[-1] if ema20 else last_close
+    last_vwap = vwap[-1] if vwap else last_close
+    last_rsi = rsi[-1] if rsi and rsi[-1] is not None else 50
+    higher_low = candles[-1]["low"] >= candles[-2]["low"] if len(candles) > 1 else False
+    lower_high = candles[-1]["high"] <= candles[-2]["high"] if len(candles) > 1 else False
+    bullish_stack = last_close > last_ema9 > last_ema20 and last_close > last_vwap
+    bearish_stack = last_close < last_ema9 < last_ema20 and last_close < last_vwap
+
+    if bullish_stack and last_rsi >= 55 and higher_low:
         action = "BUY"
         tone = "bullish"
-        reason = f"{strategy.title()} strength is positive and price is leading the session."
-    elif change <= -1.0:
+        reason = f"{strategy.title()} structure is above EMA 9, EMA 20, and VWAP with RSI strength behind it."
+    elif bearish_stack and last_rsi <= 45 and lower_high:
         action = "SELL"
         tone = "bearish"
-        reason = f"{strategy.title()} weakness is in control and price is trailing the session."
+        reason = f"{strategy.title()} structure is below EMA 9, EMA 20, and VWAP with RSI weakness behind it."
+    elif change >= 0.5 and last_close > last_ema20:
+        action = "BUY"
+        tone = "bullish"
+        reason = "Price is holding above trend support, but the structure is not fully stacked yet."
+    elif change <= -0.5 and last_close < last_ema20:
+        action = "SELL"
+        tone = "bearish"
+        reason = "Price is staying under trend support, but the structure is not fully stacked yet."
     elif bias == "Bullish":
         action = "BUY"
         tone = "bullish"
-        reason = "Bias is bullish, but the move is still moderate."
+        reason = "Bias is bullish, but candle structure is still mixed."
     elif bias == "Bearish":
         action = "SELL"
         tone = "bearish"
-        reason = "Bias is bearish, but the move is still moderate."
+        reason = "Bias is bearish, but candle structure is still mixed."
     else:
         action = "WAIT"
         tone = "neutral"
-        reason = "Price is flat versus the open, so there is no clean edge yet."
+        reason = "Price, EMA structure, and momentum are too mixed for a clean setup."
 
     if skew_value is not None and skew_value >= 150 and action != "WAIT":
         reason = f"{reason} CBOE SKEW is elevated, so risk should stay tighter than usual."
@@ -504,17 +642,19 @@ def analyze_strategy(symbol, strategy):
     if not market:
         return None
     skew = fetch_skew_indicator()
+    candle_result = fetch_and_cache_candles(symbol, "5m")
 
     d = market["data"]
     price = d["price"]
     open_price = d["open"]
+    signal_candles = candle_result["candles"] if candle_result and candle_result["candles"] else build_demo_candles(symbol, "5m")
 
     change = round(((price - open_price) / open_price) * 100, 2)
     bias = "Bullish" if change > 0 else "Bearish" if change < 0 else "Neutral"
     support = round(price * 0.99, 2)
     resistance = round(price * 1.01, 2)
     skew_value = skew["data"]["value"] if skew else None
-    trade_signal = build_trade_signal(change, bias, strategy, skew_value)
+    trade_signal = build_trade_signal(change, bias, strategy, signal_candles, skew_value)
 
     if strategy == "scalp":
         entry = round(price * 1.001, 2)
@@ -649,8 +789,12 @@ def candles():
     result = fetch_and_cache_candles(symbol.upper(), tf)
     if result and result["candles"]:
         display_candles = prepare_chart_candles(result["candles"], tf)
+        latest_candle_session = get_market_session_name(display_candles[-1]["time"]) if display_candles else "Regular Hours"
         return jsonify({
             "candles": display_candles,
+            "indicators": build_chart_indicators(display_candles),
+            "market_session": get_current_market_status(),
+            "latest_candle_session": latest_candle_session,
             "data_source": result["source"],
             "is_demo": False,
             "is_cached": result["cached"],
@@ -664,6 +808,9 @@ def candles():
     demo_candles = prepare_chart_candles(demo["candles"], tf)
     return jsonify({
         "candles": demo_candles,
+        "indicators": build_chart_indicators(demo_candles),
+        "market_session": get_current_market_status(),
+        "latest_candle_session": get_market_session_name(demo_candles[-1]["time"]) if demo_candles else "Regular Hours",
         "data_source": "demo",
         "is_demo": True,
         "is_cached": True,

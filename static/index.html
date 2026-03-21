@@ -81,6 +81,46 @@ body {
   font-size:14px;
 }
 
+.chart-meta-row {
+  display:flex;
+  align-items:center;
+  gap:10px;
+  flex-wrap:wrap;
+}
+
+.session-badge {
+  display:inline-flex;
+  align-items:center;
+  padding:5px 10px;
+  border-radius:999px;
+  font-size:12px;
+  font-weight:700;
+  letter-spacing:0.04em;
+  border:1px solid var(--line);
+  color:var(--text);
+  background:rgba(12, 23, 41, 0.92);
+}
+
+.session-badge.premarket {
+  border-color:#1d4ed8;
+  background:#0b1f46;
+}
+
+.session-badge.regular {
+  border-color:#1f7a45;
+  background:#052e16;
+}
+
+.session-badge.afterhours {
+  border-color:#a16207;
+  background:#3b2307;
+}
+
+.session-badge.closed {
+  border-color:#475569;
+  background:#172033;
+}
+
 .chart-title {
   color:var(--text);
   font-size:18px;
@@ -409,6 +449,100 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
   font-size:14px;
 }
 
+.paper-panel {
+  margin-top:18px;
+  padding:18px;
+  border:1px solid var(--line);
+  border-radius:18px;
+  background:linear-gradient(180deg, rgba(16, 29, 52, 0.96), rgba(8, 18, 34, 0.98));
+}
+
+.paper-head {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  margin-bottom:10px;
+}
+
+.paper-title {
+  font-size:16px;
+  font-weight:700;
+}
+
+.paper-subtitle {
+  color:var(--muted);
+  font-size:13px;
+}
+
+.paper-summary {
+  color:var(--muted);
+  font-size:14px;
+  margin-bottom:10px;
+}
+
+.paper-empty {
+  color:var(--muted);
+  font-size:14px;
+}
+
+.paper-list {
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+}
+
+.paper-item {
+  display:grid;
+  grid-template-columns:1fr auto;
+  gap:12px;
+  padding:12px;
+  border:1px solid var(--line);
+  border-radius:14px;
+  background:rgba(12, 23, 41, 0.92);
+}
+
+.paper-symbol {
+  font-size:15px;
+  font-weight:700;
+}
+
+.paper-details {
+  color:var(--muted);
+  font-size:13px;
+  margin-top:4px;
+}
+
+.paper-actions {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex-wrap:wrap;
+  margin-top:12px;
+}
+
+.paper-btn {
+  font-weight:700;
+}
+
+.paper-btn.buy {
+  background:#052e16;
+  color:#bbf7d0;
+  border-color:#1f7a45;
+}
+
+.paper-btn.sell {
+  background:#3f0d12;
+  color:#fecaca;
+  border-color:#991b1b;
+}
+
+.paper-btn.close {
+  background:#172033;
+  color:#dbeafe;
+  border-color:#335176;
+}
+
 .chart-empty {
   display:flex;
   align-items:center;
@@ -488,7 +622,10 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
   <div class="chart-bar">
     <div>
       <div class="chart-title" id="chartTitle">Price Chart</div>
-      <div class="chart-meta" id="chartMeta">Waiting for ticker selection</div>
+      <div class="chart-meta-row">
+        <div class="chart-meta" id="chartMeta">Waiting for ticker selection</div>
+        <div class="session-badge closed" id="sessionBadge">Closed</div>
+      </div>
     </div>
   </div>
   <div id="chart"></div>
@@ -497,6 +634,17 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
     <button data-tf="1m">1M</button>
     <button data-tf="5m" class="active">5M</button>
     <button data-tf="15m">15M</button>
+  </div>
+
+  <div class="paper-panel">
+    <div class="paper-head">
+      <div>
+        <div class="paper-title">Paper Trading</div>
+        <div class="paper-subtitle">Simulated positions saved on this device</div>
+      </div>
+    </div>
+    <div class="paper-summary" id="paperSummary">No open paper positions yet.</div>
+    <div class="paper-list" id="paperPositions"></div>
   </div>
 
 </div>
@@ -517,6 +665,9 @@ let watchlist = [];
 let watchlistData = [];
 let isLoading = false;
 const WATCHLIST_STORAGE_KEY = "trading-app-watchlist";
+const PAPER_POSITIONS_STORAGE_KEY = "trading-app-paper-positions";
+let paperPositions = [];
+const latestQuotes = {};
 const intradayEtFormatter = new Intl.DateTimeFormat("en-US", {
   timeZone: "America/New_York",
   month: "numeric",
@@ -549,6 +700,13 @@ function setChartMeta(ticker, sourceLabel){
   document.getElementById("chartMeta").innerText = `${timeframe.toUpperCase()} timeframe ET${sourceLabel ? ` - ${sourceLabel}` : ""}`;
 }
 
+function setSessionBadge(sessionLabel){
+  const badge = document.getElementById("sessionBadge");
+  const normalized = (sessionLabel || "Closed").replace(/\s+/g, "").toLowerCase();
+  badge.className = `session-badge ${normalized}`;
+  badge.innerText = sessionLabel || "Closed";
+}
+
 function isSavedTicker(ticker){
   return watchlist.includes(ticker);
 }
@@ -571,6 +729,25 @@ function saveLocalWatchlist(){
     localStorage.setItem(WATCHLIST_STORAGE_KEY, JSON.stringify(watchlist));
   }catch(err){
     console.log("Local watchlist save failed", err);
+  }
+}
+
+function loadPaperPositions(){
+  try{
+    const raw = localStorage.getItem(PAPER_POSITIONS_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    paperPositions = Array.isArray(parsed) ? parsed : [];
+  }catch(err){
+    console.log("Paper positions read failed", err);
+    paperPositions = [];
+  }
+}
+
+function savePaperPositions(){
+  try{
+    localStorage.setItem(PAPER_POSITIONS_STORAGE_KEY, JSON.stringify(paperPositions));
+  }catch(err){
+    console.log("Paper positions save failed", err);
   }
 }
 
@@ -686,6 +863,15 @@ function renderTradeSignal(signal){
   `;
 }
 
+function renderPaperActions(ticker){
+  return `
+    <div class="paper-actions">
+      <button class="paper-btn buy" onclick="addPaperTrade('BUY')">Paper Buy</button>
+      <button class="paper-btn sell" onclick="addPaperTrade('SELL')">Paper Sell</button>
+    </div>
+  `;
+}
+
 function openWatchlist(){
   document.getElementById("watchPanel").classList.add("open");
   document.getElementById("watchBackdrop").classList.add("open");
@@ -723,27 +909,43 @@ function setLoadingState(loading){
 
 function showChartMessage(message){
   setChartMeta(lastTicker, "No chart loaded");
+  setSessionBadge("Closed");
   document.getElementById("chart").innerHTML = `<div class="chart-empty">${message}</div>`;
 }
 
-function renderChart(ticker, candles, sourceLabel){
+function buildLineTrace(xValues, yValues, name, color, width=2, axis="y"){
+  return {
+    x: xValues,
+    y: yValues,
+    type: "scatter",
+    mode: "lines",
+    name,
+    line: { color, width, shape: "spline" },
+    hoverinfo: "skip",
+    yaxis: axis
+  };
+}
+
+function renderChart(ticker, candles, indicators, sourceLabel, sessionLabel){
   const container = document.getElementById("chart");
   container.innerHTML = "";
   setChartMeta(ticker, sourceLabel);
+  setSessionBadge(sessionLabel || "Closed");
   const etLabels = candles.map(c => formatEtLabel(c.time));
   const tickStep = Math.max(1, Math.ceil(candles.length / 6));
   const tickVals = [];
   const tickText = [];
+  const xValues = candles.map(c => new Date(c.time * 1000));
 
   candles.forEach((candle, index) => {
     if(index % tickStep === 0 || index === candles.length - 1){
-      tickVals.push(new Date(candle.time * 1000));
+      tickVals.push(xValues[index]);
       tickText.push(formatAxisTickLabel(candle.time));
     }
   });
 
-  const trace = {
-    x: candles.map(c => new Date(c.time * 1000)),
+  const traces = [{
+    x: xValues,
     open: candles.map(c => c.open),
     high: candles.map(c => c.high),
     low: candles.map(c => c.low),
@@ -758,14 +960,40 @@ function renderChart(ticker, candles, sourceLabel){
     type: "candlestick",
     increasing: { line: { color: "#22c55e", width: 1 } },
     decreasing: { line: { color: "#ef4444", width: 1 } },
-    whiskerwidth: 0.5
-  };
+    whiskerwidth: 0.5,
+    name: "Price",
+    yaxis: "y"
+  }];
+
+  if(indicators?.ema9?.length){
+    traces.push(buildLineTrace(xValues, indicators.ema9, "EMA 9", "#f59e0b", 2));
+  }
+  if(indicators?.ema20?.length){
+    traces.push(buildLineTrace(xValues, indicators.ema20, "EMA 20", "#60a5fa", 2));
+  }
+  if(indicators?.vwap?.length){
+    traces.push(buildLineTrace(xValues, indicators.vwap, "VWAP", "#fb923c", 2));
+  }
+
+  const hasRsi = indicators?.rsi14?.some(v => v !== null && v !== undefined);
+  if(hasRsi){
+    traces.push(buildLineTrace(xValues, indicators.rsi14, "RSI 14", "#c084fc", 2, "y2"));
+  }
 
   const layout = {
     paper_bgcolor: "#020617",
     plot_bgcolor: "#020617",
     margin: { l: 18, r: 72, t: 18, b: 62 },
     font: { color: "#94a3b8" },
+    legend: {
+      orientation: "h",
+      x: 0,
+      y: 1.12,
+      bgcolor: "rgba(4,17,31,0.65)",
+      bordercolor: "#21314c",
+      borderwidth: 1,
+      font: { size: 11 }
+    },
     xaxis: {
       rangeslider: { visible: false },
       gridcolor: "#1e293b",
@@ -778,7 +1006,8 @@ function renderChart(ticker, candles, sourceLabel){
       tickangle: 0,
       automargin: true,
       tickfont: { size: 11 },
-      fixedrange: true
+      fixedrange: true,
+      domain: [0, 1]
     },
     yaxis: {
       side: "right",
@@ -787,14 +1016,130 @@ function renderChart(ticker, candles, sourceLabel){
       tickcolor: "#1e293b",
       automargin: true,
       tickfont: { size: 11 },
+      fixedrange: true,
+      domain: hasRsi ? [0.30, 1] : [0, 1]
+    },
+    yaxis2: hasRsi ? {
+      side: "right",
+      domain: [0, 0.20],
+      range: [0, 100],
+      gridcolor: "#1e293b",
+      linecolor: "#1e293b",
+      tickcolor: "#1e293b",
+      tickfont: { size: 10 },
       fixedrange: true
-    }
+    } : undefined,
+    shapes: hasRsi ? [
+      {
+        type: "line",
+        xref: "paper",
+        x0: 0,
+        x1: 1,
+        yref: "y2",
+        y0: 70,
+        y1: 70,
+        line: { color: "#7c2d12", width: 1, dash: "dot" }
+      },
+      {
+        type: "line",
+        xref: "paper",
+        x0: 0,
+        x1: 1,
+        yref: "y2",
+        y0: 30,
+        y1: 30,
+        line: { color: "#14532d", width: 1, dash: "dot" }
+      }
+    ] : [],
+    annotations: hasRsi ? [{
+      text: "RSI 14",
+      xref: "paper",
+      yref: "paper",
+      x: 0,
+      y: 0.22,
+      showarrow: false,
+      font: { size: 10, color: "#94a3b8" }
+    }] : []
   };
 
-  Plotly.newPlot(container, [trace], layout, {
+  Plotly.newPlot(container, traces, layout, {
     responsive: true,
-    displayModeBar: false
+    displayModeBar: false,
+    scrollZoom: false
   });
+}
+
+function getPaperMarkPrice(ticker){
+  return latestQuotes[ticker] || null;
+}
+
+function renderPaperPositions(){
+  const summary = document.getElementById("paperSummary");
+  const list = document.getElementById("paperPositions");
+  list.innerHTML = "";
+
+  if(!paperPositions.length){
+    summary.innerText = "No open paper positions yet.";
+    list.innerHTML = '<div class="paper-empty">Analyze a ticker, then use Paper Buy or Paper Sell to simulate a trade.</div>';
+    return;
+  }
+
+  let totalPnl = 0;
+
+  paperPositions.forEach(position => {
+    const markPrice = getPaperMarkPrice(position.ticker) || position.entry;
+    const pnl = position.side === "BUY"
+      ? (markPrice - position.entry) * position.qty
+      : (position.entry - markPrice) * position.qty;
+    totalPnl += pnl;
+
+    const item = document.createElement("div");
+    item.className = "paper-item";
+    item.innerHTML = `
+      <div>
+        <div class="paper-symbol">${position.ticker} · ${position.side}</div>
+        <div class="paper-details">
+          Qty ${position.qty} · Entry $${position.entry.toFixed(2)} · Mark $${markPrice.toFixed(2)}
+        </div>
+        <div class="paper-details ${pnl >= 0 ? "up" : "down"}">
+          Unrealized ${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)}
+        </div>
+      </div>
+      <div>
+        <button class="paper-btn close" onclick="closePaperPosition('${position.id}')">Close</button>
+      </div>
+    `;
+    list.appendChild(item);
+  });
+
+  summary.innerText = `${paperPositions.length} open position${paperPositions.length === 1 ? "" : "s"} · Unrealized ${totalPnl >= 0 ? "+" : ""}$${totalPnl.toFixed(2)}`;
+}
+
+function addPaperTrade(side){
+  if(!lastTicker || !latestQuotes[lastTicker]){
+    setStatus("Analyze a ticker first so the paper trade uses a real mark price.", "warning");
+    return;
+  }
+
+  paperPositions = [
+    {
+      id: `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+      ticker: lastTicker,
+      side,
+      qty: 1,
+      entry: Number(latestQuotes[lastTicker]),
+      openedAt: new Date().toISOString()
+    },
+    ...paperPositions
+  ];
+  savePaperPositions();
+  renderPaperPositions();
+}
+
+function closePaperPosition(id){
+  paperPositions = paperPositions.filter(position => position.id !== id);
+  savePaperPositions();
+  renderPaperPositions();
 }
 
 document.addEventListener("click", (e)=>{
@@ -844,6 +1189,10 @@ async function loadWatchlistData(){
     const params = new URLSearchParams({ tickers: watchlist.join(",") });
     const res = await fetch(`/watchlist/data?${params.toString()}`);
     watchlistData = await res.json();
+    watchlistData.forEach(item => {
+      latestQuotes[item.ticker] = item.price;
+    });
+    renderPaperPositions();
   }catch(err){
     console.log("Watchlist data load failed", err);
     watchlistData = [];
@@ -960,7 +1309,12 @@ async function loadCandles(ticker){
       payload.data_source === "live" ? "Live provider data" :
       "Chart data";
 
-    renderChart(ticker, visibleCandles, sourceLabel);
+    const sessionLabel =
+      payload.latest_candle_session && payload.market_session !== "Regular Hours"
+        ? `${payload.market_session} · Last candles ${payload.latest_candle_session}`
+        : (payload.market_session || payload.latest_candle_session || "Regular Hours");
+
+    renderChart(ticker, visibleCandles, payload.indicators || {}, sourceLabel, sessionLabel);
 
     if(payload.is_demo){
       setLastUpdated("Demo candles loaded just now");
@@ -1029,6 +1383,8 @@ async function analyze(sym){
       setLastUpdated(`Live quote just updated at ${new Date().toLocaleTimeString()}`);
     }
 
+    latestQuotes[t] = d.price;
+
     document.getElementById("result").innerHTML = `
       <div class="card">
         <div class="ticker-label">${d.ticker}</div>
@@ -1041,6 +1397,8 @@ async function analyze(sym){
         </div>
 
         <div id="watchAction">${getWatchButtonMarkup(d.ticker)}</div>
+
+        ${renderPaperActions(d.ticker)}
 
         ${renderTradeSignal(d.indicators?.trade_signal)}
 
@@ -1059,6 +1417,7 @@ async function analyze(sym){
     setStatus(statusMessage, statusTone);
     await loadWatchlistData();
     renderWatch();
+    renderPaperPositions();
 
     await loadCandles(t);
   }catch(err){
@@ -1076,6 +1435,21 @@ document.getElementById("ticker").addEventListener("keydown", (e)=>{
   }
 });
 
+function getTrendArrow(value){
+  if(value > 0) return "↑";
+  if(value < 0) return "↓";
+  return "→";
+}
+
+function getWatchButtonMarkup(ticker){
+  if(isSavedTicker(ticker)){
+    return `<button class="saved-btn" onclick="return false;">Saved</button>`;
+  }
+  return `<button onclick="addWatch('${ticker}')">+ Watch</button>`;
+}
+
+loadPaperPositions();
+renderPaperPositions();
 showChartMessage("Search for a ticker, then click Analyze to load the chart.");
 loadWatchlist();
 </script>

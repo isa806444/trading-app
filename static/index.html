@@ -1,0 +1,1036 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Trading Terminal</title>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+
+<style>
+:root {
+  --bg:#04111f;
+  --bg-soft:#0a1628;
+  --panel:#0c1729;
+  --panel-strong:#101d34;
+  --line:#21314c;
+  --text:#f8fafc;
+  --muted:#8ea3bf;
+  --green:#22c55e;
+  --green-soft:#052e16;
+  --red:#ef4444;
+  --red-soft:#3f0d12;
+  --amber:#f59e0b;
+  --amber-soft:#3b2307;
+}
+
+body {
+  margin:0;
+  font-family:"Segoe UI", "Trebuchet MS", sans-serif;
+  background:
+    radial-gradient(circle at top, rgba(34, 197, 94, 0.08), transparent 28%),
+    linear-gradient(180deg, #071221 0%, var(--bg) 100%);
+  color:var(--text);
+}
+
+.container { max-width:920px; margin:auto; padding:24px 20px 36px; }
+.top { display:flex; justify-content:space-between; gap:12px; margin-bottom:20px; }
+
+.page-tools {
+  display:flex;
+  justify-content:flex-end;
+  margin-bottom:10px;
+}
+
+.market-bar, .chart-bar {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  padding:14px 16px;
+  border:1px solid var(--line);
+  background:linear-gradient(180deg, rgba(16, 29, 52, 0.96), rgba(12, 23, 41, 0.96));
+  box-shadow:0 18px 45px rgba(2, 6, 23, 0.28);
+  backdrop-filter:blur(10px);
+}
+
+.market-bar {
+  margin-top:14px;
+  border-radius:12px;
+}
+
+.chart-bar {
+  margin-top:20px;
+  border-radius:12px 12px 0 0;
+}
+
+.market-meta {
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+}
+
+.market-label {
+  color:var(--muted);
+  font-size:12px;
+  text-transform:uppercase;
+  letter-spacing:0.08em;
+}
+
+.market-value, .chart-meta {
+  color:var(--muted);
+  font-size:14px;
+}
+
+.chart-title {
+  color:var(--text);
+  font-size:18px;
+  font-weight:700;
+  letter-spacing:0.01em;
+}
+
+input {
+  flex:1;
+  padding:14px 16px;
+  border-radius:14px;
+  border:1px solid var(--line);
+  background:rgba(12, 23, 41, 0.92);
+  color:var(--text);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,0.03);
+}
+
+button {
+  padding:10px 14px;
+  border-radius:12px;
+  border:1px solid transparent;
+  cursor:pointer;
+  transition:transform 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+button:hover {
+  transform:translateY(-1px);
+}
+
+button:disabled { opacity:0.6; cursor:not-allowed; }
+
+.analyze-btn {
+  background:linear-gradient(180deg, #34d399, var(--green));
+  color:#03110a;
+  font-weight:700;
+  min-width:120px;
+}
+
+.strategy, .tf-bar { display:flex; gap:6px; margin-top:10px; }
+
+.tf-bar {
+  margin-top:12px;
+}
+
+.strategy button, .tf-bar button {
+  flex:1;
+  background:rgba(12, 23, 41, 0.92);
+  border-color:var(--line);
+  color:var(--muted);
+}
+
+.strategy button.active, .tf-bar button.active {
+  background:linear-gradient(180deg, #16304d, #11233b);
+  border-color:#335176;
+  color:var(--text);
+}
+
+.saved-btn {
+  background:#14532d;
+  color:#dcfce7;
+  font-weight:700;
+  border-color:#1f7a45;
+}
+
+.card {
+  margin-top:22px;
+  padding:22px;
+  border:1px solid var(--line);
+  border-radius:22px;
+  background:
+    linear-gradient(180deg, rgba(16, 29, 52, 0.98), rgba(10, 22, 40, 0.98));
+  box-shadow:0 22px 50px rgba(2, 6, 23, 0.35);
+}
+
+.price { font-size:46px; font-weight:800; letter-spacing:-0.03em; }
+
+.price-row {
+  display:flex;
+  align-items:flex-end;
+  justify-content:space-between;
+  gap:12px;
+  flex-wrap:wrap;
+}
+
+.ticker-label {
+  color:var(--muted);
+  font-size:13px;
+  text-transform:uppercase;
+  letter-spacing:0.1em;
+}
+
+.change-pill {
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  padding:8px 12px;
+  border-radius:999px;
+  font-size:14px;
+  font-weight:700;
+}
+
+.change-pill.up {
+  background:rgba(6, 46, 22, 0.95);
+  border:1px solid #1f7a45;
+}
+
+.change-pill.down {
+  background:rgba(63, 13, 18, 0.95);
+  border:1px solid #991b1b;
+}
+
+.trend-arrow {
+  font-size:16px;
+  line-height:1;
+}
+
+.status {
+  margin-top:16px;
+  padding:12px 14px;
+  border-radius:12px;
+  border:1px solid #334155;
+  background:rgba(12, 23, 41, 0.96);
+  color:#cbd5e1;
+}
+
+.status.warning {
+  border-color:#92400e;
+  background:#1c1917;
+  color:#fdba74;
+}
+
+.status.ok {
+  border-color:#14532d;
+  background:#052e16;
+  color:#bbf7d0;
+}
+
+.up { color:#22c55e; }
+.down { color:#ef4444; }
+
+.section { margin-top:16px; border-top:1px solid var(--line); padding-top:12px; }
+
+.indicator-grid {
+  display:grid;
+  grid-template-columns:repeat(auto-fit, minmax(180px, 1fr));
+  gap:10px;
+  margin-top:10px;
+}
+
+.indicator-card {
+  border:1px solid var(--line);
+  border-radius:16px;
+  padding:14px;
+  background:linear-gradient(180deg, rgba(16, 29, 52, 0.95), rgba(12, 23, 41, 0.95));
+}
+
+.indicator-name {
+  color:var(--muted);
+  font-size:12px;
+  text-transform:uppercase;
+  letter-spacing:0.08em;
+}
+
+.indicator-value {
+  margin-top:8px;
+  font-size:28px;
+  font-weight:700;
+  color:var(--text);
+}
+
+.indicator-meta {
+  margin-top:6px;
+  color:var(--muted);
+  font-size:13px;
+}
+
+.indicator-card.skew-low {
+  border-color:#1f7a45;
+  background:linear-gradient(180deg, rgba(6, 46, 22, 0.9), rgba(8, 35, 23, 0.96));
+}
+
+.indicator-card.skew-mid {
+  border-color:#a16207;
+  background:linear-gradient(180deg, rgba(59, 35, 7, 0.9), rgba(43, 27, 9, 0.96));
+}
+
+.indicator-card.skew-high {
+  border-color:#991b1b;
+  background:linear-gradient(180deg, rgba(63, 13, 18, 0.9), rgba(42, 14, 16, 0.96));
+}
+
+.signal-chip {
+  display:inline-flex;
+  align-items:center;
+  margin-top:14px;
+  padding:8px 12px;
+  border-radius:999px;
+  font-size:13px;
+  font-weight:700;
+  letter-spacing:0.06em;
+}
+
+.signal-chip.buy {
+  background:#052e16;
+  border:1px solid #14532d;
+  color:#bbf7d0;
+}
+
+.signal-chip.sell {
+  background:#3f0d12;
+  border:1px solid #7f1d1d;
+  color:#fecaca;
+}
+
+.signal-chip.wait {
+  background:#172033;
+  border:1px solid #334155;
+  color:#cbd5e1;
+}
+
+.watch {
+  position:fixed; right:0; top:0;
+  width:280px; height:100%;
+  background:linear-gradient(180deg, #071221, #04111f);
+  border-left:1px solid var(--line);
+  padding:16px;
+  transform:translateX(100%);
+  transition:transform 0.25s ease;
+  z-index:20;
+}
+
+.watch.open {
+  transform:translateX(0);
+}
+
+.watch-header {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  margin-bottom:12px;
+}
+
+.watch-toggle {
+  background:rgba(12, 23, 41, 0.92);
+  color:#e2e8f0;
+  border-color:var(--line);
+}
+
+.watch-close {
+  background:#1e293b;
+  color:#e2e8f0;
+  border-color:#314463;
+}
+
+.watch-backdrop {
+  position:fixed;
+  inset:0;
+  background:rgba(2, 6, 23, 0.45);
+  opacity:0;
+  pointer-events:none;
+  transition:opacity 0.25s ease;
+  z-index:10;
+}
+
+.watch-backdrop.open {
+  opacity:1;
+  pointer-events:auto;
+}
+
+.watch-item {
+  display:grid;
+  grid-template-columns:1fr auto;
+  gap:8px;
+  padding:10px 0;
+  border-bottom:1px solid var(--line);
+}
+
+.watch-ticker {
+  cursor:pointer;
+  color:#e2e8f0;
+}
+
+.watch-symbol {
+  font-weight:600;
+}
+
+.watch-details {
+  color:#94a3b8;
+  font-size:13px;
+}
+
+.watch-main {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+}
+
+.watch-copy {
+  min-width:0;
+}
+
+.watch-sparkline {
+  width:78px;
+  height:28px;
+  flex:0 0 auto;
+  opacity:0.95;
+}
+
+.watch-change-up {
+  color:#22c55e;
+}
+
+.watch-change-down {
+  color:#ef4444;
+}
+
+.watch-remove {
+  background:#7f1d1d;
+  color:#fecaca;
+  padding:6px 10px;
+}
+
+.watch-empty {
+  color:#64748b;
+  font-size:14px;
+}
+
+.chart-empty {
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  height:430px;
+  border:1px dashed #334155;
+  border-top:none;
+  border-radius:0 0 12px 12px;
+  color:#94a3b8;
+  background:#0b1220;
+  text-align:center;
+  padding:20px;
+}
+
+#chart {
+  width:100%;
+  height:430px;
+  border:1px solid var(--line);
+  border-top:none;
+  border-radius:0 0 12px 12px;
+  overflow:hidden;
+}
+
+@media (max-width: 720px) {
+  .top,
+  .market-bar,
+  .chart-bar {
+    flex-direction:column;
+    align-items:stretch;
+  }
+
+  .price {
+    font-size:38px;
+  }
+
+  .watch {
+    width:min(88vw, 320px);
+  }
+}
+</style>
+</head>
+
+<body>
+
+<div id="watchBackdrop" class="watch-backdrop" onclick="closeWatchlist()"></div>
+
+<div class="container">
+
+  <div class="page-tools">
+    <button class="watch-toggle" onclick="openWatchlist()">Watchlist</button>
+  </div>
+
+  <div class="top">
+    <input id="ticker" placeholder="Search ticker"/>
+    <button class="analyze-btn" onclick="analyze()">Analyze</button>
+  </div>
+
+  <div class="market-bar">
+    <div class="market-meta">
+      <div class="market-label">Last Updated</div>
+      <div class="market-value" id="lastUpdated">Waiting for data...</div>
+    </div>
+    <button id="refreshBtn" onclick="manualRefresh()">Refresh Now</button>
+  </div>
+
+  <div class="strategy" id="strategyBar">
+    <button data-s="scalp">Scalp</button>
+    <button data-s="day" class="active">Day</button>
+    <button data-s="swing">Swing</button>
+    <button data-s="momentum">Momentum</button>
+    <button data-s="mean">Mean</button>
+  </div>
+
+  <div id="result"></div>
+  <div id="status"></div>
+
+  <div class="chart-bar">
+    <div>
+      <div class="chart-title" id="chartTitle">Price Chart</div>
+      <div class="chart-meta" id="chartMeta">Waiting for ticker selection</div>
+    </div>
+  </div>
+  <div id="chart"></div>
+
+  <div class="tf-bar" id="tfBar">
+    <button data-tf="1m">1M</button>
+    <button data-tf="5m" class="active">5M</button>
+    <button data-tf="15m">15M</button>
+  </div>
+
+</div>
+
+<div id="watchPanel" class="watch">
+  <div class="watch-header">
+    <h4>Watchlist</h4>
+    <button class="watch-close" onclick="closeWatchlist()">Close</button>
+  </div>
+  <div id="watchlist"></div>
+</div>
+
+<script>
+let strategy = "day";
+let timeframe = "5m";
+let lastTicker = null;
+let watchlist = [];
+let watchlistData = [];
+let isLoading = false;
+const intradayEtFormatter = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/New_York",
+  month: "numeric",
+  day: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+  hour12: true
+});
+const intradayAxisFormatter = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/New_York",
+  hour: "numeric",
+  minute: "2-digit",
+  hour12: true
+});
+function setStatus(message, tone=""){
+  const el = document.getElementById("status");
+  if(!message){
+    el.innerHTML = "";
+    return;
+  }
+  el.innerHTML = `<div class="status ${tone}">${message}</div>`;
+}
+
+function setLastUpdated(message){
+  document.getElementById("lastUpdated").innerText = message;
+}
+
+function setChartMeta(ticker, sourceLabel){
+  document.getElementById("chartTitle").innerText = ticker ? `${ticker} Candlestick Chart` : "Price Chart";
+  document.getElementById("chartMeta").innerText = `${timeframe.toUpperCase()} timeframe ET${sourceLabel ? ` - ${sourceLabel}` : ""}`;
+}
+
+function isSavedTicker(ticker){
+  return watchlist.includes(ticker);
+}
+
+function formatEtLabel(unixSeconds){
+  const date = new Date(unixSeconds * 1000);
+  return `${intradayEtFormatter.format(date)} ET`;
+}
+
+function formatAxisTickLabel(unixSeconds){
+  return intradayAxisFormatter.format(new Date(unixSeconds * 1000));
+}
+
+function getWatchButtonMarkup(ticker){
+  if(isSavedTicker(ticker)){
+    return `<button class="saved-btn" onclick="return false;">Saved ✓</button>`;
+  }
+  return `<button onclick="addWatch('${ticker}')">+ Watch</button>`;
+}
+
+function formatAge(seconds){
+  const rounded = Math.max(0, Math.round(seconds || 0));
+  return `${rounded}s ago`;
+}
+
+function getWatchButtonMarkup(ticker){
+  if(isSavedTicker(ticker)){
+    return `<button class="saved-btn" onclick="return false;">Saved</button>`;
+  }
+  return `<button onclick="addWatch('${ticker}')">+ Watch</button>`;
+}
+
+function getTrendArrow(value){
+  if(value > 0) return "↑";
+  if(value < 0) return "↓";
+  return "→";
+}
+
+function renderSparkline(points, positive){
+  if(!Array.isArray(points) || points.length < 2){
+    return "";
+  }
+
+  const min = Math.min(...points);
+  const max = Math.max(...points);
+  const range = Math.max(max - min, 0.01);
+  const width = 78;
+  const height = 28;
+  const coords = points.map((point, index) => {
+    const x = (index / (points.length - 1)) * width;
+    const y = height - (((point - min) / range) * (height - 4)) - 2;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+  const stroke = positive ? "#22c55e" : "#ef4444";
+
+  return `
+    <svg class="watch-sparkline" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" aria-hidden="true">
+      <polyline fill="none" stroke="${stroke}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" points="${coords}"></polyline>
+    </svg>
+  `;
+}
+
+function renderSkewIndicator(skew){
+  if(!skew){
+    return "";
+  }
+
+  const changeClass = skew.change >= 0 ? "up" : "down";
+  const changePrefix = skew.change >= 0 ? "+" : "";
+  const skewTone =
+    skew.value >= 150 ? "skew-high" :
+    skew.value >= 135 ? "skew-mid" :
+    "skew-low";
+  const sourceLabel =
+    skew.is_stale ? `Cached ${formatAge(skew.cache_age_seconds)}` :
+    skew.is_cached ? "Recent cached reading" :
+    "Latest reading";
+
+  return `
+    <div class="section">
+      <div>CBOE SKEW Index</div>
+      <div class="indicator-grid">
+        <div class="indicator-card ${skewTone}">
+          <div class="indicator-name">Reading</div>
+          <div class="indicator-value">${skew.value}</div>
+          <div class="indicator-meta ${changeClass}"><span class="trend-arrow">${getTrendArrow(skew.change)}</span> ${changePrefix}${skew.change} vs prior close</div>
+        </div>
+        <div class="indicator-card ${skewTone}">
+          <div class="indicator-name">Tail Risk</div>
+          <div class="indicator-value" style="font-size:20px;">${skew.signal}</div>
+          <div class="indicator-meta">${sourceLabel}</div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderTradeSignal(signal){
+  if(!signal){
+    return "";
+  }
+
+  const chipClass =
+    signal.action === "BUY" ? "buy" :
+    signal.action === "SELL" ? "sell" :
+    "wait";
+
+  return `
+    <div class="section">
+      <div>Trade Signal</div>
+      <div class="signal-chip ${chipClass}">${signal.action}</div>
+      <div class="indicator-meta">${signal.reason}</div>
+    </div>
+  `;
+}
+
+function openWatchlist(){
+  document.getElementById("watchPanel").classList.add("open");
+  document.getElementById("watchBackdrop").classList.add("open");
+}
+
+function closeWatchlist(){
+  document.getElementById("watchPanel").classList.remove("open");
+  document.getElementById("watchBackdrop").classList.remove("open");
+}
+
+function manualRefresh(){
+  if(lastTicker){
+    analyze(lastTicker);
+  }else{
+    setStatus("Search a ticker first, then you can manually refresh it here.", "warning");
+  }
+}
+
+function setLoadingState(loading){
+  isLoading = loading;
+
+  const analyzeBtn = document.querySelector(".analyze-btn");
+  const refreshBtn = document.getElementById("refreshBtn");
+
+  if(analyzeBtn){
+    analyzeBtn.disabled = loading;
+    analyzeBtn.innerText = loading ? "Loading..." : "Analyze";
+  }
+
+  if(refreshBtn){
+    refreshBtn.disabled = loading;
+    refreshBtn.innerText = loading ? "Refreshing..." : "Refresh Now";
+  }
+}
+
+function showChartMessage(message){
+  setChartMeta(lastTicker, "No chart loaded");
+  document.getElementById("chart").innerHTML = `<div class="chart-empty">${message}</div>`;
+}
+
+function renderChart(ticker, candles, sourceLabel){
+  const container = document.getElementById("chart");
+  container.innerHTML = "";
+  setChartMeta(ticker, sourceLabel);
+  const etLabels = candles.map(c => formatEtLabel(c.time));
+  const tickStep = Math.max(1, Math.ceil(candles.length / 6));
+  const tickVals = [];
+  const tickText = [];
+
+  candles.forEach((candle, index) => {
+    if(index % tickStep === 0 || index === candles.length - 1){
+      tickVals.push(new Date(candle.time * 1000));
+      tickText.push(formatAxisTickLabel(candle.time));
+    }
+  });
+
+  const trace = {
+    x: candles.map(c => new Date(c.time * 1000)),
+    open: candles.map(c => c.open),
+    high: candles.map(c => c.high),
+    low: candles.map(c => c.low),
+    close: candles.map(c => c.close),
+    customdata: etLabels,
+    hovertemplate:
+      "Time: %{customdata}<br>" +
+      "Open: $%{open:.2f}<br>" +
+      "High: $%{high:.2f}<br>" +
+      "Low: $%{low:.2f}<br>" +
+      "Close: $%{close:.2f}<extra></extra>",
+    type: "candlestick",
+    increasing: { line: { color: "#22c55e", width: 1 } },
+    decreasing: { line: { color: "#ef4444", width: 1 } },
+    whiskerwidth: 0.5
+  };
+
+  const layout = {
+    paper_bgcolor: "#020617",
+    plot_bgcolor: "#020617",
+    margin: { l: 18, r: 72, t: 18, b: 62 },
+    font: { color: "#94a3b8" },
+    xaxis: {
+      rangeslider: { visible: false },
+      gridcolor: "#1e293b",
+      linecolor: "#1e293b",
+      tickcolor: "#1e293b",
+      type: "date",
+      tickmode: "array",
+      tickvals: tickVals,
+      ticktext: tickText,
+      tickangle: 0,
+      automargin: true,
+      tickfont: { size: 11 },
+      fixedrange: true
+    },
+    yaxis: {
+      side: "right",
+      gridcolor: "#1e293b",
+      linecolor: "#1e293b",
+      tickcolor: "#1e293b",
+      automargin: true,
+      tickfont: { size: 11 },
+      fixedrange: true
+    }
+  };
+
+  Plotly.newPlot(container, [trace], layout, {
+    responsive: true,
+    displayModeBar: false
+  });
+}
+
+document.addEventListener("click", (e)=>{
+  if(e.target.dataset.s){
+    strategy = e.target.dataset.s;
+    document.querySelectorAll("#strategyBar button").forEach(b=>b.classList.remove("active"));
+    e.target.classList.add("active");
+    if(lastTicker) analyze(lastTicker);
+  }
+
+  if(e.target.dataset.tf){
+    timeframe = e.target.dataset.tf;
+    document.querySelectorAll("#tfBar button").forEach(b=>b.classList.remove("active"));
+    e.target.classList.add("active");
+    if(lastTicker) loadCandles(lastTicker);
+  }
+});
+
+async function loadWatchlist(){
+  try{
+    const res = await fetch("/watchlist");
+    watchlist = await res.json();
+    await loadWatchlistData();
+    renderWatch();
+  }catch(err){
+    console.log("Watchlist load failed", err);
+  }
+}
+
+async function loadWatchlistData(){
+  try{
+    const res = await fetch("/watchlist/data");
+    watchlistData = await res.json();
+  }catch(err){
+    console.log("Watchlist data load failed", err);
+    watchlistData = [];
+  }
+}
+
+async function addWatch(t){
+  try{
+    const res = await fetch("/watchlist", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ticker: t })
+    });
+    watchlist = await res.json();
+    await loadWatchlistData();
+    renderWatch();
+    if(lastTicker === t){
+      updateWatchButton(t);
+    }
+  }catch(err){
+    console.log("Watchlist add failed", err);
+  }
+}
+
+async function removeWatch(t){
+  try{
+    const res = await fetch("/watchlist", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ticker: t })
+    });
+    watchlist = await res.json();
+    watchlistData = watchlistData.filter(item => item.ticker !== t);
+    renderWatch();
+    if(lastTicker === t){
+      updateWatchButton(t);
+    }
+  }catch(err){
+    console.log("Watchlist remove failed", err);
+  }
+}
+
+function updateWatchButton(ticker){
+  const container = document.getElementById("watchAction");
+  if(container){
+    container.innerHTML = getWatchButtonMarkup(ticker);
+  }
+}
+
+function renderWatch(){
+  const el=document.getElementById("watchlist");
+  el.innerHTML="";
+
+  if(!watchlist.length){
+    el.innerHTML = '<div class="watch-empty">No saved tickers yet.</div>';
+    return;
+  }
+
+  watchlist.forEach(t=>{
+    const snapshot = watchlistData.find(item => item.ticker === t);
+    const row = document.createElement("div");
+    row.className = "watch-item";
+
+    const ticker = document.createElement("div");
+    ticker.className = "watch-ticker";
+    const sparkline = snapshot ? renderSparkline(snapshot.sparkline, snapshot.change >= 0) : "";
+    ticker.innerHTML = `
+      <div class="watch-main">
+        <div class="watch-copy">
+          <div class="watch-symbol">${t}</div>
+          <div class="watch-details">
+            ${snapshot ? `$${snapshot.price} ` : ""}
+            ${snapshot ? `<span class="${snapshot.change >= 0 ? "watch-change-up" : "watch-change-down"}">${snapshot.change >= 0 ? "+" : ""}${snapshot.change}%</span>` : "Loading..."}
+          </div>
+        </div>
+        ${sparkline}
+      </div>
+    `;
+    ticker.onclick = ()=>{
+      closeWatchlist();
+      analyze(t);
+    };
+
+    const removeBtn = document.createElement("button");
+    removeBtn.className = "watch-remove";
+    removeBtn.innerText = "Remove";
+    removeBtn.onclick = ()=>removeWatch(t);
+
+    row.appendChild(ticker);
+    row.appendChild(removeBtn);
+    el.appendChild(row);
+  });
+}
+
+async function loadCandles(ticker){
+  const cRes = await fetch(`/candles?ticker=${ticker}&tf=${timeframe}`);
+  const payload = await cRes.json();
+  const visibleCandles = Array.isArray(payload.candles) ? payload.candles : [];
+
+  if(Array.isArray(visibleCandles) && visibleCandles.length){
+    const sourceLabel =
+      payload.is_demo ? "Demo data" :
+      payload.is_stale ? "Cached real data" :
+      payload.data_source === "live" ? "Live provider data" :
+      "Chart data";
+
+    renderChart(ticker, visibleCandles, sourceLabel);
+
+    if(payload.is_demo){
+      setLastUpdated("Demo candles loaded just now");
+      setStatus("Live market data is unavailable, so this chart is using demo candles.", "warning");
+    }else if(payload.warning){
+      if(payload.is_stale || payload.is_cached){
+        setLastUpdated(`Cached candles ${formatAge(payload.cache_age_seconds)}`);
+      }
+      setStatus(payload.warning, "warning");
+    }else if(payload.is_stale){
+      setLastUpdated(`Cached candles ${formatAge(payload.cache_age_seconds)}`);
+      setStatus(`Showing cached candles from ${Math.round(payload.cache_age_seconds)}s ago.`, "warning");
+    }else if(payload.data_source === "live"){
+      setLastUpdated(`Live candles updated at ${new Date().toLocaleTimeString()}`);
+    }
+  }else{
+    showChartMessage("No candle data returned for this ticker and timeframe yet.");
+    if(payload.warning){
+      if(payload.is_stale || payload.is_cached){
+        setLastUpdated(`Cached candles ${formatAge(payload.cache_age_seconds)}`);
+      }else{
+        setLastUpdated("No recent candle data available");
+      }
+      setStatus(payload.warning, "warning");
+    }
+  }
+}
+
+async function analyze(sym){
+  if(isLoading) return;
+
+  let t=sym||document.getElementById("ticker").value.trim();
+  if(!t) return;
+
+  t=t.toUpperCase();
+  lastTicker=t;
+  setLoadingState(true);
+
+  try{
+    const res = await fetch(`/analyze?ticker=${t}&strategy=${strategy}`);
+    const d = await res.json();
+
+    if(!d || d.error){
+      document.getElementById("result").innerHTML = "";
+      showChartMessage("No chart data is available yet. Try Refresh Now after a moment.");
+      setLastUpdated("No recent market data available");
+      setStatus("Live provider data is temporarily unavailable.", "warning");
+      return;
+    }
+
+    let statusMessage = "Live market data loaded.";
+    let statusTone = "ok";
+
+    if(d.is_demo){
+      statusMessage = "Live market data is unavailable, so this result is using demo data.";
+      statusTone = "warning";
+      setLastUpdated("Demo quote loaded just now");
+    }else if(d.is_stale){
+      statusMessage = `Showing cached quote data from ${Math.round(d.cache_age_seconds)}s ago because live data is temporarily unavailable.`;
+      statusTone = "warning";
+      setLastUpdated(`Cached quote ${formatAge(d.cache_age_seconds)}`);
+    }else if(d.is_cached){
+      statusMessage = `Showing recent cached quote data from ${Math.round(d.cache_age_seconds)}s ago.`;
+      setLastUpdated(`Cached quote ${formatAge(d.cache_age_seconds)}`);
+    }else{
+      setLastUpdated(`Live quote just updated at ${new Date().toLocaleTimeString()}`);
+    }
+
+    document.getElementById("result").innerHTML = `
+      <div class="card">
+        <div class="ticker-label">${d.ticker}</div>
+        <div class="price-row">
+          <div class="price">$${d.price}</div>
+          <div class="change-pill ${d.change>=0?'up':'down'}">
+            <span class="trend-arrow">${getTrendArrow(d.change)}</span>
+            <span>${d.change>=0?'+':''}${d.change}%</span>
+          </div>
+        </div>
+
+        <div id="watchAction">${getWatchButtonMarkup(d.ticker)}</div>
+
+        ${renderTradeSignal(d.indicators?.trade_signal)}
+
+        <div class="section">
+          Entry: ${d.plan.entry}<br>
+          Stop: ${d.plan.stop}<br>
+          Targets: ${d.plan.targets.join(", ")}
+        </div>
+
+        ${renderSkewIndicator(d.indicators?.skew)}
+
+        <div class="section">${d.summary}</div>
+      </div>
+    `;
+
+    setStatus(statusMessage, statusTone);
+    await loadWatchlistData();
+    renderWatch();
+
+    await loadCandles(t);
+  }catch(err){
+    console.log(err);
+    setLastUpdated("Update failed");
+    setStatus("Something went wrong while loading market data.", "warning");
+  }finally{
+    setLoadingState(false);
+  }
+}
+
+document.getElementById("ticker").addEventListener("keydown", (e)=>{
+  if(e.key === "Enter"){
+    analyze();
+  }
+});
+
+showChartMessage("Search for a ticker, then click Analyze to load the chart.");
+loadWatchlist();
+</script>
+
+</body>
+</html>

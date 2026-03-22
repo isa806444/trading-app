@@ -25,8 +25,6 @@ CANDLE_CACHE_TTL = 120
 INDICATOR_CACHE_TTL = 900
 NEWS_CACHE_TTL = 900
 DEMO_TIMEZONE = ZoneInfo("America/New_York")
-SKEW_SYMBOL = "^SKEW"
-SKEW_CACHE_KEY = "indicator:skew"
 
 quote_cache = {}
 candle_cache = {}
@@ -722,15 +720,7 @@ def get_data(symbol):
     return get_demo_market(symbol, "5m")["quote"]
 
 
-def get_skew_signal(value):
-    if value >= 150:
-        return "Elevated tail-risk pricing"
-    if value >= 135:
-        return "Moderate tail-risk pricing"
-    return "Calmer tail-risk pricing"
-
-
-def build_trade_signal(change, bias, strategy, candles, skew_value=None):
+def build_trade_signal(change, bias, strategy, candles):
     closes = [c["close"] for c in candles]
     ema9 = calculate_ema(closes, 9)
     ema20 = calculate_ema(closes, 20)
@@ -777,79 +767,11 @@ def build_trade_signal(change, bias, strategy, candles, skew_value=None):
         tone = "neutral"
         reason = "Price, EMA structure, and momentum are too mixed for a clean setup."
 
-    if skew_value is not None and skew_value >= 150 and action != "WAIT":
-        reason = f"{reason} CBOE SKEW is elevated, so risk should stay tighter than usual."
-
     return {
         "action": action,
         "tone": tone,
         "reason": reason
     }
-
-
-def fetch_skew_indicator():
-    cached = get_cache_entry(quote_cache, SKEW_CACHE_KEY, INDICATOR_CACHE_TTL)
-    if cached and not cached["stale"]:
-        return {
-            "data": cached["data"],
-            "source": "cache",
-            "cached": True,
-            "stale": False,
-            "age_seconds": cached["age_seconds"]
-        }
-
-    try:
-        response = requests.get(
-            f"https://query1.finance.yahoo.com/v8/finance/chart/{SKEW_SYMBOL}",
-            params={
-                "interval": "1d",
-                "range": "5d",
-                "includePrePost": "false",
-                "events": "div,splits"
-            },
-            headers={"User-Agent": "Mozilla/5.0"},
-            timeout=15
-        )
-        response.raise_for_status()
-        payload = response.json()
-        result = ((payload.get("chart") or {}).get("result") or [None])[0]
-        if not result:
-            raise ValueError("Missing SKEW chart payload")
-
-        closes = (((result.get("indicators") or {}).get("quote") or [{}])[0].get("close") or [])
-        valid_closes = [float(value) for value in closes if value is not None]
-        if not valid_closes:
-            raise ValueError("Missing SKEW close values")
-
-        value = round(valid_closes[-1], 2)
-        previous = round(valid_closes[-2], 2) if len(valid_closes) > 1 else value
-        change = round(value - previous, 2)
-        indicator = {
-            "name": "CBOE SKEW Index",
-            "symbol": SKEW_SYMBOL,
-            "value": value,
-            "change": change,
-            "signal": get_skew_signal(value)
-        }
-        set_cache_entry(quote_cache, SKEW_CACHE_KEY, indicator)
-        return {
-            "data": indicator,
-            "source": "live",
-            "cached": False,
-            "stale": False,
-            "age_seconds": 0
-        }
-    except Exception as exc:
-        print("SKEW fetch error:", exc)
-        if cached:
-            return {
-                "data": cached["data"],
-                "source": "cache",
-                "cached": True,
-                "stale": True,
-                "age_seconds": cached["age_seconds"]
-            }
-        return None
 
 
 # =========================
@@ -860,7 +782,6 @@ def analyze_strategy(symbol, strategy):
     market = get_data(symbol)
     if not market:
         return None
-    skew = fetch_skew_indicator()
     candle_result = fetch_and_cache_candles(symbol, "5m")
 
     d = market["data"]
@@ -873,8 +794,7 @@ def analyze_strategy(symbol, strategy):
     bias = "Bullish" if change > 0 else "Bearish" if change < 0 else "Neutral"
     support = round(price * 0.99, 2)
     resistance = round(price * 1.01, 2)
-    skew_value = skew["data"]["value"] if skew else None
-    trade_signal = build_trade_signal(change, bias, strategy, signal_candles, skew_value)
+    trade_signal = build_trade_signal(change, bias, strategy, signal_candles)
     news = fetch_stock_news(symbol, change)
 
     if strategy == "scalp":
@@ -931,14 +851,7 @@ def analyze_strategy(symbol, strategy):
         "summary": summary,
         "news": news,
         "indicators": {
-            "trade_signal": trade_signal,
-            "skew": {
-                **skew["data"],
-                "data_source": skew["source"],
-                "is_cached": skew["cached"],
-                "is_stale": skew["stale"],
-                "cache_age_seconds": skew["age_seconds"]
-            } if skew else None
+            "trade_signal": trade_signal
         }
     }
 

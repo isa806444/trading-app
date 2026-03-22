@@ -566,21 +566,6 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
   font-size:13px;
 }
 
-.indicator-card.skew-low {
-  border-color:#1f7a45;
-  background:linear-gradient(180deg, rgba(6, 46, 22, 0.9), rgba(8, 35, 23, 0.96));
-}
-
-.indicator-card.skew-mid {
-  border-color:#a16207;
-  background:linear-gradient(180deg, rgba(59, 35, 7, 0.9), rgba(43, 27, 9, 0.96));
-}
-
-.indicator-card.skew-high {
-  border-color:#991b1b;
-  background:linear-gradient(180deg, rgba(63, 13, 18, 0.9), rgba(42, 14, 16, 0.96));
-}
-
 .signal-chip {
   display:inline-flex;
   align-items:center;
@@ -1118,7 +1103,7 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
       </div>
       <div class="hero-step">
         <strong>2. Analyze</strong>
-        <span>Review the signal, key levels, SKEW, chart overlays, and latest headlines.</span>
+        <span>Review the signal, key levels, chart overlays, and latest headlines.</span>
       </div>
       <div class="hero-step">
         <strong>3. Track</strong>
@@ -1304,7 +1289,7 @@ function setOnboardingVisible(visible){
   }
 }
 
-function renderMarketEmptyState(title="Search a stock or company name to begin.", copy="You will see the latest price move, chart, signal, key levels, SKEW reading, and recent news once a ticker is analyzed."){
+function renderMarketEmptyState(title="Search a stock or company name to begin.", copy="You will see the latest price move, chart, signal, key levels, and recent news once a ticker is analyzed."){
   const result = document.getElementById("result");
   result.innerHTML = `
     <div class="empty-state">
@@ -1545,41 +1530,6 @@ function renderSparkline(points, positive){
     <svg class="watch-sparkline" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" aria-hidden="true">
       <polyline fill="none" stroke="${stroke}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" points="${coords}"></polyline>
     </svg>
-  `;
-}
-
-function renderSkewIndicator(skew){
-  if(!skew){
-    return "";
-  }
-
-  const changeClass = skew.change >= 0 ? "up" : "down";
-  const changePrefix = skew.change >= 0 ? "+" : "";
-  const skewTone =
-    skew.value >= 150 ? "skew-high" :
-    skew.value >= 135 ? "skew-mid" :
-    "skew-low";
-  const sourceLabel =
-    skew.is_stale ? `Cached ${formatAge(skew.cache_age_seconds)}` :
-    skew.is_cached ? "Recent cached reading" :
-    "Latest reading";
-
-  return `
-    <div class="section">
-      <div>CBOE SKEW Index</div>
-      <div class="indicator-grid">
-        <div class="indicator-card ${skewTone}">
-          <div class="indicator-name">Reading</div>
-          <div class="indicator-value">${skew.value}</div>
-          <div class="indicator-meta ${changeClass}"><span class="trend-arrow">${getTrendArrow(skew.change)}</span> ${changePrefix}${skew.change} vs prior close</div>
-        </div>
-        <div class="indicator-card ${skewTone}">
-          <div class="indicator-name">Tail Risk</div>
-          <div class="indicator-value" style="font-size:20px;">${skew.signal}</div>
-          <div class="indicator-meta">${sourceLabel}</div>
-        </div>
-      </div>
-    </div>
   `;
 }
 
@@ -2595,7 +2545,6 @@ async function analyze(sym){
           <div class="indicator-meta">Targets: ${d.plan.targets.join(", ")}</div>
         </div>
 
-        ${renderSkewIndicator(d.indicators?.skew)}
         ${renderNewsSection(d.news)}
 
         <div class="section">

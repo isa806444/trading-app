@@ -595,6 +595,70 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
   color:#cbd5e1;
 }
 
+.signal-row {
+  display:flex;
+  align-items:center;
+  gap:10px;
+  flex-wrap:wrap;
+  margin-top:12px;
+}
+
+.grade-chip {
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  min-width:42px;
+  height:42px;
+  padding:0 12px;
+  border-radius:14px;
+  border:1px solid var(--line);
+  background:rgba(12, 23, 41, 0.92);
+  color:var(--text);
+  font-size:18px;
+  font-weight:800;
+}
+
+.grade-chip.buy {
+  background:#052e16;
+  border-color:#14532d;
+  color:#bbf7d0;
+}
+
+.grade-chip.sell {
+  background:#3f0d12;
+  border-color:#7f1d1d;
+  color:#fecaca;
+}
+
+.grade-chip.wait {
+  background:#172033;
+  border-color:#334155;
+  color:#cbd5e1;
+}
+
+.signal-supporting {
+  display:grid;
+  gap:8px;
+  margin-top:10px;
+}
+
+.confirmation-list {
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+}
+
+.confirmation-pill {
+  display:inline-flex;
+  align-items:center;
+  padding:6px 10px;
+  border-radius:999px;
+  background:rgba(12, 23, 41, 0.92);
+  border:1px solid var(--line);
+  color:#d7e2f0;
+  font-size:12px;
+}
+
 .watch {
   position:fixed; right:0; top:0;
   width:280px; height:100%;
@@ -1542,12 +1606,26 @@ function renderTradeSignal(signal){
     signal.action === "BUY" ? "buy" :
     signal.action === "SELL" ? "sell" :
     "wait";
+  const confirmations = Array.isArray(signal.confirmations) ? signal.confirmations : [];
 
   return `
     <div class="section">
-      <div>Trade Signal</div>
-      <div class="signal-chip ${chipClass}">${signal.action}</div>
-      <div class="indicator-meta">${signal.reason}</div>
+      <div class="section-title-row">
+        <div>Setup Grade</div>
+        <div class="helper-pill">${signal.strength || "Mixed"} conviction</div>
+      </div>
+      <div class="signal-row">
+        <div class="grade-chip ${chipClass}">${signal.grade || "C"}</div>
+        <div class="signal-chip ${chipClass}">${signal.action}</div>
+      </div>
+      <div class="signal-supporting">
+        <div class="indicator-meta">${signal.reason}</div>
+        ${confirmations.length ? `
+          <div class="confirmation-list">
+            ${confirmations.map(item => `<div class="confirmation-pill">${item}</div>`).join("")}
+          </div>
+        ` : ""}
+      </div>
     </div>
   `;
 }

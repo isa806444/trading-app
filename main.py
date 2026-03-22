@@ -737,39 +737,88 @@ def build_trade_signal(change, bias, strategy, candles):
     lower_high = candles[-1]["high"] <= candles[-2]["high"] if len(candles) > 1 else False
     bullish_stack = last_close > last_ema9 > last_ema20 and last_close > last_vwap
     bearish_stack = last_close < last_ema9 < last_ema20 and last_close < last_vwap
+    bullish_confirmations = []
+    bearish_confirmations = []
 
-    if bullish_stack and last_rsi >= 55 and higher_low:
-        action = "BUY"
-        tone = "bullish"
-        reason = f"{strategy.title()} structure is above EMA 9, EMA 20, and VWAP with RSI strength behind it."
-    elif bearish_stack and last_rsi <= 45 and lower_high:
-        action = "SELL"
-        tone = "bearish"
-        reason = f"{strategy.title()} structure is below EMA 9, EMA 20, and VWAP with RSI weakness behind it."
-    elif change >= 0.5 and last_close > last_ema20:
-        action = "BUY"
-        tone = "bullish"
-        reason = "Price is holding above trend support, but the structure is not fully stacked yet."
-    elif change <= -0.5 and last_close < last_ema20:
-        action = "SELL"
-        tone = "bearish"
-        reason = "Price is staying under trend support, but the structure is not fully stacked yet."
-    elif bias == "Bullish":
-        action = "BUY"
-        tone = "bullish"
-        reason = "Bias is bullish, but candle structure is still mixed."
+    if bullish_stack:
+        bullish_confirmations.append("price is stacked above EMA 9, EMA 20, and VWAP")
+    if bearish_stack:
+        bearish_confirmations.append("price is stacked below EMA 9, EMA 20, and VWAP")
+
+    if last_rsi >= 55:
+        bullish_confirmations.append(f"RSI is showing strength at {round(last_rsi, 1)}")
+    elif last_rsi <= 45:
+        bearish_confirmations.append(f"RSI is showing weakness at {round(last_rsi, 1)}")
+
+    if higher_low:
+        bullish_confirmations.append("the latest candle held a higher low")
+    if lower_high:
+        bearish_confirmations.append("the latest candle printed a lower high")
+
+    if change >= 0.5:
+        bullish_confirmations.append(f"the stock is up {change}% on the day")
+    elif change <= -0.5:
+        bearish_confirmations.append(f"the stock is down {abs(change)}% on the day")
+
+    if bias == "Bullish":
+        bullish_confirmations.append("overall session bias is bullish")
     elif bias == "Bearish":
+        bearish_confirmations.append("overall session bias is bearish")
+
+    long_score = len(bullish_confirmations)
+    short_score = len(bearish_confirmations)
+    dominant_score = max(long_score, short_score)
+    opposing_score = min(long_score, short_score)
+
+    if long_score >= 4 and long_score >= short_score + 2:
+        action = "BUY"
+        tone = "bullish"
+        grade = "A"
+        strength = "Strong"
+        confirmations = bullish_confirmations
+        reason = f"This {strategy} setup looks strong because " + ", ".join(confirmations[:3]) + "."
+    elif short_score >= 4 and short_score >= long_score + 2:
         action = "SELL"
         tone = "bearish"
-        reason = "Bias is bearish, but candle structure is still mixed."
+        grade = "A"
+        strength = "Strong"
+        confirmations = bearish_confirmations
+        reason = f"This {strategy} setup looks strong because " + ", ".join(confirmations[:3]) + "."
+    elif long_score >= 3 and long_score > short_score:
+        action = "BUY"
+        tone = "bullish"
+        grade = "B"
+        strength = "Moderate"
+        confirmations = bullish_confirmations
+        reason = f"This {strategy} setup has enough bullish confirmation to be usable, mainly because " + ", ".join(confirmations[:3]) + "."
+    elif short_score >= 3 and short_score > long_score:
+        action = "SELL"
+        tone = "bearish"
+        grade = "B"
+        strength = "Moderate"
+        confirmations = bearish_confirmations
+        reason = f"This {strategy} setup has enough bearish confirmation to be usable, mainly because " + ", ".join(confirmations[:3]) + "."
+    elif dominant_score >= 2 and dominant_score > opposing_score:
+        action = "WAIT"
+        tone = "neutral"
+        grade = "C"
+        strength = "Mixed"
+        confirmations = bullish_confirmations if long_score > short_score else bearish_confirmations
+        reason = f"There is some directional evidence here, but it is not strong enough yet. Right now the clearest signs are that " + ", ".join(confirmations[:2]) + "."
     else:
         action = "WAIT"
         tone = "neutral"
-        reason = "Price, EMA structure, and momentum are too mixed for a clean setup."
+        grade = "C"
+        strength = "Weak"
+        confirmations = []
+        reason = "This setup is still too mixed. Price, trend structure, and momentum are not lined up well enough to call it strong."
 
     return {
         "action": action,
         "tone": tone,
+        "grade": grade,
+        "strength": strength,
+        "confirmations": confirmations[:4],
         "reason": reason
     }
 

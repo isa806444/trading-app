@@ -6,6 +6,7 @@ import hashlib
 import json
 import math
 import os
+import psycopg2
 import requests
 import time
 
@@ -16,6 +17,7 @@ WATCHLIST_FILE = "watchlist.json"
 MARKET_CACHE_FILE = "market_cache.json"
 TWELVE_DATA_BASE_URL = "https://api.twelvedata.com"
 TWELVE_DATA_API_KEY_ENV = "TWELVE_DATA_API_KEY"
+DATABASE_URL_ENV = "DATABASE_URL"
 QUOTE_CACHE_TTL = 60
 CANDLE_CACHE_TTL = 120
 INDICATOR_CACHE_TTL = 900
@@ -25,6 +27,7 @@ SKEW_CACHE_KEY = "indicator:skew"
 
 quote_cache = {}
 candle_cache = {}
+database_enabled = False
 
 
 # =========================
@@ -58,11 +61,108 @@ def get_twelve_data_api_key():
     return os.environ.get(TWELVE_DATA_API_KEY_ENV, "").strip()
 
 
+def get_database_url():
+    direct = os.environ.get(DATABASE_URL_ENV, "").strip()
+    if direct:
+        return direct
+
+    for key, value in os.environ.items():
+        normalized = key.lower()
+        if ("database" in normalized or "trading_app_db" in normalized) and "://" in str(value):
+            return str(value).strip()
+
+    return ""
+
+
 # =========================
 # STORAGE
 # =========================
 
-def load_watchlist():
+def get_db_connection():
+    database_url = get_database_url()
+    if not database_url:
+        return None
+    return psycopg2.connect(database_url)
+
+
+def initialize_database():
+    global database_enabled
+
+    try:
+        conn = get_db_connection()
+        if not conn:
+            database_enabled = False
+            return
+        with conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS app_state (
+                        state_key TEXT PRIMARY KEY,
+                        state_value JSONB NOT NULL DEFAULT '[]'::jsonb,
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                    """
+                )
+        conn.close()
+        database_enabled = True
+    except Exception as exc:
+        print("Database initialization skipped:", exc)
+        database_enabled = False
+
+
+def load_state_list(state_key, fallback=None):
+    if database_enabled:
+        try:
+            conn = get_db_connection()
+            if conn:
+                with conn:
+                    with conn.cursor() as cursor:
+                        cursor.execute(
+                            "SELECT state_value FROM app_state WHERE state_key = %s",
+                            (state_key,)
+                        )
+                        row = cursor.fetchone()
+                        if row and isinstance(row[0], list):
+                            conn.close()
+                            return row[0]
+                conn.close()
+        except Exception as exc:
+            print(f"Database read failed for {state_key}:", exc)
+
+    return fallback() if fallback else []
+
+
+def save_state_list(state_key, data, fallback=None):
+    cleaned = data if isinstance(data, list) else []
+
+    if database_enabled:
+        try:
+            conn = get_db_connection()
+            if conn:
+                with conn:
+                    with conn.cursor() as cursor:
+                        cursor.execute(
+                            """
+                            INSERT INTO app_state (state_key, state_value, updated_at)
+                            VALUES (%s, %s::jsonb, NOW())
+                            ON CONFLICT (state_key)
+                            DO UPDATE SET
+                                state_value = EXCLUDED.state_value,
+                                updated_at = NOW()
+                            """,
+                            (state_key, json.dumps(cleaned))
+                        )
+                conn.close()
+                return
+        except Exception as exc:
+            print(f"Database write failed for {state_key}:", exc)
+
+    if fallback:
+        fallback(cleaned)
+
+
+def load_watchlist_file_only():
     if not os.path.exists(WATCHLIST_FILE):
         return []
     try:
@@ -73,9 +173,17 @@ def load_watchlist():
         return []
 
 
-def save_watchlist(data):
+def save_watchlist_file_only(data):
     with open(WATCHLIST_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
+
+
+def load_watchlist():
+    return load_state_list("watchlist", load_watchlist_file_only)
+
+
+def save_watchlist(data):
+    save_state_list("watchlist", data, save_watchlist_file_only)
 
 
 def load_market_cache():
@@ -131,6 +239,7 @@ def initialize_market_cache():
     candle_cache = stored["candles"]
 
 
+initialize_database()
 initialize_market_cache()
 
 
@@ -746,6 +855,30 @@ def get_watchlist_snapshot(symbol):
     }
 
 
+def load_paper_positions():
+    return load_state_list("paper_positions")
+
+
+def save_paper_positions(data):
+    save_state_list("paper_positions", data)
+
+
+def load_paper_history():
+    return load_state_list("paper_history")
+
+
+def save_paper_history(data):
+    save_state_list("paper_history", data)
+
+
+def load_alerts():
+    return load_state_list("alerts")
+
+
+def save_alerts(data):
+    save_state_list("alerts", data)
+
+
 # =========================
 # ROUTES
 # =========================
@@ -859,6 +992,42 @@ def watchlist_data():
             snapshots.append(snapshot)
 
     return jsonify(snapshots)
+
+
+@app.route("/app-state", methods=["GET", "POST"])
+def app_state():
+    if request.method == "GET":
+        return jsonify({
+            "database_enabled": database_enabled,
+            "watchlist": load_watchlist(),
+            "paper_positions": load_paper_positions(),
+            "paper_history": load_paper_history(),
+            "alerts": load_alerts()
+        })
+
+    payload = request.get_json(silent=True) or {}
+
+    if "watchlist" in payload:
+        cleaned_watchlist = []
+        for ticker in payload.get("watchlist") or []:
+            normalized = str(ticker).upper().strip()
+            if normalized and normalized not in cleaned_watchlist:
+                cleaned_watchlist.append(normalized)
+        save_watchlist(cleaned_watchlist)
+
+    if "paper_positions" in payload:
+        save_paper_positions(payload.get("paper_positions") or [])
+
+    if "paper_history" in payload:
+        save_paper_history(payload.get("paper_history") or [])
+
+    if "alerts" in payload:
+        save_alerts(payload.get("alerts") or [])
+
+    return jsonify({
+        "ok": True,
+        "database_enabled": database_enabled
+    })
 
 
 # =========================

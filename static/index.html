@@ -760,6 +760,7 @@ let paperPositions = [];
 let paperHistory = [];
 let alerts = [];
 const latestQuotes = {};
+let serverStateEnabled = false;
 const intradayEtFormatter = new Intl.DateTimeFormat("en-US", {
   timeZone: "America/New_York",
   month: "numeric",
@@ -878,6 +879,79 @@ function saveAlerts(){
     localStorage.setItem(ALERTS_STORAGE_KEY, JSON.stringify(alerts));
   }catch(err){
     console.log("Alerts save failed", err);
+  }
+}
+
+function mergeUniqueStrings(...lists){
+  const merged = [];
+  lists.flat().forEach(item => {
+    const normalized = String(item || "").toUpperCase().trim();
+    if(normalized && !merged.includes(normalized)){
+      merged.push(normalized);
+    }
+  });
+  return merged;
+}
+
+function mergeObjectsById(...lists){
+  const merged = [];
+  const seen = new Set();
+
+  lists.flat().forEach(item => {
+    if(!item || !item.id || seen.has(item.id)){
+      return;
+    }
+    seen.add(item.id);
+    merged.push(item);
+  });
+
+  return merged;
+}
+
+async function saveRemoteState(){
+  if(!serverStateEnabled){
+    return;
+  }
+
+  try{
+    await fetch("/app-state", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        watchlist,
+        paper_positions: paperPositions,
+        paper_history: paperHistory,
+        alerts
+      })
+    });
+  }catch(err){
+    console.log("Remote state save failed", err);
+  }
+}
+
+async function loadRemoteState(){
+  try{
+    const res = await fetch("/app-state");
+    const payload = await res.json();
+    serverStateEnabled = !!payload.database_enabled;
+
+    if(!serverStateEnabled){
+      return;
+    }
+
+    watchlist = mergeUniqueStrings(payload.watchlist || [], watchlist);
+    paperPositions = mergeObjectsById(payload.paper_positions || [], paperPositions);
+    paperHistory = mergeObjectsById(payload.paper_history || [], paperHistory);
+    alerts = mergeObjectsById(payload.alerts || [], alerts);
+
+    saveLocalWatchlist();
+    savePaperPositions();
+    savePaperHistory();
+    saveAlerts();
+    await saveRemoteState();
+  }catch(err){
+    console.log("Remote state load failed", err);
+    serverStateEnabled = false;
   }
 }
 
@@ -1292,6 +1366,7 @@ function addPaperTrade(side){
     ...paperPositions
   ];
   savePaperPositions();
+  saveRemoteState();
   renderPaperPositions();
 }
 
@@ -1318,6 +1393,7 @@ function closePaperPosition(id){
   savePaperHistory();
   paperPositions = paperPositions.filter(item => item.id !== id);
   savePaperPositions();
+  saveRemoteState();
   renderPaperPositions();
 }
 
@@ -1346,12 +1422,14 @@ function addAlertForCurrentTicker(){
     ...alerts
   ];
   saveAlerts();
+  saveRemoteState();
   renderAlerts();
 }
 
 function removeAlert(id){
   alerts = alerts.filter(alert => alert.id !== id);
   saveAlerts();
+  saveRemoteState();
   renderAlerts();
 }
 
@@ -1405,6 +1483,7 @@ function checkAlerts(){
 
   if(changed){
     saveAlerts();
+    saveRemoteState();
     renderAlerts();
   }
 }
@@ -1464,9 +1543,14 @@ document.addEventListener("click", (e)=>{
 
 async function loadWatchlist(){
   watchlist = loadLocalWatchlist();
+  loadPaperPositions();
+  loadPaperHistory();
+  loadAlerts();
 
   try{
-    if(!watchlist.length){
+    await loadRemoteState();
+
+    if(!watchlist.length && !serverStateEnabled){
       const res = await fetch("/watchlist");
       const serverWatchlist = await res.json();
       if(Array.isArray(serverWatchlist) && serverWatchlist.length){
@@ -1476,10 +1560,14 @@ async function loadWatchlist(){
     }
     await loadWatchlistData();
     renderWatch();
+    renderPaperPositions();
+    renderAlerts();
   }catch(err){
     console.log("Watchlist load failed", err);
     await loadWatchlistData();
     renderWatch();
+    renderPaperPositions();
+    renderAlerts();
   }
 }
 
@@ -1510,6 +1598,7 @@ async function addWatch(t){
     watchlist = [...watchlist, normalized];
     saveLocalWatchlist();
   }
+  await saveRemoteState();
 
   try{
     await fetch("/watchlist", {
@@ -1533,6 +1622,7 @@ async function removeWatch(t){
   watchlist = watchlist.filter(item => item !== normalized);
   saveLocalWatchlist();
   watchlistData = watchlistData.filter(item => item.ticker !== normalized);
+  await saveRemoteState();
 
   try{
     await fetch("/watchlist", {

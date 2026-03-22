@@ -161,18 +161,24 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
 
 .strategy, .tf-bar { display:flex; gap:6px; margin-top:10px; }
 
+.preset-bar {
+  display:flex;
+  gap:6px;
+  margin-top:10px;
+}
+
 .tf-bar {
   margin-top:12px;
 }
 
-.strategy button, .tf-bar button {
+.strategy button, .tf-bar button, .preset-bar button {
   flex:1;
   background:rgba(12, 23, 41, 0.92);
   border-color:var(--line);
   color:var(--muted);
 }
 
-.strategy button.active, .tf-bar button.active {
+.strategy button.active, .tf-bar button.active, .preset-bar button.active {
   background:linear-gradient(180deg, #16304d, #11233b);
   border-color:#335176;
   color:var(--text);
@@ -521,6 +527,23 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
   margin-top:12px;
 }
 
+.paper-controls {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex-wrap:wrap;
+  margin-top:12px;
+}
+
+.paper-qty {
+  width:88px;
+  padding:10px 12px;
+  border-radius:12px;
+  border:1px solid var(--line);
+  background:rgba(12, 23, 41, 0.92);
+  color:var(--text);
+}
+
 .paper-btn {
   font-weight:700;
 }
@@ -541,6 +564,52 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
   background:#172033;
   color:#dbeafe;
   border-color:#335176;
+}
+
+.paper-history {
+  margin-top:14px;
+  border-top:1px solid var(--line);
+  padding-top:12px;
+}
+
+.alerts-panel {
+  margin-top:18px;
+  padding:18px;
+  border:1px solid var(--line);
+  border-radius:18px;
+  background:linear-gradient(180deg, rgba(16, 29, 52, 0.96), rgba(8, 18, 34, 0.98));
+}
+
+.alert-list {
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+}
+
+.alert-item {
+  display:grid;
+  grid-template-columns:1fr auto;
+  gap:12px;
+  padding:12px;
+  border:1px solid var(--line);
+  border-radius:14px;
+  background:rgba(12, 23, 41, 0.92);
+}
+
+.alert-controls {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex-wrap:wrap;
+  margin-top:12px;
+}
+
+.alert-direction {
+  padding:10px 12px;
+  border-radius:12px;
+  border:1px solid var(--line);
+  background:rgba(12, 23, 41, 0.92);
+  color:var(--text);
 }
 
 .chart-empty {
@@ -636,6 +705,12 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
     <button data-tf="15m">15M</button>
   </div>
 
+  <div class="preset-bar" id="presetBar">
+    <button data-preset="trend" class="active">Trend Preset</button>
+    <button data-preset="momentum">Momentum Preset</button>
+    <button data-preset="mean">Mean Reversion</button>
+  </div>
+
   <div class="paper-panel">
     <div class="paper-head">
       <div>
@@ -645,6 +720,18 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
     </div>
     <div class="paper-summary" id="paperSummary">No open paper positions yet.</div>
     <div class="paper-list" id="paperPositions"></div>
+    <div class="paper-history" id="paperHistory"></div>
+  </div>
+
+  <div class="alerts-panel">
+    <div class="paper-head">
+      <div>
+        <div class="paper-title">Alerts</div>
+        <div class="paper-subtitle">Price alerts stored on this device</div>
+      </div>
+    </div>
+    <div class="paper-summary" id="alertSummary">No alerts yet.</div>
+    <div class="alert-list" id="alertList"></div>
   </div>
 
 </div>
@@ -664,9 +751,14 @@ let lastTicker = null;
 let watchlist = [];
 let watchlistData = [];
 let isLoading = false;
+let indicatorPreset = "trend";
 const WATCHLIST_STORAGE_KEY = "trading-app-watchlist";
 const PAPER_POSITIONS_STORAGE_KEY = "trading-app-paper-positions";
+const PAPER_HISTORY_STORAGE_KEY = "trading-app-paper-history";
+const ALERTS_STORAGE_KEY = "trading-app-alerts";
 let paperPositions = [];
+let paperHistory = [];
+let alerts = [];
 const latestQuotes = {};
 const intradayEtFormatter = new Intl.DateTimeFormat("en-US", {
   timeZone: "America/New_York",
@@ -748,6 +840,44 @@ function savePaperPositions(){
     localStorage.setItem(PAPER_POSITIONS_STORAGE_KEY, JSON.stringify(paperPositions));
   }catch(err){
     console.log("Paper positions save failed", err);
+  }
+}
+
+function loadPaperHistory(){
+  try{
+    const raw = localStorage.getItem(PAPER_HISTORY_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    paperHistory = Array.isArray(parsed) ? parsed : [];
+  }catch(err){
+    console.log("Paper history read failed", err);
+    paperHistory = [];
+  }
+}
+
+function savePaperHistory(){
+  try{
+    localStorage.setItem(PAPER_HISTORY_STORAGE_KEY, JSON.stringify(paperHistory));
+  }catch(err){
+    console.log("Paper history save failed", err);
+  }
+}
+
+function loadAlerts(){
+  try{
+    const raw = localStorage.getItem(ALERTS_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    alerts = Array.isArray(parsed) ? parsed : [];
+  }catch(err){
+    console.log("Alerts read failed", err);
+    alerts = [];
+  }
+}
+
+function saveAlerts(){
+  try{
+    localStorage.setItem(ALERTS_STORAGE_KEY, JSON.stringify(alerts));
+  }catch(err){
+    console.log("Alerts save failed", err);
   }
 }
 
@@ -865,9 +995,18 @@ function renderTradeSignal(signal){
 
 function renderPaperActions(ticker){
   return `
-    <div class="paper-actions">
+    <div class="paper-controls">
+      <input id="paperQty" class="paper-qty" type="number" min="1" step="1" value="1" />
       <button class="paper-btn buy" onclick="addPaperTrade('BUY')">Paper Buy</button>
       <button class="paper-btn sell" onclick="addPaperTrade('SELL')">Paper Sell</button>
+    </div>
+    <div class="alert-controls">
+      <select id="alertDirection" class="alert-direction">
+        <option value="above">Alert Above</option>
+        <option value="below">Alert Below</option>
+      </select>
+      <input id="alertPrice" class="paper-qty" type="number" min="0" step="0.01" value="${latestQuotes[ticker] || ""}" />
+      <button class="paper-btn close" onclick="addAlertForCurrentTicker()">Add Alert</button>
     </div>
   `;
 }
@@ -965,17 +1104,17 @@ function renderChart(ticker, candles, indicators, sourceLabel, sessionLabel){
     yaxis: "y"
   }];
 
-  if(indicators?.ema9?.length){
+  if(indicators?.ema9?.length && indicatorPreset !== "mean"){
     traces.push(buildLineTrace(xValues, indicators.ema9, "EMA 9", "#f59e0b", 2));
   }
   if(indicators?.ema20?.length){
     traces.push(buildLineTrace(xValues, indicators.ema20, "EMA 20", "#60a5fa", 2));
   }
-  if(indicators?.vwap?.length){
+  if(indicators?.vwap?.length && indicatorPreset !== "momentum"){
     traces.push(buildLineTrace(xValues, indicators.vwap, "VWAP", "#fb923c", 2));
   }
 
-  const hasRsi = indicators?.rsi14?.some(v => v !== null && v !== undefined);
+  const hasRsi = indicatorPreset !== "trend" && indicators?.rsi14?.some(v => v !== null && v !== undefined);
   if(hasRsi){
     traces.push(buildLineTrace(xValues, indicators.rsi14, "RSI 14", "#c084fc", 2, "y2"));
   }
@@ -1076,43 +1215,61 @@ function getPaperMarkPrice(ticker){
 function renderPaperPositions(){
   const summary = document.getElementById("paperSummary");
   const list = document.getElementById("paperPositions");
+  const history = document.getElementById("paperHistory");
   list.innerHTML = "";
+  history.innerHTML = "";
 
   if(!paperPositions.length){
     summary.innerText = "No open paper positions yet.";
     list.innerHTML = '<div class="paper-empty">Analyze a ticker, then use Paper Buy or Paper Sell to simulate a trade.</div>';
-    return;
+  } else {
+    let totalPnl = 0;
+
+    paperPositions.forEach(position => {
+      const markPrice = getPaperMarkPrice(position.ticker) || position.entry;
+      const pnl = position.side === "BUY"
+        ? (markPrice - position.entry) * position.qty
+        : (position.entry - markPrice) * position.qty;
+      totalPnl += pnl;
+
+      const item = document.createElement("div");
+      item.className = "paper-item";
+      item.innerHTML = `
+        <div>
+          <div class="paper-symbol">${position.ticker} · ${position.side}</div>
+          <div class="paper-details">
+            Qty ${position.qty} · Entry $${position.entry.toFixed(2)} · Mark $${markPrice.toFixed(2)}
+          </div>
+          <div class="paper-details ${pnl >= 0 ? "up" : "down"}">
+            Unrealized ${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)}
+          </div>
+        </div>
+        <div>
+          <button class="paper-btn close" onclick="closePaperPosition('${position.id}')">Close</button>
+        </div>
+      `;
+      list.appendChild(item);
+    });
+
+    summary.innerText = `${paperPositions.length} open position${paperPositions.length === 1 ? "" : "s"} · Unrealized ${totalPnl >= 0 ? "+" : ""}$${totalPnl.toFixed(2)}`;
   }
 
-  let totalPnl = 0;
-
-  paperPositions.forEach(position => {
-    const markPrice = getPaperMarkPrice(position.ticker) || position.entry;
-    const pnl = position.side === "BUY"
-      ? (markPrice - position.entry) * position.qty
-      : (position.entry - markPrice) * position.qty;
-    totalPnl += pnl;
-
-    const item = document.createElement("div");
-    item.className = "paper-item";
-    item.innerHTML = `
-      <div>
-        <div class="paper-symbol">${position.ticker} · ${position.side}</div>
-        <div class="paper-details">
-          Qty ${position.qty} · Entry $${position.entry.toFixed(2)} · Mark $${markPrice.toFixed(2)}
-        </div>
-        <div class="paper-details ${pnl >= 0 ? "up" : "down"}">
-          Unrealized ${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)}
-        </div>
-      </div>
-      <div>
-        <button class="paper-btn close" onclick="closePaperPosition('${position.id}')">Close</button>
+  if(paperHistory.length){
+    history.innerHTML = `
+      <div class="paper-subtitle">Recent Closed Trades</div>
+      <div class="alert-list">
+        ${paperHistory.slice(0, 6).map(item => `
+          <div class="alert-item">
+            <div>
+              <div class="paper-symbol">${item.ticker} · ${item.side}</div>
+              <div class="paper-details">Qty ${item.qty} · Entry $${item.entry.toFixed(2)} · Exit $${item.exit.toFixed(2)}</div>
+            </div>
+            <div class="paper-details ${item.realized >= 0 ? "up" : "down"}">${item.realized >= 0 ? "+" : ""}$${item.realized.toFixed(2)}</div>
+          </div>
+        `).join("")}
       </div>
     `;
-    list.appendChild(item);
-  });
-
-  summary.innerText = `${paperPositions.length} open position${paperPositions.length === 1 ? "" : "s"} · Unrealized ${totalPnl >= 0 ? "+" : ""}$${totalPnl.toFixed(2)}`;
+  }
 }
 
 function addPaperTrade(side){
@@ -1120,13 +1277,15 @@ function addPaperTrade(side){
     setStatus("Analyze a ticker first so the paper trade uses a real mark price.", "warning");
     return;
   }
+  const qtyInput = document.getElementById("paperQty");
+  const qty = Math.max(1, Number(qtyInput?.value || 1));
 
   paperPositions = [
     {
       id: `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
       ticker: lastTicker,
       side,
-      qty: 1,
+      qty,
       entry: Number(latestQuotes[lastTicker]),
       openedAt: new Date().toISOString()
     },
@@ -1137,9 +1296,147 @@ function addPaperTrade(side){
 }
 
 function closePaperPosition(id){
-  paperPositions = paperPositions.filter(position => position.id !== id);
+  const position = paperPositions.find(item => item.id === id);
+  if(!position){
+    return;
+  }
+
+  const exit = getPaperMarkPrice(position.ticker) || position.entry;
+  const realized = position.side === "BUY"
+    ? (exit - position.entry) * position.qty
+    : (position.entry - exit) * position.qty;
+
+  paperHistory = [
+    {
+      ...position,
+      exit,
+      realized,
+      closedAt: new Date().toISOString()
+    },
+    ...paperHistory
+  ];
+  savePaperHistory();
+  paperPositions = paperPositions.filter(item => item.id !== id);
   savePaperPositions();
   renderPaperPositions();
+}
+
+function addAlertForCurrentTicker(){
+  if(!lastTicker || !latestQuotes[lastTicker]){
+    setStatus("Analyze a ticker first so the alert uses a live price anchor.", "warning");
+    return;
+  }
+
+  const direction = document.getElementById("alertDirection")?.value || "above";
+  const target = Number(document.getElementById("alertPrice")?.value || 0);
+  if(!target){
+    setStatus("Enter an alert price first.", "warning");
+    return;
+  }
+
+  alerts = [
+    {
+      id: `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+      ticker: lastTicker,
+      direction,
+      target,
+      status: "active",
+      createdAt: new Date().toISOString()
+    },
+    ...alerts
+  ];
+  saveAlerts();
+  renderAlerts();
+}
+
+function removeAlert(id){
+  alerts = alerts.filter(alert => alert.id !== id);
+  saveAlerts();
+  renderAlerts();
+}
+
+function maybeNotifyAlert(alert, markPrice){
+  if(!("Notification" in window)){
+    return;
+  }
+
+  if(Notification.permission === "default"){
+    Notification.requestPermission();
+    return;
+  }
+
+  if(Notification.permission === "granted"){
+    new Notification(`${alert.ticker} ${alert.direction === "above" ? "broke above" : "fell below"} $${alert.target}`, {
+      body: `Latest price: $${markPrice.toFixed(2)}`
+    });
+  }
+}
+
+function checkAlerts(){
+  let changed = false;
+
+  alerts = alerts.map(alert => {
+    if(alert.status !== "active"){
+      return alert;
+    }
+
+    const markPrice = getPaperMarkPrice(alert.ticker);
+    if(!markPrice){
+      return alert;
+    }
+
+    const hit = alert.direction === "above"
+      ? markPrice >= alert.target
+      : markPrice <= alert.target;
+
+    if(!hit){
+      return alert;
+    }
+
+    changed = true;
+    maybeNotifyAlert(alert, markPrice);
+    return {
+      ...alert,
+      status: "triggered",
+      triggeredAt: new Date().toISOString(),
+      triggeredPrice: markPrice
+    };
+  });
+
+  if(changed){
+    saveAlerts();
+    renderAlerts();
+  }
+}
+
+function renderAlerts(){
+  const summary = document.getElementById("alertSummary");
+  const list = document.getElementById("alertList");
+  list.innerHTML = "";
+
+  if(!alerts.length){
+    summary.innerText = "No alerts yet.";
+    list.innerHTML = '<div class="paper-empty">Create a price alert from the current ticker card.</div>';
+    return;
+  }
+
+  const active = alerts.filter(alert => alert.status === "active").length;
+  summary.innerText = `${active} active alert${active === 1 ? "" : "s"} · ${alerts.length - active} triggered`;
+
+  alerts.slice(0, 8).forEach(alert => {
+    const item = document.createElement("div");
+    item.className = "alert-item";
+    item.innerHTML = `
+      <div>
+        <div class="paper-symbol">${alert.ticker} · ${alert.direction === "above" ? "Above" : "Below"} $${Number(alert.target).toFixed(2)}</div>
+        <div class="paper-details">${alert.status === "active" ? "Active" : `Triggered at $${Number(alert.triggeredPrice).toFixed(2)}`}</div>
+      </div>
+      <div>
+        <button class="paper-btn close" onclick="removeAlert('${alert.id}')">Remove</button>
+      </div>
+    `;
+    list.appendChild(item);
+  });
 }
 
 document.addEventListener("click", (e)=>{
@@ -1153,6 +1450,13 @@ document.addEventListener("click", (e)=>{
   if(e.target.dataset.tf){
     timeframe = e.target.dataset.tf;
     document.querySelectorAll("#tfBar button").forEach(b=>b.classList.remove("active"));
+    e.target.classList.add("active");
+    if(lastTicker) loadCandles(lastTicker);
+  }
+
+  if(e.target.dataset.preset){
+    indicatorPreset = e.target.dataset.preset;
+    document.querySelectorAll("#presetBar button").forEach(b=>b.classList.remove("active"));
     e.target.classList.add("active");
     if(lastTicker) loadCandles(lastTicker);
   }
@@ -1193,6 +1497,7 @@ async function loadWatchlistData(){
       latestQuotes[item.ticker] = item.price;
     });
     renderPaperPositions();
+    checkAlerts();
   }catch(err){
     console.log("Watchlist data load failed", err);
     watchlistData = [];
@@ -1384,6 +1689,8 @@ async function analyze(sym){
     }
 
     latestQuotes[t] = d.price;
+    checkAlerts();
+    renderAlerts();
 
     document.getElementById("result").innerHTML = `
       <div class="card">
@@ -1449,7 +1756,10 @@ function getWatchButtonMarkup(ticker){
 }
 
 loadPaperPositions();
+loadPaperHistory();
+loadAlerts();
 renderPaperPositions();
+renderAlerts();
 showChartMessage("Search for a ticker, then click Analyze to load the chart.");
 loadWatchlist();
 </script>

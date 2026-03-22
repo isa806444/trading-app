@@ -1231,8 +1231,11 @@ function renderChart(ticker, candles, indicators, sourceLabel, sessionLabel){
       tickfont: { size: 11 },
       fixedrange: true,
       domain: hasRsi ? [0.30, 1] : [0, 1]
-    },
-    yaxis2: hasRsi ? {
+    }
+  };
+
+  if(hasRsi){
+    layout.yaxis2 = {
       side: "right",
       domain: [0, 0.20],
       range: [0, 100],
@@ -1241,8 +1244,8 @@ function renderChart(ticker, candles, indicators, sourceLabel, sessionLabel){
       tickcolor: "#1e293b",
       tickfont: { size: 10 },
       fixedrange: true
-    } : undefined,
-    shapes: hasRsi ? [
+    };
+    layout.shapes = [
       {
         type: "line",
         xref: "paper",
@@ -1263,8 +1266,8 @@ function renderChart(ticker, candles, indicators, sourceLabel, sessionLabel){
         y1: 30,
         line: { color: "#14532d", width: 1, dash: "dot" }
       }
-    ] : [],
-    annotations: hasRsi ? [{
+    ];
+    layout.annotations = [{
       text: "RSI 14",
       xref: "paper",
       yref: "paper",
@@ -1272,8 +1275,8 @@ function renderChart(ticker, candles, indicators, sourceLabel, sessionLabel){
       y: 0.22,
       showarrow: false,
       font: { size: 10, color: "#94a3b8" }
-    }] : []
-  };
+    }];
+  }
 
   Plotly.newPlot(container, traces, layout, {
     responsive: true,

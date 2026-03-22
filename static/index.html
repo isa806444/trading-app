@@ -646,6 +646,36 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
   color:var(--text);
 }
 
+.news-list {
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+  margin-top:10px;
+}
+
+.news-item {
+  border:1px solid var(--line);
+  border-radius:14px;
+  padding:12px;
+  background:rgba(12, 23, 41, 0.92);
+}
+
+.news-item a {
+  color:#dbeafe;
+  text-decoration:none;
+  font-weight:600;
+}
+
+.news-item a:hover {
+  text-decoration:underline;
+}
+
+.news-time {
+  margin-top:6px;
+  color:var(--muted);
+  font-size:12px;
+}
+
 .chart-empty {
   display:flex;
   align-items:center;
@@ -1097,6 +1127,29 @@ function renderTradeSignal(signal){
       <div>Trade Signal</div>
       <div class="signal-chip ${chipClass}">${signal.action}</div>
       <div class="indicator-meta">${signal.reason}</div>
+    </div>
+  `;
+}
+
+function renderNewsSection(news){
+  if(!news){
+    return "";
+  }
+
+  const articles = Array.isArray(news.articles) ? news.articles.slice(0, 3) : [];
+
+  return `
+    <div class="section">
+      <div>Latest News</div>
+      <div class="indicator-meta">${news.driver || "No fresh headlines were available."}</div>
+      <div class="news-list">
+        ${articles.length ? articles.map(article => `
+          <div class="news-item">
+            <a href="${article.link}" target="_blank" rel="noopener noreferrer">${article.title}</a>
+            <div class="news-time">${article.published_at || "Recent headline"}</div>
+          </div>
+        `).join("") : '<div class="paper-empty">No fresh headlines were available for this ticker just now.</div>'}
+      </div>
     </div>
   `;
 }
@@ -1969,6 +2022,7 @@ async function analyze(sym){
         </div>
 
         ${renderSkewIndicator(d.indicators?.skew)}
+        ${renderNewsSection(d.news)}
 
         <div class="section">${d.summary}</div>
       </div>

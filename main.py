@@ -9,6 +9,8 @@ import os
 import psycopg2
 import requests
 import time
+from urllib.parse import quote_plus
+from xml.etree import ElementTree
 
 app = Flask(__name__, static_folder="static")
 CORS(app)
@@ -21,6 +23,7 @@ DATABASE_URL_ENV = "DATABASE_URL"
 QUOTE_CACHE_TTL = 60
 CANDLE_CACHE_TTL = 120
 INDICATOR_CACHE_TTL = 900
+NEWS_CACHE_TTL = 900
 DEMO_TIMEZONE = ZoneInfo("America/New_York")
 SKEW_SYMBOL = "^SKEW"
 SKEW_CACHE_KEY = "indicator:skew"
@@ -28,6 +31,7 @@ SKEW_CACHE_KEY = "indicator:skew"
 quote_cache = {}
 candle_cache = {}
 database_enabled = False
+news_cache = {}
 
 
 # =========================
@@ -389,6 +393,72 @@ def build_chart_indicators(candles):
         "vwap": calculate_vwap(candles),
         "rsi14": calculate_rsi(closes, 14),
     }
+
+
+def summarize_news_driver(change, headlines):
+    joined = " ".join(headlines).lower()
+
+    if any(word in joined for word in ["earnings", "guidance", "revenue", "profit", "forecast"]):
+        category = "earnings or guidance headlines"
+    elif any(word in joined for word in ["upgrade", "downgrade", "rating", "price target", "analyst"]):
+        category = "analyst rating headlines"
+    elif any(word in joined for word in ["deal", "acquisition", "merger", "partnership", "contract"]):
+        category = "deal or partnership headlines"
+    elif any(word in joined for word in ["launch", "product", "ai", "fda", "chip", "drug"]):
+        category = "company catalyst headlines"
+    elif any(word in joined for word in ["rates", "inflation", "fed", "tariff", "economy", "market"]):
+        category = "macro market headlines"
+    else:
+        category = "recent company headlines"
+
+    if change > 0:
+        return f"Possible reason it's up: {category}."
+    if change < 0:
+        return f"Possible reason it's down: {category}."
+    return f"Possible driver today: {category}."
+
+
+def fetch_stock_news(symbol, change):
+    cache_key = f"news:{symbol}"
+    cached = get_cache_entry(news_cache, cache_key, NEWS_CACHE_TTL)
+    if cached and not cached["stale"]:
+        return cached["data"]
+
+    query = quote_plus(f"{symbol} stock when:1d")
+    url = f"https://news.google.com/rss/search?q={query}&hl=en-US&gl=US&ceid=US:en"
+
+    try:
+        response = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
+        response.raise_for_status()
+        root = ElementTree.fromstring(response.text)
+        items = []
+
+        for item in root.findall(".//item")[:5]:
+            title = (item.findtext("title") or "").strip()
+            link = (item.findtext("link") or "").strip()
+            pub_date = (item.findtext("pubDate") or "").strip()
+            if title and link:
+                items.append({
+                    "title": title,
+                    "link": link,
+                    "published_at": pub_date
+                })
+
+        headlines = [item["title"] for item in items[:3]]
+        payload = {
+            "driver": summarize_news_driver(change, headlines) if headlines else "No fresh headlines were found for this ticker just now.",
+            "articles": items
+        }
+        set_cache_entry(news_cache, cache_key, payload)
+        return payload
+    except Exception as exc:
+        print("News fetch error:", exc)
+        if cached:
+            return cached["data"]
+        return {
+            "driver": "No fresh headlines were available for this ticker just now.",
+            "articles": []
+        }
 
 
 def get_quote_from_candles(symbol, preferred_source="cache"):
@@ -764,6 +834,7 @@ def analyze_strategy(symbol, strategy):
     resistance = round(price * 1.01, 2)
     skew_value = skew["data"]["value"] if skew else None
     trade_signal = build_trade_signal(change, bias, strategy, signal_candles, skew_value)
+    news = fetch_stock_news(symbol, change)
 
     if strategy == "scalp":
         entry = round(price * 1.001, 2)
@@ -816,6 +887,7 @@ def analyze_strategy(symbol, strategy):
             "targets": targets
         },
         "summary": summary,
+        "news": news,
         "indicators": {
             "trade_signal": trade_signal,
             "skew": {

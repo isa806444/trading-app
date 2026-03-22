@@ -487,6 +487,40 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
   margin-bottom:10px;
 }
 
+.analytics-grid {
+  display:grid;
+  grid-template-columns:repeat(auto-fit, minmax(140px, 1fr));
+  gap:10px;
+  margin:12px 0 14px;
+}
+
+.analytics-card {
+  border:1px solid var(--line);
+  border-radius:14px;
+  padding:12px;
+  background:rgba(12, 23, 41, 0.92);
+}
+
+.analytics-label {
+  color:var(--muted);
+  font-size:12px;
+  text-transform:uppercase;
+  letter-spacing:0.08em;
+}
+
+.analytics-value {
+  margin-top:8px;
+  font-size:24px;
+  font-weight:700;
+}
+
+.paper-section-title {
+  margin:14px 0 10px;
+  color:var(--text);
+  font-size:14px;
+  font-weight:700;
+}
+
 .paper-empty {
   color:var(--muted);
   font-size:14px;
@@ -1342,6 +1376,124 @@ function renderPaperPositions(){
               <div class="paper-details">Qty ${item.qty} · Entry $${item.entry.toFixed(2)} · Exit $${item.exit.toFixed(2)}</div>
             </div>
             <div class="paper-details ${item.realized >= 0 ? "up" : "down"}">${item.realized >= 0 ? "+" : ""}$${item.realized.toFixed(2)}</div>
+          </div>
+        `).join("")}
+      </div>
+    `;
+  }
+}
+
+function formatMoney(value){
+  const amount = Number(value || 0);
+  return `${amount >= 0 ? "+" : "-"}$${Math.abs(amount).toFixed(2)}`;
+}
+
+function renderAnalyticsCard(label, value, tone=""){
+  return `
+    <div class="analytics-card">
+      <div class="analytics-label">${label}</div>
+      <div class="analytics-value ${tone}">${value}</div>
+    </div>
+  `;
+}
+
+function renderPaperPositions(){
+  const summary = document.getElementById("paperSummary");
+  const list = document.getElementById("paperPositions");
+  const history = document.getElementById("paperHistory");
+  list.innerHTML = "";
+  history.innerHTML = "";
+
+  let realizedPnl = 0;
+  let winningTrades = 0;
+  paperHistory.forEach(item => {
+    const value = Number(item.realized || 0);
+    realizedPnl += value;
+    if(value > 0){
+      winningTrades += 1;
+    }
+  });
+
+  if(!paperPositions.length){
+    summary.innerText = "No open paper positions yet.";
+    list.innerHTML = `
+      <div class="analytics-grid">
+        ${renderAnalyticsCard("Open P&L", "$0.00")}
+        ${renderAnalyticsCard("Realized P&L", formatMoney(realizedPnl), realizedPnl >= 0 ? "up" : "down")}
+        ${renderAnalyticsCard("Win Rate", paperHistory.length ? `${Math.round((winningTrades / paperHistory.length) * 100)}%` : "0%")}
+        ${renderAnalyticsCard("Open Trades", "0")}
+      </div>
+      <div class="paper-empty">Analyze a ticker, then use Paper Buy or Paper Sell to simulate a trade.</div>
+    `;
+  } else {
+    let totalPnl = 0;
+    let longExposure = 0;
+    let shortExposure = 0;
+    let openMarkup = "";
+
+    paperPositions.forEach(position => {
+      const markPrice = getPaperMarkPrice(position.ticker) || position.entry;
+      const pnl = position.side === "BUY"
+        ? (markPrice - position.entry) * position.qty
+        : (position.entry - markPrice) * position.qty;
+      totalPnl += pnl;
+      const notional = markPrice * position.qty;
+      if(position.side === "BUY"){
+        longExposure += notional;
+      }else{
+        shortExposure += notional;
+      }
+
+      openMarkup += `
+        <div class="paper-item">
+          <div>
+            <div class="paper-symbol">${position.ticker} | ${position.side}</div>
+            <div class="paper-details">
+              Qty ${position.qty} | Entry $${position.entry.toFixed(2)} | Mark $${markPrice.toFixed(2)}
+            </div>
+            <div class="paper-details ${pnl >= 0 ? "up" : "down"}">
+              Unrealized ${formatMoney(pnl)}
+            </div>
+          </div>
+          <div>
+            <button class="paper-btn close" onclick="closePaperPosition('${position.id}')">Close</button>
+          </div>
+        </div>
+      `;
+    });
+
+    const winRate = paperHistory.length ? `${Math.round((winningTrades / paperHistory.length) * 100)}%` : "0%";
+    summary.innerText = `${paperPositions.length} open position${paperPositions.length === 1 ? "" : "s"} | Shared across your devices`;
+    list.innerHTML = `
+      <div class="analytics-grid">
+        ${renderAnalyticsCard("Open P&L", formatMoney(totalPnl), totalPnl >= 0 ? "up" : "down")}
+        ${renderAnalyticsCard("Realized P&L", formatMoney(realizedPnl), realizedPnl >= 0 ? "up" : "down")}
+        ${renderAnalyticsCard("Win Rate", winRate)}
+        ${renderAnalyticsCard("Long Exposure", `$${longExposure.toFixed(2)}`)}
+        ${renderAnalyticsCard("Short Exposure", `$${shortExposure.toFixed(2)}`)}
+        ${renderAnalyticsCard("Open Trades", String(paperPositions.length))}
+      </div>
+      <div class="paper-section-title">Open Positions</div>
+      ${openMarkup}
+    `;
+  }
+
+  if(paperHistory.length){
+    const avgClosed = realizedPnl / paperHistory.length;
+    history.innerHTML = `
+      <div class="paper-section-title">Closed Trade History</div>
+      <div class="analytics-grid">
+        ${renderAnalyticsCard("Closed Trades", String(paperHistory.length))}
+        ${renderAnalyticsCard("Average Closed P&L", formatMoney(avgClosed), avgClosed >= 0 ? "up" : "down")}
+      </div>
+      <div class="alert-list">
+        ${paperHistory.slice(0, 6).map(item => `
+          <div class="alert-item">
+            <div>
+              <div class="paper-symbol">${item.ticker} | ${item.side}</div>
+              <div class="paper-details">Qty ${item.qty} | Entry $${item.entry.toFixed(2)} | Exit $${item.exit.toFixed(2)}</div>
+            </div>
+            <div class="paper-details ${item.realized >= 0 ? "up" : "down"}">${formatMoney(item.realized)}</div>
           </div>
         `).join("")}
       </div>

@@ -455,6 +455,41 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
   font-size:14px;
 }
 
+.view-panel.hidden {
+  display:none;
+}
+
+.messages-panel {
+  margin-top:18px;
+  padding:18px;
+  border:1px solid var(--line);
+  border-radius:18px;
+  background:linear-gradient(180deg, rgba(16, 29, 52, 0.96), rgba(8, 18, 34, 0.98));
+}
+
+.bottom-nav {
+  position:sticky;
+  bottom:12px;
+  margin-top:22px;
+  display:flex;
+  gap:10px;
+  justify-content:center;
+  z-index:5;
+}
+
+.bottom-nav button {
+  min-width:140px;
+  background:rgba(12, 23, 41, 0.96);
+  border-color:var(--line);
+  color:var(--muted);
+}
+
+.bottom-nav button.active {
+  background:linear-gradient(180deg, #16304d, #11233b);
+  border-color:#335176;
+  color:var(--text);
+}
+
 .paper-panel {
   margin-top:18px;
   padding:18px;
@@ -749,6 +784,7 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
     <button data-s="mean">Mean</button>
   </div>
 
+  <div id="marketView" class="view-panel">
   <div id="result"></div>
   <div id="status"></div>
 
@@ -775,27 +811,35 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
     <button data-preset="mean">Mean Reversion</button>
   </div>
 
+  <div class="messages-panel">
+    <div class="paper-head">
+      <div>
+        <div class="paper-title">Messages</div>
+        <div class="paper-subtitle">Triggered alerts will appear here</div>
+      </div>
+    </div>
+    <div class="paper-summary" id="alertSummary">No alert messages yet.</div>
+    <div class="alert-list" id="alertList"></div>
+  </div>
+  </div>
+
+  <div id="portfolioView" class="view-panel hidden">
   <div class="paper-panel">
     <div class="paper-head">
       <div>
-        <div class="paper-title">Paper Trading</div>
-        <div class="paper-subtitle">Simulated positions saved on this device</div>
+        <div class="paper-title">Portfolio Dashboard</div>
+        <div class="paper-subtitle">Paper trading analytics and position tracking</div>
       </div>
     </div>
     <div class="paper-summary" id="paperSummary">No open paper positions yet.</div>
     <div class="paper-list" id="paperPositions"></div>
     <div class="paper-history" id="paperHistory"></div>
   </div>
+  </div>
 
-  <div class="alerts-panel">
-    <div class="paper-head">
-      <div>
-        <div class="paper-title">Alerts</div>
-        <div class="paper-subtitle">Price alerts stored on this device</div>
-      </div>
-    </div>
-    <div class="paper-summary" id="alertSummary">No alerts yet.</div>
-    <div class="alert-list" id="alertList"></div>
+  <div class="bottom-nav">
+    <button id="marketNav" class="active" onclick="switchView('market')">Market</button>
+    <button id="portfolioNav" onclick="switchView('portfolio')">Portfolio</button>
   </div>
 
 </div>
@@ -816,6 +860,7 @@ let watchlist = [];
 let watchlistData = [];
 let isLoading = false;
 let indicatorPreset = "trend";
+let currentView = "market";
 const WATCHLIST_STORAGE_KEY = "trading-app-watchlist";
 const PAPER_POSITIONS_STORAGE_KEY = "trading-app-paper-positions";
 const PAPER_HISTORY_STORAGE_KEY = "trading-app-paper-history";
@@ -1180,6 +1225,14 @@ function openWatchlist(){
 function closeWatchlist(){
   document.getElementById("watchPanel").classList.remove("open");
   document.getElementById("watchBackdrop").classList.remove("open");
+}
+
+function switchView(view){
+  currentView = view;
+  document.getElementById("marketView").classList.toggle("hidden", view !== "market");
+  document.getElementById("portfolioView").classList.toggle("hidden", view !== "portfolio");
+  document.getElementById("marketNav").classList.toggle("active", view === "market");
+  document.getElementById("portfolioNav").classList.toggle("active", view === "portfolio");
 }
 
 function manualRefresh(){
@@ -2062,12 +2115,47 @@ function getWatchButtonMarkup(ticker){
   return `<button onclick="addWatch('${ticker}')">+ Watch</button>`;
 }
 
+function renderAlerts(){
+  const summary = document.getElementById("alertSummary");
+  const list = document.getElementById("alertList");
+  list.innerHTML = "";
+
+  const triggered = alerts.filter(alert => alert.status === "triggered");
+  const activeAlerts = alerts.filter(alert => alert.status === "active");
+
+  if(!triggered.length){
+    summary.innerText = activeAlerts.length
+      ? `${activeAlerts.length} active alert${activeAlerts.length === 1 ? "" : "s"} | No triggered messages yet.`
+      : "No alert messages yet.";
+    list.innerHTML = '<div class="paper-empty">Search a ticker and create an alert from that ticker card. Triggered alerts will appear here.</div>';
+    return;
+  }
+
+  summary.innerText = `${activeAlerts.length} active alert${activeAlerts.length === 1 ? "" : "s"} | ${triggered.length} message${triggered.length === 1 ? "" : "s"}`;
+
+  triggered.slice(0, 8).forEach(alert => {
+    const item = document.createElement("div");
+    item.className = "alert-item";
+    item.innerHTML = `
+      <div>
+        <div class="paper-symbol">${alert.ticker} | ${alert.direction === "above" ? "Above" : "Below"} $${Number(alert.target).toFixed(2)}</div>
+        <div class="paper-details">Triggered at $${Number(alert.triggeredPrice).toFixed(2)}</div>
+      </div>
+      <div>
+        <button class="paper-btn close" onclick="removeAlert('${alert.id}')">Dismiss</button>
+      </div>
+    `;
+    list.appendChild(item);
+  });
+}
+
 loadPaperPositions();
 loadPaperHistory();
 loadAlerts();
 renderPaperPositions();
 renderAlerts();
 showChartMessage("Search for a ticker, then click Analyze to load the chart.");
+switchView("market");
 loadWatchlist();
 </script>
 

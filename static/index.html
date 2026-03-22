@@ -1232,6 +1232,7 @@ function renderChart(ticker, candles, indicators, sourceLabel, sessionLabel){
     plot_bgcolor: "#020617",
     margin: { l: 18, r: 72, t: 18, b: 62 },
     font: { color: "#94a3b8" },
+    dragmode: "zoom",
     legend: {
       orientation: "h",
       x: 0,
@@ -1253,7 +1254,7 @@ function renderChart(ticker, candles, indicators, sourceLabel, sessionLabel){
       tickangle: 0,
       automargin: true,
       tickfont: { size: 11 },
-      fixedrange: true,
+      fixedrange: false,
       domain: [0, 1]
     },
     yaxis: {
@@ -1263,7 +1264,7 @@ function renderChart(ticker, candles, indicators, sourceLabel, sessionLabel){
       tickcolor: "#1e293b",
       automargin: true,
       tickfont: { size: 11 },
-      fixedrange: true,
+      fixedrange: false,
       domain: hasRsi ? [0.30, 1] : [0, 1]
     }
   };
@@ -1277,7 +1278,7 @@ function renderChart(ticker, candles, indicators, sourceLabel, sessionLabel){
       linecolor: "#1e293b",
       tickcolor: "#1e293b",
       tickfont: { size: 10 },
-      fixedrange: true
+      fixedrange: false
     };
     layout.shapes = [
       {
@@ -1314,8 +1315,15 @@ function renderChart(ticker, candles, indicators, sourceLabel, sessionLabel){
 
   Plotly.newPlot(container, traces, layout, {
     responsive: true,
-    displayModeBar: false,
-    scrollZoom: false
+    displayModeBar: true,
+    scrollZoom: true,
+    doubleClick: "reset",
+    modeBarButtonsToRemove: [
+      "select2d",
+      "lasso2d",
+      "autoScale2d",
+      "toggleSpikelines"
+    ]
   });
 }
 

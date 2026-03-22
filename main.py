@@ -524,6 +524,46 @@ def fetch_twelve_data_candles(symbol, tf):
     return candles
 
 
+def search_symbols(query):
+    api_key = get_twelve_data_api_key()
+    if not api_key or len(query.strip()) < 1:
+        return []
+
+    try:
+        response = requests.get(
+            f"{TWELVE_DATA_BASE_URL}/symbol_search",
+            params={
+                "apikey": api_key,
+                "symbol": query.strip(),
+                "outputsize": 8,
+                "show_plan": "false"
+            },
+            timeout=15
+        )
+        response.raise_for_status()
+        payload = response.json()
+        matches = payload.get("data") or []
+        results = []
+
+        for item in matches:
+            symbol = (item.get("symbol") or "").strip()
+            name = (item.get("instrument_name") or item.get("name") or "").strip()
+            exchange = (item.get("exchange") or "").strip()
+            country = (item.get("country") or "").strip()
+            if symbol and name:
+                results.append({
+                    "symbol": symbol,
+                    "name": name,
+                    "exchange": exchange,
+                    "country": country
+                })
+
+        return results
+    except Exception as exc:
+        print("Symbol search error:", exc)
+        return []
+
+
 def fetch_and_cache_candles(symbol, tf):
     cache_key = f"{symbol}:{tf}"
     cached_candles = get_cache_entry(candle_cache, cache_key, CANDLE_CACHE_TTL)
@@ -1066,6 +1106,15 @@ def watchlist_data():
             snapshots.append(snapshot)
 
     return jsonify(snapshots)
+
+
+@app.route("/search-symbols")
+def search_symbols_route():
+    query = request.args.get("q", "").strip()
+    if not query:
+        return jsonify([])
+
+    return jsonify(search_symbols(query))
 
 
 @app.route("/app-state", methods=["GET", "POST"])

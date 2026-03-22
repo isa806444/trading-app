@@ -1,6 +1,6 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, request, send_from_directory, session, has_request_context
 from flask_cors import CORS
 import hashlib
 import json
@@ -10,6 +10,7 @@ import psycopg2
 import requests
 import time
 from urllib.parse import quote_plus
+from werkzeug.security import check_password_hash, generate_password_hash
 from xml.etree import ElementTree
 
 app = Flask(__name__, static_folder="static")
@@ -24,12 +25,14 @@ QUOTE_CACHE_TTL = 60
 CANDLE_CACHE_TTL = 120
 INDICATOR_CACHE_TTL = 900
 NEWS_CACHE_TTL = 900
+EVENTS_CACHE_TTL = 1800
 DEMO_TIMEZONE = ZoneInfo("America/New_York")
 
 quote_cache = {}
 candle_cache = {}
 database_enabled = False
 news_cache = {}
+events_cache = {}
 
 
 # =========================
@@ -57,6 +60,9 @@ def load_env_file():
 
 
 load_env_file()
+app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "trading-app-dev-secret")
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_HTTPONLY"] = True
 
 
 def get_twelve_data_api_key():
@@ -106,6 +112,28 @@ def initialize_database():
                     )
                     """
                 )
+                cursor.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS users (
+                        id SERIAL PRIMARY KEY,
+                        email TEXT NOT NULL UNIQUE,
+                        display_name TEXT NOT NULL,
+                        password_hash TEXT NOT NULL,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                    """
+                )
+                cursor.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS user_state (
+                        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                        state_key TEXT NOT NULL,
+                        state_value JSONB NOT NULL DEFAULT '[]'::jsonb,
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        PRIMARY KEY (user_id, state_key)
+                    )
+                    """
+                )
         conn.close()
         database_enabled = True
     except Exception as exc:
@@ -113,16 +141,34 @@ def initialize_database():
         database_enabled = False
 
 
-def load_state_list(state_key, fallback=None):
-    if database_enabled:
+def get_current_user_id():
+    if not has_request_context():
+        return None
+    raw_user_id = session.get("user_id")
+    if raw_user_id is None:
+        return None
+    try:
+        return int(raw_user_id)
+    except (TypeError, ValueError):
+        return None
+
+
+def normalize_email(value):
+    return str(value or "").strip().lower()
+
+
+def load_state_list(state_key, fallback=None, user_id=None):
+    current_user_id = user_id if user_id is not None else get_current_user_id()
+
+    if database_enabled and current_user_id:
         try:
             conn = get_db_connection()
             if conn:
                 with conn:
                     with conn.cursor() as cursor:
                         cursor.execute(
-                            "SELECT state_value FROM app_state WHERE state_key = %s",
-                            (state_key,)
+                            "SELECT state_value FROM user_state WHERE user_id = %s AND state_key = %s",
+                            (current_user_id, state_key)
                         )
                         row = cursor.fetchone()
                         if row and isinstance(row[0], list):
@@ -135,10 +181,11 @@ def load_state_list(state_key, fallback=None):
     return fallback() if fallback else []
 
 
-def save_state_list(state_key, data, fallback=None):
+def save_state_list(state_key, data, fallback=None, user_id=None):
     cleaned = data if isinstance(data, list) else []
+    current_user_id = user_id if user_id is not None else get_current_user_id()
 
-    if database_enabled:
+    if database_enabled and current_user_id:
         try:
             conn = get_db_connection()
             if conn:
@@ -146,14 +193,14 @@ def save_state_list(state_key, data, fallback=None):
                     with conn.cursor() as cursor:
                         cursor.execute(
                             """
-                            INSERT INTO app_state (state_key, state_value, updated_at)
-                            VALUES (%s, %s::jsonb, NOW())
-                            ON CONFLICT (state_key)
+                            INSERT INTO user_state (user_id, state_key, state_value, updated_at)
+                            VALUES (%s, %s, %s::jsonb, NOW())
+                            ON CONFLICT (user_id, state_key)
                             DO UPDATE SET
                                 state_value = EXCLUDED.state_value,
                                 updated_at = NOW()
                             """,
-                            (state_key, json.dumps(cleaned))
+                            (current_user_id, state_key, json.dumps(cleaned))
                         )
                 conn.close()
                 return
@@ -243,6 +290,125 @@ def initialize_market_cache():
 
 initialize_database()
 initialize_market_cache()
+
+
+# =========================
+# AUTH
+# =========================
+
+def get_user_by_email(email):
+    normalized = normalize_email(email)
+    if not normalized or not database_enabled:
+        return None
+
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return None
+        with conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT id, email, display_name, password_hash, created_at FROM users WHERE email = %s",
+                    (normalized,)
+                )
+                row = cursor.fetchone()
+        conn.close()
+        if not row:
+            return None
+        return {
+            "id": row[0],
+            "email": row[1],
+            "display_name": row[2],
+            "password_hash": row[3],
+            "created_at": row[4].isoformat() if row[4] else None
+        }
+    except Exception as exc:
+        print("User lookup failed:", exc)
+        return None
+
+
+def get_user_by_id(user_id):
+    if not user_id or not database_enabled:
+        return None
+
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return None
+        with conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT id, email, display_name, created_at FROM users WHERE id = %s",
+                    (user_id,)
+                )
+                row = cursor.fetchone()
+        conn.close()
+        if not row:
+            return None
+        return {
+            "id": row[0],
+            "email": row[1],
+            "display_name": row[2],
+            "created_at": row[3].isoformat() if row[3] else None
+        }
+    except Exception as exc:
+        print("User load by id failed:", exc)
+        return None
+
+
+def get_current_user():
+    return get_user_by_id(get_current_user_id())
+
+
+def create_user(email, password, display_name):
+    normalized = normalize_email(email)
+    clean_name = str(display_name or "").strip() or normalized.split("@")[0]
+    if not normalized or "@" not in normalized:
+        return None, "Enter a valid email address."
+    if len(password or "") < 8:
+        return None, "Password must be at least 8 characters."
+    if not database_enabled:
+        return None, "User accounts are unavailable right now."
+    if get_user_by_email(normalized):
+        return None, "An account with that email already exists."
+
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return None, "User accounts are unavailable right now."
+        with conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO users (email, display_name, password_hash)
+                    VALUES (%s, %s, %s)
+                    RETURNING id, email, display_name, created_at
+                    """,
+                    (normalized, clean_name, generate_password_hash(password))
+                )
+                row = cursor.fetchone()
+        conn.close()
+        return {
+            "id": row[0],
+            "email": row[1],
+            "display_name": row[2],
+            "created_at": row[3].isoformat() if row[3] else None
+        }, None
+    except Exception as exc:
+        print("Create user failed:", exc)
+        return None, "Could not create the account right now."
+
+
+def authenticate_user(email, password):
+    user = get_user_by_email(email)
+    if not user or not check_password_hash(user["password_hash"], password or ""):
+        return None
+    return {
+        "id": user["id"],
+        "email": user["email"],
+        "display_name": user["display_name"],
+        "created_at": user["created_at"]
+    }
 
 
 # =========================
@@ -457,6 +623,157 @@ def fetch_stock_news(symbol, change):
             "driver": "No fresh headlines were available for this ticker just now.",
             "articles": []
         }
+
+
+def parse_event_datetime(value):
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+
+    if raw.startswith("/Date(") and raw.endswith(")/"):
+        digits = "".join(ch for ch in raw if ch.isdigit())
+        if digits:
+            return datetime.fromtimestamp(int(digits) / 1000, tz=DEMO_TIMEZONE)
+
+    cleaned = raw.replace("Z", "+00:00")
+    try:
+        dt = datetime.fromisoformat(cleaned)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=DEMO_TIMEZONE)
+        return dt.astimezone(DEMO_TIMEZONE)
+    except ValueError:
+        pass
+
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%a, %d %b %Y %H:%M:%S %Z"):
+        try:
+            dt = datetime.strptime(raw, fmt)
+            return dt.replace(tzinfo=DEMO_TIMEZONE)
+        except ValueError:
+            continue
+
+    return None
+
+
+def format_event_dt(dt):
+    if not dt:
+        return None
+    return dt.astimezone(DEMO_TIMEZONE).isoformat()
+
+
+def fetch_earnings_dates(symbol):
+    cache_key = f"earnings:{symbol}"
+    cached = get_cache_entry(events_cache, cache_key, EVENTS_CACHE_TTL)
+    if cached and not cached["stale"]:
+        return cached["data"]
+
+    try:
+        response = requests.get(
+            f"https://query1.finance.yahoo.com/v10/finance/quoteSummary/{symbol}",
+            params={"modules": "calendarEvents,earningsTrend"},
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=15
+        )
+        response.raise_for_status()
+        payload = response.json()
+        result = ((payload.get("quoteSummary") or {}).get("result") or [None])[0] or {}
+        calendar_events = result.get("calendarEvents") or {}
+        earnings_block = calendar_events.get("earnings") or {}
+        raw_dates = earnings_block.get("earningsDate") or []
+        normalized_dates = []
+
+        for item in raw_dates:
+            if isinstance(item, dict):
+                if item.get("raw"):
+                    dt = datetime.fromtimestamp(item["raw"], tz=DEMO_TIMEZONE)
+                else:
+                    dt = parse_event_datetime(item.get("fmt"))
+            else:
+                dt = parse_event_datetime(item)
+            if dt:
+                normalized_dates.append(dt)
+
+        normalized_dates.sort()
+        now = datetime.now(tz=DEMO_TIMEZONE)
+        next_date = next((dt for dt in normalized_dates if dt >= now), None)
+        most_recent = None
+        for dt in normalized_dates:
+            if dt <= now:
+                most_recent = dt
+
+        trend = ((result.get("earningsTrend") or {}).get("trend") or [{}])[0]
+        payload = {
+            "next_earnings_date": format_event_dt(next_date),
+            "recent_earnings_date": format_event_dt(most_recent),
+            "eps_estimate": trend.get("epsEstimate"),
+            "revenue_estimate": trend.get("revenueEstimate"),
+            "source": "Yahoo Finance"
+        }
+        set_cache_entry(events_cache, cache_key, payload)
+        return payload
+    except Exception as exc:
+        print("Earnings date fetch error:", exc)
+        if cached:
+            return cached["data"]
+        return {
+            "next_earnings_date": None,
+            "recent_earnings_date": None,
+            "eps_estimate": None,
+            "revenue_estimate": None,
+            "source": "Unavailable"
+        }
+
+
+def fetch_economic_calendar():
+    cache_key = "economic_calendar:us"
+    cached = get_cache_entry(events_cache, cache_key, EVENTS_CACHE_TTL)
+    if cached and not cached["stale"]:
+        return cached["data"]
+
+    try:
+        response = requests.get(
+            "https://api.tradingeconomics.com/calendar",
+            params={
+                "c": "guest:guest",
+                "country": "United States"
+            },
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=20
+        )
+        response.raise_for_status()
+        payload = response.json()
+        now = datetime.now(tz=DEMO_TIMEZONE)
+        events = []
+
+        for item in payload if isinstance(payload, list) else []:
+            dt = parse_event_datetime(item.get("Date"))
+            if not dt or dt < now:
+                continue
+            events.append({
+                "date": format_event_dt(dt),
+                "event": item.get("Event") or item.get("Category") or "Economic release",
+                "category": item.get("Category") or "Macro",
+                "importance": item.get("Importance") or item.get("ImportanceLevel") or "",
+                "actual": item.get("Actual"),
+                "forecast": item.get("Forecast"),
+                "previous": item.get("Previous")
+            })
+
+        events.sort(key=lambda item: item["date"] or "")
+        result = events[:8]
+        set_cache_entry(events_cache, cache_key, result)
+        return result
+    except Exception as exc:
+        print("Economic calendar fetch error:", exc)
+        if cached:
+            return cached["data"]
+        return []
+
+
+def fetch_market_events(symbol):
+    return {
+        "earnings": fetch_earnings_dates(symbol),
+        "economic_calendar": fetch_economic_calendar()
+    }
 
 
 def get_quote_from_candles(symbol, preferred_source="cache"):
@@ -845,6 +1162,7 @@ def analyze_strategy(symbol, strategy):
     resistance = round(price * 1.01, 2)
     trade_signal = build_trade_signal(change, bias, strategy, signal_candles)
     news = fetch_stock_news(symbol, change)
+    events = fetch_market_events(symbol)
 
     if strategy == "scalp":
         entry = round(price * 1.001, 2)
@@ -899,6 +1217,7 @@ def analyze_strategy(symbol, strategy):
         },
         "summary": summary,
         "news": news,
+        "events": events,
         "indicators": {
             "trade_signal": trade_signal
         }
@@ -962,6 +1281,56 @@ def save_alerts(data):
 @app.route("/")
 def home():
     return send_from_directory("static", "index.html")
+
+
+@app.route("/auth/status")
+def auth_status():
+    user = get_current_user()
+    return jsonify({
+        "database_enabled": database_enabled,
+        "authenticated": bool(user),
+        "user": user
+    })
+
+
+@app.route("/auth/signup", methods=["POST"])
+def auth_signup():
+    payload = request.get_json(silent=True) or {}
+    user, error = create_user(
+        payload.get("email"),
+        payload.get("password"),
+        payload.get("display_name")
+    )
+    if error:
+        return jsonify({"error": error}), 400
+
+    session["user_id"] = user["id"]
+    return jsonify({
+        "ok": True,
+        "authenticated": True,
+        "user": user
+    })
+
+
+@app.route("/auth/login", methods=["POST"])
+def auth_login():
+    payload = request.get_json(silent=True) or {}
+    user = authenticate_user(payload.get("email"), payload.get("password"))
+    if not user:
+        return jsonify({"error": "Email or password was incorrect."}), 401
+
+    session["user_id"] = user["id"]
+    return jsonify({
+        "ok": True,
+        "authenticated": True,
+        "user": user
+    })
+
+
+@app.route("/auth/logout", methods=["POST"])
+def auth_logout():
+    session.pop("user_id", None)
+    return jsonify({"ok": True, "authenticated": False})
 
 
 @app.route("/analyze")
@@ -1081,9 +1450,13 @@ def search_symbols_route():
 
 @app.route("/app-state", methods=["GET", "POST"])
 def app_state():
+    current_user = get_current_user()
+
     if request.method == "GET":
         return jsonify({
             "database_enabled": database_enabled,
+            "authenticated": bool(current_user),
+            "user": current_user,
             "watchlist": load_watchlist(),
             "paper_positions": load_paper_positions(),
             "paper_history": load_paper_history(),
@@ -1111,7 +1484,9 @@ def app_state():
 
     return jsonify({
         "ok": True,
-        "database_enabled": database_enabled
+        "database_enabled": database_enabled,
+        "authenticated": bool(current_user),
+        "user": current_user
     })
 
 

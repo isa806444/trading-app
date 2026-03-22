@@ -158,6 +158,40 @@ body {
   font-size:12px;
 }
 
+.indicator-toggle-bar {
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+  margin-top:12px;
+}
+
+.event-grid {
+  display:grid;
+  grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));
+  gap:10px;
+  margin-top:10px;
+}
+
+.event-card {
+  border:1px solid var(--line);
+  border-radius:16px;
+  padding:14px;
+  background:rgba(12, 23, 41, 0.92);
+}
+
+.event-name {
+  color:var(--text);
+  font-size:14px;
+  font-weight:700;
+}
+
+.event-meta {
+  margin-top:6px;
+  color:var(--muted);
+  font-size:13px;
+  line-height:1.45;
+}
+
 .search-wrap {
   position:relative;
   flex:1;
@@ -166,7 +200,94 @@ body {
 .page-tools {
   display:flex;
   justify-content:flex-end;
+  align-items:center;
+  gap:10px;
   margin-bottom:10px;
+}
+
+.page-tool-group {
+  display:flex;
+  align-items:center;
+  gap:10px;
+  flex-wrap:wrap;
+}
+
+.auth-summary {
+  color:var(--muted);
+  font-size:13px;
+}
+
+.auth-btn,
+.logout-btn {
+  background:rgba(12, 23, 41, 0.92);
+  color:#e2e8f0;
+  border-color:var(--line);
+}
+
+.logout-btn {
+  background:#172033;
+}
+
+.modal-backdrop {
+  position:fixed;
+  inset:0;
+  background:rgba(2, 6, 23, 0.68);
+  display:none;
+  align-items:center;
+  justify-content:center;
+  padding:18px;
+  z-index:40;
+}
+
+.modal-backdrop.open {
+  display:flex;
+}
+
+.auth-modal {
+  width:min(100%, 420px);
+  border:1px solid var(--line);
+  border-radius:22px;
+  background:linear-gradient(180deg, rgba(16, 29, 52, 0.98), rgba(10, 22, 40, 0.98));
+  box-shadow:0 24px 60px rgba(2, 6, 23, 0.45);
+  padding:20px;
+}
+
+.auth-tabs {
+  display:flex;
+  gap:8px;
+  margin:14px 0;
+}
+
+.auth-tabs button,
+.indicator-toggle {
+  background:rgba(12, 23, 41, 0.92);
+  border-color:var(--line);
+  color:var(--muted);
+}
+
+.auth-tabs button.active,
+.indicator-toggle.active {
+  background:linear-gradient(180deg, #16304d, #11233b);
+  border-color:#335176;
+  color:var(--text);
+}
+
+.auth-form {
+  display:grid;
+  gap:10px;
+}
+
+.auth-actions {
+  display:flex;
+  gap:10px;
+  justify-content:flex-end;
+  margin-top:14px;
+}
+
+.ghost-btn {
+  background:transparent;
+  border-color:var(--line);
+  color:var(--muted);
 }
 
 .market-bar, .chart-bar {
@@ -767,6 +888,10 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
   font-size:14px;
 }
 
+.hidden {
+  display:none !important;
+}
+
 .view-panel.hidden {
   display:none;
 }
@@ -941,6 +1066,10 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
   color:var(--text);
 }
 
+.paper-note {
+  min-width:180px;
+}
+
 .paper-btn {
   font-weight:700;
 }
@@ -967,6 +1096,45 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
   margin-top:14px;
   border-top:1px solid var(--line);
   padding-top:12px;
+}
+
+.equity-chart {
+  width:100%;
+  height:260px;
+  border:1px solid var(--line);
+  border-radius:16px;
+  overflow:hidden;
+  background:#08101d;
+  margin:12px 0 14px;
+}
+
+.journal-list {
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+  margin-top:12px;
+}
+
+.journal-item {
+  border:1px solid var(--line);
+  border-radius:14px;
+  padding:12px;
+  background:rgba(12, 23, 41, 0.92);
+}
+
+.journal-top {
+  display:flex;
+  justify-content:space-between;
+  gap:10px;
+  align-items:flex-start;
+  flex-wrap:wrap;
+}
+
+.journal-note {
+  margin-top:8px;
+  color:#d7e2f0;
+  font-size:13px;
+  line-height:1.45;
 }
 
 .alerts-panel {
@@ -1152,7 +1320,12 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
 <div class="container">
 
   <div class="page-tools">
-    <button class="watch-toggle" onclick="openWatchlist()">Watchlist</button>
+    <div class="page-tool-group">
+      <div id="authSummary" class="auth-summary">Using local mode</div>
+      <button id="authBtn" class="auth-btn" onclick="openAuthModal()">Sign In</button>
+      <button id="logoutBtn" class="logout-btn hidden" onclick="logoutUser()">Logout</button>
+      <button class="watch-toggle" onclick="openWatchlist()">Watchlist</button>
+    </div>
   </div>
 
   <div id="marketView" class="view-panel">
@@ -1251,6 +1424,7 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
     <button data-preset="momentum">Momentum Preset</button>
     <button data-preset="mean">Mean Reversion</button>
   </div>
+  <div id="indicatorToggleBar" class="indicator-toggle-bar"></div>
   </div>
 
   <details id="messagesPanel" class="messages-panel details-panel">
@@ -1270,6 +1444,7 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
     <div class="paper-summary" id="portfolioContextSummary">No ticker analyzed yet.</div>
     <div class="paper-controls">
       <input id="paperQty" class="paper-qty" type="number" min="1" step="1" value="1" />
+      <input id="paperNote" class="paper-qty paper-note" type="text" maxlength="140" placeholder="Optional trade note" />
       <button class="paper-btn buy" onclick="addPaperTrade('BUY')">Paper Buy</button>
       <button class="paper-btn sell" onclick="addPaperTrade('SELL')">Paper Sell</button>
     </div>
@@ -1282,8 +1457,10 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
       </div>
     </div>
     <div class="paper-summary" id="paperSummary">No open paper positions yet.</div>
+    <div id="equityChart" class="equity-chart"></div>
     <div class="paper-list" id="paperPositions"></div>
     <div class="paper-history" id="paperHistory"></div>
+    <div id="tradeJournal" class="journal-list"></div>
   </div>
   </div>
 
@@ -1302,6 +1479,27 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
   <div id="watchlist"></div>
 </div>
 
+<div id="authModal" class="modal-backdrop" onclick="closeAuthModal(event)">
+  <div class="auth-modal" onclick="event.stopPropagation()">
+    <div class="section-kicker">Account</div>
+    <div class="section-title">Keep your trading data tied to you</div>
+    <div class="section-copy">Sign in to sync your watchlist, paper trades, alerts, and history across devices with your own account.</div>
+    <div class="auth-tabs">
+      <button id="loginTab" class="active" onclick="setAuthMode('login')">Sign In</button>
+      <button id="signupTab" onclick="setAuthMode('signup')">Create Account</button>
+    </div>
+    <div class="auth-form">
+      <input id="authName" type="text" placeholder="Display name" class="hidden" />
+      <input id="authEmail" type="email" placeholder="Email address" />
+      <input id="authPassword" type="password" placeholder="Password" />
+    </div>
+    <div class="auth-actions">
+      <button class="ghost-btn" onclick="closeAuthModal()">Close</button>
+      <button id="authSubmitBtn" class="analyze-btn" onclick="submitAuth()">Sign In</button>
+    </div>
+  </div>
+</div>
+
 <script>
 let strategy = "day";
 let timeframe = "5m";
@@ -1311,10 +1509,20 @@ let watchlistData = [];
 let isLoading = false;
 let indicatorPreset = "trend";
 let currentView = "market";
+let authMode = "login";
+let currentUser = null;
+let lastChartState = null;
+let indicatorVisibility = {
+  ema9: true,
+  ema20: true,
+  vwap: true,
+  rsi: false
+};
 const WATCHLIST_STORAGE_KEY = "trading-app-watchlist";
 const PAPER_POSITIONS_STORAGE_KEY = "trading-app-paper-positions";
 const PAPER_HISTORY_STORAGE_KEY = "trading-app-paper-history";
 const ALERTS_STORAGE_KEY = "trading-app-alerts";
+const STARTING_EQUITY = 10000;
 let paperPositions = [];
 let paperHistory = [];
 let alerts = [];
@@ -1366,6 +1574,161 @@ function renderMarketEmptyState(title="Search a stock or company name to begin."
       </div>
     </div>
   `;
+}
+
+function setAuthMode(mode){
+  authMode = mode === "signup" ? "signup" : "login";
+  document.getElementById("loginTab").classList.toggle("active", authMode === "login");
+  document.getElementById("signupTab").classList.toggle("active", authMode === "signup");
+  document.getElementById("authName").classList.toggle("hidden", authMode !== "signup");
+  document.getElementById("authSubmitBtn").innerText = authMode === "signup" ? "Create Account" : "Sign In";
+}
+
+function openAuthModal(){
+  document.getElementById("authModal").classList.add("open");
+}
+
+function closeAuthModal(event){
+  if(event && event.target && event.target.id !== "authModal"){
+    return;
+  }
+  document.getElementById("authModal").classList.remove("open");
+}
+
+function renderAuthState(){
+  const summary = document.getElementById("authSummary");
+  const authBtn = document.getElementById("authBtn");
+  const logoutBtn = document.getElementById("logoutBtn");
+
+  if(currentUser){
+    summary.innerText = `Signed in as ${currentUser.display_name || currentUser.email}`;
+    authBtn.classList.add("hidden");
+    logoutBtn.classList.remove("hidden");
+  }else{
+    summary.innerText = "Using local mode";
+    authBtn.classList.remove("hidden");
+    logoutBtn.classList.add("hidden");
+  }
+}
+
+async function refreshAuthStatus(){
+  try{
+    const res = await fetch("/auth/status");
+    const payload = await res.json();
+    currentUser = payload.authenticated ? payload.user : null;
+    serverStateEnabled = !!payload.database_enabled && !!payload.authenticated;
+    renderAuthState();
+  }catch(err){
+    console.log("Auth status load failed", err);
+    currentUser = null;
+    serverStateEnabled = false;
+    renderAuthState();
+  }
+}
+
+async function submitAuth(){
+  const email = document.getElementById("authEmail").value.trim();
+  const password = document.getElementById("authPassword").value;
+  const displayName = document.getElementById("authName").value.trim();
+  const endpoint = authMode === "signup" ? "/auth/signup" : "/auth/login";
+
+  try{
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email,
+        password,
+        display_name: displayName
+      })
+    });
+    const payload = await res.json();
+    if(!res.ok || payload.error){
+      setStatus(payload.error || "Could not sign you in.", "warning");
+      return;
+    }
+
+    currentUser = payload.user;
+    serverStateEnabled = true;
+    renderAuthState();
+    closeAuthModal();
+    await loadRemoteState();
+    await loadWatchlistData();
+    renderWatch();
+    renderPaperPositions();
+    renderAlerts();
+    setStatus(authMode === "signup" ? "Account created and synced." : "Signed in and synced.", "ok");
+  }catch(err){
+    console.log("Auth submit failed", err);
+    setStatus("Could not complete that account request right now.", "warning");
+  }
+}
+
+async function logoutUser(){
+  try{
+    await fetch("/auth/logout", { method: "POST" });
+  }catch(err){
+    console.log("Logout failed", err);
+  }
+  currentUser = null;
+  serverStateEnabled = false;
+  watchlist = loadLocalWatchlist();
+  loadPaperPositions();
+  loadPaperHistory();
+  loadAlerts();
+  await loadWatchlistData();
+  renderWatch();
+  renderPaperPositions();
+  renderAlerts();
+  renderAuthState();
+  setStatus("Signed out. The app is back in local mode on this device.", "ok");
+}
+
+function applyIndicatorPreset(preset){
+  indicatorPreset = preset;
+  if(preset === "trend"){
+    indicatorVisibility = { ema9: true, ema20: true, vwap: true, rsi: false };
+  }else if(preset === "momentum"){
+    indicatorVisibility = { ema9: true, ema20: true, vwap: false, rsi: true };
+  }else{
+    indicatorVisibility = { ema9: false, ema20: true, vwap: true, rsi: true };
+  }
+  renderIndicatorToggles();
+}
+
+function renderIndicatorToggles(){
+  const container = document.getElementById("indicatorToggleBar");
+  if(!container){
+    return;
+  }
+  const items = [
+    { key: "ema9", label: "EMA 9" },
+    { key: "ema20", label: "EMA 20" },
+    { key: "vwap", label: "VWAP" },
+    { key: "rsi", label: "RSI 14" }
+  ];
+  container.innerHTML = items.map(item => `
+    <button class="indicator-toggle ${indicatorVisibility[item.key] ? "active" : ""}" onclick="toggleIndicator('${item.key}')">${item.label}</button>
+  `).join("");
+}
+
+function toggleIndicator(key){
+  indicatorVisibility[key] = !indicatorVisibility[key];
+  renderIndicatorToggles();
+  renderCurrentChart();
+}
+
+function renderCurrentChart(){
+  if(!lastChartState){
+    return;
+  }
+  renderChart(
+    lastChartState.ticker,
+    lastChartState.candles,
+    lastChartState.indicators,
+    lastChartState.sourceLabel,
+    lastChartState.sessionLabel
+  );
 }
 
 function setLastUpdated(message){
@@ -1493,7 +1856,7 @@ function mergeObjectsById(...lists){
 }
 
 async function saveRemoteState(){
-  if(!serverStateEnabled){
+  if(!serverStateEnabled || !currentUser){
     return;
   }
 
@@ -1517,7 +1880,9 @@ async function loadRemoteState(){
   try{
     const res = await fetch("/app-state");
     const payload = await res.json();
-    serverStateEnabled = !!payload.database_enabled;
+    currentUser = payload.authenticated ? payload.user : currentUser;
+    serverStateEnabled = !!payload.database_enabled && !!payload.authenticated;
+    renderAuthState();
 
     if(!serverStateEnabled){
       return;
@@ -1627,6 +1992,53 @@ function renderTradeSignal(signal){
         ` : ""}
       </div>
     </div>
+  `;
+}
+
+function formatLongDate(value){
+  if(!value){
+    return "Not available yet";
+  }
+  const dt = new Date(value);
+  if(Number.isNaN(dt.getTime())){
+    return value;
+  }
+  return dt.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  });
+}
+
+function renderEventsSection(events){
+  if(!events){
+    return "";
+  }
+
+  const earnings = events.earnings || {};
+  const calendar = Array.isArray(events.economic_calendar) ? events.economic_calendar.slice(0, 4) : [];
+
+  return `
+    <details class="details-panel">
+      <summary>Market Events</summary>
+      <div class="details-body">
+        <div class="event-grid">
+          <div class="event-card">
+            <div class="indicator-name">Next Earnings</div>
+            <div class="event-name">${formatLongDate(earnings.next_earnings_date)}</div>
+            <div class="event-meta">Recent earnings: ${formatLongDate(earnings.recent_earnings_date)}</div>
+            <div class="event-meta">Source: ${earnings.source || "Unavailable"}</div>
+          </div>
+          <div class="event-card">
+            <div class="indicator-name">Upcoming Macro</div>
+            ${calendar.length ? calendar.map(item => `
+              <div class="event-meta"><strong>${item.event}</strong><br>${formatLongDate(item.date)}</div>
+            `).join("") : '<div class="event-meta">Upcoming United States calendar events are unavailable right now.</div>'}
+          </div>
+        </div>
+      </div>
+    </details>
   `;
 }
 
@@ -1778,6 +2190,7 @@ function setLoadingState(loading){
 }
 
 function showChartMessage(message){
+  lastChartState = null;
   setChartMeta(lastTicker, "No chart loaded");
   setSessionBadge("Closed");
   document.getElementById("chart").innerHTML = `
@@ -1804,6 +2217,7 @@ function buildLineTrace(xValues, yValues, name, color, width=2, axis="y"){
 function renderChart(ticker, candles, indicators, sourceLabel, sessionLabel){
   const container = document.getElementById("chart");
   container.innerHTML = "";
+  lastChartState = { ticker, candles, indicators, sourceLabel, sessionLabel };
   setChartMeta(ticker, sourceLabel);
   setSessionBadge(sessionLabel || "Closed");
   const etLabels = candles.map(c => formatEtLabel(c.time));
@@ -1840,17 +2254,17 @@ function renderChart(ticker, candles, indicators, sourceLabel, sessionLabel){
     yaxis: "y"
   }];
 
-  if(indicators?.ema9?.length && indicatorPreset !== "mean"){
+  if(indicators?.ema9?.length && indicatorVisibility.ema9){
     traces.push(buildLineTrace(xValues, indicators.ema9, "EMA 9", "#f59e0b", 2));
   }
-  if(indicators?.ema20?.length){
+  if(indicators?.ema20?.length && indicatorVisibility.ema20){
     traces.push(buildLineTrace(xValues, indicators.ema20, "EMA 20", "#60a5fa", 2));
   }
-  if(indicators?.vwap?.length && indicatorPreset !== "momentum"){
+  if(indicators?.vwap?.length && indicatorVisibility.vwap){
     traces.push(buildLineTrace(xValues, indicators.vwap, "VWAP", "#fb923c", 2));
   }
 
-  const hasRsi = indicatorPreset !== "trend" && indicators?.rsi14?.some(v => v !== null && v !== undefined);
+  const hasRsi = indicatorVisibility.rsi && indicators?.rsi14?.some(v => v !== null && v !== undefined);
   if(hasRsi){
     traces.push(buildLineTrace(xValues, indicators.rsi14, "RSI 14", "#c084fc", 2, "y2"));
   }
@@ -2033,6 +2447,84 @@ function renderAnalyticsCard(label, value, tone=""){
   `;
 }
 
+function renderEquityCurve(){
+  const container = document.getElementById("equityChart");
+  if(!container){
+    return;
+  }
+
+  const ordered = [...paperHistory].sort((a, b) => new Date(a.closedAt) - new Date(b.closedAt));
+  let equity = STARTING_EQUITY;
+  const xValues = ["Start"];
+  const yValues = [equity];
+
+  ordered.forEach((item, index) => {
+    equity += Number(item.realized || 0);
+    xValues.push(item.closedAt ? formatLongDate(item.closedAt) : `Trade ${index + 1}`);
+    yValues.push(Number(equity.toFixed(2)));
+  });
+
+  Plotly.newPlot(container, [{
+    x: xValues,
+    y: yValues,
+    type: "scatter",
+    mode: "lines+markers",
+    line: { color: "#34d399", width: 3, shape: "spline" },
+    marker: { size: 6, color: "#34d399" },
+    hovertemplate: "Point: %{x}<br>Equity: $%{y:.2f}<extra></extra>"
+  }], {
+    paper_bgcolor: "#08101d",
+    plot_bgcolor: "#08101d",
+    margin: { l: 24, r: 18, t: 18, b: 42 },
+    font: { color: "#94a3b8" },
+    xaxis: { gridcolor: "#1e293b", automargin: true },
+    yaxis: { gridcolor: "#1e293b", automargin: true, tickprefix: "$" }
+  }, {
+    responsive: true,
+    displayModeBar: false
+  });
+}
+
+function renderTradeJournal(){
+  const container = document.getElementById("tradeJournal");
+  if(!container){
+    return;
+  }
+
+  if(!paperHistory.length){
+    container.innerHTML = `
+      <details class="details-panel">
+        <summary>Trade Journal</summary>
+        <div class="details-body">
+          <div class="paper-empty">Closed trades with notes, timing, and realized P&L will appear here.</div>
+        </div>
+      </details>
+    `;
+    return;
+  }
+
+  container.innerHTML = `
+    <details class="details-panel">
+      <summary>Trade Journal</summary>
+      <div class="details-body">
+        ${paperHistory.slice(0, 12).map(item => `
+          <div class="journal-item">
+            <div class="journal-top">
+              <div>
+                <div class="paper-symbol">${item.ticker} | ${item.side}</div>
+                <div class="paper-details">Opened ${formatLongDate(item.openedAt)} | Closed ${formatLongDate(item.closedAt)}</div>
+              </div>
+              <div class="paper-details ${item.realized >= 0 ? "up" : "down"}">${formatMoney(item.realized)}</div>
+            </div>
+            <div class="paper-details">Qty ${item.qty} | Entry $${item.entry.toFixed(2)} | Exit $${item.exit.toFixed(2)}</div>
+            ${item.note ? `<div class="journal-note">${item.note}</div>` : ""}
+          </div>
+        `).join("")}
+      </div>
+    </details>
+  `;
+}
+
 function renderPaperPositions(){
   const summary = document.getElementById("paperSummary");
   const list = document.getElementById("paperPositions");
@@ -2042,13 +2534,19 @@ function renderPaperPositions(){
 
   let realizedPnl = 0;
   let winningTrades = 0;
+  let grossWins = 0;
+  let grossLosses = 0;
   paperHistory.forEach(item => {
     const value = Number(item.realized || 0);
     realizedPnl += value;
     if(value > 0){
       winningTrades += 1;
+      grossWins += value;
+    }else if(value < 0){
+      grossLosses += Math.abs(value);
     }
   });
+  const profitFactor = grossLosses ? (grossWins / grossLosses).toFixed(2) : (grossWins ? "Inf" : "0.00");
 
   if(!paperPositions.length){
     summary.innerText = "No open paper positions yet. Use the market page to analyze a ticker first, then place a paper trade here.";
@@ -2058,6 +2556,7 @@ function renderPaperPositions(){
         ${renderAnalyticsCard("Realized P&L", formatMoney(realizedPnl), realizedPnl >= 0 ? "up" : "down")}
         ${renderAnalyticsCard("Win Rate", paperHistory.length ? `${Math.round((winningTrades / paperHistory.length) * 100)}%` : "0%")}
         ${renderAnalyticsCard("Open Trades", "0")}
+        ${renderAnalyticsCard("Profit Factor", profitFactor)}
       </div>
       <div class="paper-empty">Analyze a ticker on the market page, then use Paper Buy or Paper Sell here to simulate the position cleanly.</div>
     `;
@@ -2108,6 +2607,7 @@ function renderPaperPositions(){
         ${renderAnalyticsCard("Long Exposure", `$${longExposure.toFixed(2)}`)}
         ${renderAnalyticsCard("Short Exposure", `$${shortExposure.toFixed(2)}`)}
         ${renderAnalyticsCard("Open Trades", String(paperPositions.length))}
+        ${renderAnalyticsCard("Profit Factor", profitFactor)}
       </div>
       <div class="paper-section-title">Open Positions</div>
       ${openMarkup}
@@ -2148,6 +2648,9 @@ function renderPaperPositions(){
       </details>
     `;
   }
+
+  renderEquityCurve();
+  renderTradeJournal();
 }
 
 function addPaperTrade(side){
@@ -2156,7 +2659,9 @@ function addPaperTrade(side){
     return;
   }
   const qtyInput = document.getElementById("paperQty");
+  const noteInput = document.getElementById("paperNote");
   const qty = Math.max(1, Number(qtyInput?.value || 1));
+  const note = (noteInput?.value || "").trim();
 
   paperPositions = [
     {
@@ -2165,6 +2670,7 @@ function addPaperTrade(side){
       side,
       qty,
       entry: Number(latestQuotes[lastTicker]),
+      note,
       openedAt: new Date().toISOString()
     },
     ...paperPositions
@@ -2172,6 +2678,9 @@ function addPaperTrade(side){
   savePaperPositions();
   saveRemoteState();
   renderPaperPositions();
+  if(noteInput){
+    noteInput.value = "";
+  }
 }
 
 function closePaperPosition(id){
@@ -2338,10 +2847,10 @@ document.addEventListener("click", (e)=>{
   }
 
   if(e.target.dataset.preset){
-    indicatorPreset = e.target.dataset.preset;
+    applyIndicatorPreset(e.target.dataset.preset);
     document.querySelectorAll("#presetBar button").forEach(b=>b.classList.remove("active"));
     e.target.classList.add("active");
-    if(lastTicker) loadCandles(lastTicker);
+    renderCurrentChart();
   }
 });
 
@@ -2623,6 +3132,7 @@ async function analyze(sym){
           <div class="indicator-meta">Targets: ${d.plan.targets.join(", ")}</div>
         </div>
 
+        ${renderEventsSection(d.events)}
         ${renderNewsSection(d.news)}
 
         <div class="section">
@@ -2730,17 +3240,24 @@ function renderAlerts(){
   });
 }
 
-loadPaperPositions();
-loadPaperHistory();
-loadAlerts();
-renderPaperPositions();
-renderAlerts();
-renderMarketEmptyState();
-setOnboardingVisible(true);
-showChartMessage("Search for a ticker, then click Analyze to load the chart.");
-renderPortfolioContext();
-switchView("market");
-loadWatchlist();
+async function initializeApp(){
+  setAuthMode("login");
+  renderIndicatorToggles();
+  loadPaperPositions();
+  loadPaperHistory();
+  loadAlerts();
+  await refreshAuthStatus();
+  renderPaperPositions();
+  renderAlerts();
+  renderMarketEmptyState();
+  setOnboardingVisible(true);
+  showChartMessage("Search for a ticker, then click Analyze to load the chart.");
+  renderPortfolioContext();
+  switchView("market");
+  await loadWatchlist();
+}
+
+initializeApp();
 </script>
 
 </body>

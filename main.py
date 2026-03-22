@@ -27,6 +27,20 @@ INDICATOR_CACHE_TTL = 900
 NEWS_CACHE_TTL = 900
 EVENTS_CACHE_TTL = 1800
 DEMO_TIMEZONE = ZoneInfo("America/New_York")
+STATIC_US_MACRO_EVENTS = [
+    ("2026-04-03T08:30:00-04:00", "Employment Situation", "March 2026"),
+    ("2026-04-10T08:30:00-04:00", "Consumer Price Index", "March 2026"),
+    ("2026-04-14T08:30:00-04:00", "Producer Price Index", "March 2026"),
+    ("2026-05-08T08:30:00-04:00", "Employment Situation", "April 2026"),
+    ("2026-05-12T08:30:00-04:00", "Consumer Price Index", "April 2026"),
+    ("2026-05-13T08:30:00-04:00", "Producer Price Index", "April 2026"),
+    ("2026-06-05T08:30:00-04:00", "Employment Situation", "May 2026"),
+    ("2026-06-10T08:30:00-04:00", "Consumer Price Index", "May 2026"),
+    ("2026-06-11T08:30:00-04:00", "Producer Price Index", "May 2026"),
+    ("2026-07-02T08:30:00-04:00", "Employment Situation", "June 2026"),
+    ("2026-07-14T08:30:00-04:00", "Consumer Price Index", "June 2026"),
+    ("2026-07-15T08:30:00-04:00", "Producer Price Index", "June 2026"),
+]
 
 quote_cache = {}
 candle_cache = {}
@@ -667,31 +681,20 @@ def fetch_earnings_dates(symbol):
         return cached["data"]
 
     try:
+        api_key = get_twelve_data_api_key()
+        if not api_key:
+            raise ValueError("Missing Twelve Data API key for earnings")
+
         response = requests.get(
-            f"https://query1.finance.yahoo.com/v10/finance/quoteSummary/{symbol}",
-            params={"modules": "calendarEvents,earningsTrend"},
-            headers={"User-Agent": "Mozilla/5.0"},
+            f"{TWELVE_DATA_BASE_URL}/earnings",
+            params={"symbol": symbol, "apikey": api_key},
             timeout=15
         )
         response.raise_for_status()
         payload = response.json()
-        result = ((payload.get("quoteSummary") or {}).get("result") or [None])[0] or {}
-        calendar_events = result.get("calendarEvents") or {}
-        earnings_block = calendar_events.get("earnings") or {}
-        raw_dates = earnings_block.get("earningsDate") or []
-        normalized_dates = []
-
-        for item in raw_dates:
-            if isinstance(item, dict):
-                if item.get("raw"):
-                    dt = datetime.fromtimestamp(item["raw"], tz=DEMO_TIMEZONE)
-                else:
-                    dt = parse_event_datetime(item.get("fmt"))
-            else:
-                dt = parse_event_datetime(item)
-            if dt:
-                normalized_dates.append(dt)
-
+        earnings = payload.get("earnings") or []
+        normalized_dates = [parse_event_datetime(item.get("date")) for item in earnings if isinstance(item, dict)]
+        normalized_dates = [dt for dt in normalized_dates if dt]
         normalized_dates.sort()
         now = datetime.now(tz=DEMO_TIMEZONE)
         next_date = next((dt for dt in normalized_dates if dt >= now), None)
@@ -700,13 +703,13 @@ def fetch_earnings_dates(symbol):
             if dt <= now:
                 most_recent = dt
 
-        trend = ((result.get("earningsTrend") or {}).get("trend") or [{}])[0]
+        next_row = next((item for item in earnings if parse_event_datetime(item.get("date")) == next_date), None) if next_date else None
         payload = {
             "next_earnings_date": format_event_dt(next_date),
             "recent_earnings_date": format_event_dt(most_recent),
-            "eps_estimate": trend.get("epsEstimate"),
-            "revenue_estimate": trend.get("revenueEstimate"),
-            "source": "Yahoo Finance"
+            "eps_estimate": next_row.get("eps_estimate") if isinstance(next_row, dict) else None,
+            "revenue_estimate": None,
+            "source": "Twelve Data"
         }
         set_cache_entry(events_cache, cache_key, payload)
         return payload
@@ -730,36 +733,25 @@ def fetch_economic_calendar():
         return cached["data"]
 
     try:
-        response = requests.get(
-            "https://api.tradingeconomics.com/calendar",
-            params={
-                "c": "guest:guest",
-                "country": "United States"
-            },
-            headers={"User-Agent": "Mozilla/5.0"},
-            timeout=20
-        )
-        response.raise_for_status()
-        payload = response.json()
         now = datetime.now(tz=DEMO_TIMEZONE)
-        events = []
-
-        for item in payload if isinstance(payload, list) else []:
-            dt = parse_event_datetime(item.get("Date"))
+        upcoming = []
+        for raw_date, event_name, reference in STATIC_US_MACRO_EVENTS:
+            dt = parse_event_datetime(raw_date)
             if not dt or dt < now:
                 continue
-            events.append({
+            upcoming.append({
                 "date": format_event_dt(dt),
-                "event": item.get("Event") or item.get("Category") or "Economic release",
-                "category": item.get("Category") or "Macro",
-                "importance": item.get("Importance") or item.get("ImportanceLevel") or "",
-                "actual": item.get("Actual"),
-                "forecast": item.get("Forecast"),
-                "previous": item.get("Previous")
+                "event": event_name,
+                "category": "US Macro",
+                "importance": "High",
+                "reference": reference,
+                "actual": None,
+                "forecast": None,
+                "previous": None,
+                "source": "BLS"
             })
-
-        events.sort(key=lambda item: item["date"] or "")
-        result = events[:8]
+        upcoming.sort(key=lambda item: item["date"] or "")
+        result = upcoming[:8]
         set_cache_entry(events_cache, cache_key, result)
         return result
     except Exception as exc:

@@ -828,6 +828,7 @@ def analyze_strategy(symbol, strategy):
     open_price = d["open"]
     signal_candles = candle_result["candles"] if candle_result and candle_result["candles"] else build_demo_candles(symbol, "5m")
 
+    dollar_change = round(price - open_price, 2)
     change = round(((price - open_price) / open_price) * 100, 2)
     bias = "Bullish" if change > 0 else "Bearish" if change < 0 else "Neutral"
     support = round(price * 0.99, 2)
@@ -870,6 +871,7 @@ def analyze_strategy(symbol, strategy):
     return {
         "ticker": symbol,
         "price": price,
+        "dollar_change": dollar_change,
         "change": change,
         "bias": bias,
         "data_source": market["source"],

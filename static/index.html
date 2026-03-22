@@ -2005,7 +2005,7 @@ async function analyze(sym){
           <div class="price">$${d.price}</div>
           <div class="change-pill ${d.change>=0?'up':'down'}">
             <span class="trend-arrow">${getTrendArrow(d.change)}</span>
-            <span>${d.change>=0?'+':''}${d.change}%</span>
+            <span>${d.dollar_change>=0?'+':''}$${Math.abs(d.dollar_change).toFixed(2)} | ${d.change>=0?'+':''}${d.change}%</span>
           </div>
         </div>
 

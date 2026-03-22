@@ -490,6 +490,22 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
   color:var(--text);
 }
 
+.portfolio-context {
+  margin-bottom:14px;
+  padding:16px;
+  border:1px solid var(--line);
+  border-radius:16px;
+  background:rgba(12, 23, 41, 0.92);
+}
+
+.portfolio-context-grid {
+  display:flex;
+  align-items:flex-end;
+  justify-content:space-between;
+  gap:12px;
+  flex-wrap:wrap;
+}
+
 .paper-panel {
   margin-top:18px;
   padding:18px;
@@ -763,6 +779,7 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
     <button class="watch-toggle" onclick="openWatchlist()">Watchlist</button>
   </div>
 
+  <div id="marketView" class="view-panel">
   <div class="top">
     <input id="ticker" placeholder="Search ticker"/>
     <button class="analyze-btn" onclick="analyze()">Analyze</button>
@@ -783,8 +800,6 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
     <button data-s="momentum">Momentum</button>
     <button data-s="mean">Mean</button>
   </div>
-
-  <div id="marketView" class="view-panel">
   <div id="result"></div>
   <div id="status"></div>
 
@@ -824,6 +839,16 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
   </div>
 
   <div id="portfolioView" class="view-panel hidden">
+  <div class="portfolio-context" id="portfolioContext">
+    <div class="paper-title">Current Market Context</div>
+    <div class="paper-subtitle">Analyze a ticker on the market page and it will show up here.</div>
+    <div class="paper-summary" id="portfolioContextSummary">No ticker analyzed yet.</div>
+    <div class="paper-controls">
+      <input id="paperQty" class="paper-qty" type="number" min="1" step="1" value="1" />
+      <button class="paper-btn buy" onclick="addPaperTrade('BUY')">Paper Buy</button>
+      <button class="paper-btn sell" onclick="addPaperTrade('SELL')">Paper Sell</button>
+    </div>
+  </div>
   <div class="paper-panel">
     <div class="paper-head">
       <div>
@@ -870,6 +895,7 @@ let paperHistory = [];
 let alerts = [];
 const latestQuotes = {};
 let serverStateEnabled = false;
+let latestAnalyzedSnapshot = null;
 const intradayEtFormatter = new Intl.DateTimeFormat("en-US", {
   timeZone: "America/New_York",
   month: "numeric",
@@ -1201,11 +1227,6 @@ function renderNewsSection(news){
 
 function renderPaperActions(ticker){
   return `
-    <div class="paper-controls">
-      <input id="paperQty" class="paper-qty" type="number" min="1" step="1" value="1" />
-      <button class="paper-btn buy" onclick="addPaperTrade('BUY')">Paper Buy</button>
-      <button class="paper-btn sell" onclick="addPaperTrade('SELL')">Paper Sell</button>
-    </div>
     <div class="alert-controls">
       <select id="alertDirection" class="alert-direction">
         <option value="above">Alert Above</option>
@@ -1233,6 +1254,27 @@ function switchView(view){
   document.getElementById("portfolioView").classList.toggle("hidden", view !== "portfolio");
   document.getElementById("marketNav").classList.toggle("active", view === "market");
   document.getElementById("portfolioNav").classList.toggle("active", view === "portfolio");
+}
+
+function renderPortfolioContext(){
+  const summary = document.getElementById("portfolioContextSummary");
+  if(!latestAnalyzedSnapshot){
+    summary.innerText = "No ticker analyzed yet.";
+    return;
+  }
+
+  summary.innerHTML = `
+    <div class="portfolio-context-grid">
+      <div>
+        <div class="ticker-label">${latestAnalyzedSnapshot.ticker}</div>
+        <div class="price">$${latestAnalyzedSnapshot.price}</div>
+      </div>
+      <div class="change-pill ${latestAnalyzedSnapshot.change >= 0 ? "up" : "down"}">
+        <span class="trend-arrow">${getTrendArrow(latestAnalyzedSnapshot.change)}</span>
+        <span>${latestAnalyzedSnapshot.dollarChange >= 0 ? "+" : ""}$${Math.abs(latestAnalyzedSnapshot.dollarChange).toFixed(2)} | ${latestAnalyzedSnapshot.change >= 0 ? "+" : ""}${latestAnalyzedSnapshot.change}%</span>
+      </div>
+    </div>
+  `;
 }
 
 function manualRefresh(){
@@ -2048,8 +2090,15 @@ async function analyze(sym){
     }
 
     latestQuotes[t] = d.price;
+    latestAnalyzedSnapshot = {
+      ticker: d.ticker,
+      price: d.price,
+      dollarChange: d.dollar_change,
+      change: d.change
+    };
     checkAlerts();
     renderAlerts();
+    renderPortfolioContext();
 
     document.getElementById("result").innerHTML = `
       <div class="card">
@@ -2155,6 +2204,7 @@ loadAlerts();
 renderPaperPositions();
 renderAlerts();
 showChartMessage("Search for a ticker, then click Analyze to load the chart.");
+renderPortfolioContext();
 switchView("market");
 loadWatchlist();
 </script>

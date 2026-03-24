@@ -500,13 +500,116 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
   box-shadow:none;
 }
 
+.market-stack {
+  display:grid;
+  gap:18px;
+}
+
+.market-stack > * {
+  min-width:0;
+}
+
+.price-card-grid {
+  display:grid;
+  grid-template-columns:minmax(0, 1.2fr) minmax(280px, 0.8fr);
+  gap:18px;
+  align-items:start;
+}
+
+.signal-column,
+.plan-column {
+  display:grid;
+  gap:14px;
+}
+
+.chart-shell {
+  border:1px solid var(--line);
+  border-radius:24px;
+  overflow:hidden;
+  background:linear-gradient(180deg, rgba(16, 29, 52, 0.96), rgba(8, 18, 34, 0.98));
+  box-shadow:0 22px 50px rgba(2, 6, 23, 0.28);
+}
+
+.chart-tool-row {
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:12px;
+  flex-wrap:wrap;
+}
+
+.chart-tool-actions {
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+}
+
+.chart-tool-btn {
+  background:rgba(12, 23, 41, 0.92);
+  border-color:var(--line);
+  color:var(--muted);
+}
+
+.chart-tool-btn.active {
+  background:linear-gradient(180deg, #16304d, #11233b);
+  border-color:#335176;
+  color:var(--text);
+}
+
 .insights-shell {
   margin-top:18px;
 }
 
 .insights-grid {
   display:grid;
+  grid-template-columns:repeat(auto-fit, minmax(280px, 1fr));
   gap:18px;
+}
+
+.insight-card {
+  border:1px solid var(--line);
+  border-radius:22px;
+  background:linear-gradient(180deg, rgba(16, 29, 52, 0.98), rgba(10, 22, 40, 0.98));
+  box-shadow:0 18px 44px rgba(2, 6, 23, 0.22);
+}
+
+.market-pulse-card {
+  padding:18px;
+}
+
+.pulse-grid {
+  display:grid;
+  grid-template-columns:repeat(auto-fit, minmax(180px, 1fr));
+  gap:10px;
+  margin-top:12px;
+}
+
+.pulse-item {
+  border:1px solid rgba(51, 81, 118, 0.5);
+  border-radius:18px;
+  padding:14px;
+  background:rgba(9, 18, 33, 0.7);
+}
+
+.pulse-title {
+  color:var(--muted);
+  font-size:12px;
+  text-transform:uppercase;
+  letter-spacing:0.08em;
+}
+
+.pulse-value {
+  margin-top:8px;
+  color:var(--text);
+  font-size:24px;
+  font-weight:700;
+}
+
+.pulse-meta {
+  margin-top:6px;
+  color:var(--muted);
+  font-size:13px;
+  line-height:1.45;
 }
 
 .empty-state {
@@ -811,6 +914,34 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
   margin-bottom:12px;
 }
 
+.watch-subhead {
+  display:grid;
+  gap:8px;
+  margin-bottom:12px;
+}
+
+.watch-toolbar {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+}
+
+.watch-stats {
+  color:var(--muted);
+  font-size:13px;
+}
+
+.watch-sort {
+  width:auto;
+  min-width:140px;
+  padding:10px 12px;
+  border-radius:12px;
+  border:1px solid var(--line);
+  background:rgba(12, 23, 41, 0.92);
+  color:var(--text);
+}
+
 .watch-toggle {
   background:rgba(12, 23, 41, 0.92);
   color:#e2e8f0;
@@ -865,6 +996,25 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
   align-items:center;
   justify-content:space-between;
   gap:10px;
+}
+
+.watch-meta-row {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex-wrap:wrap;
+}
+
+.watch-mini-badge {
+  display:inline-flex;
+  align-items:center;
+  padding:4px 8px;
+  border-radius:999px;
+  font-size:11px;
+  font-weight:700;
+  border:1px solid var(--line);
+  background:rgba(12, 23, 41, 0.92);
+  color:#d7e2f0;
 }
 
 .watch-copy {
@@ -984,6 +1134,18 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
   margin-bottom:10px;
 }
 
+.portfolio-grid {
+  display:grid;
+  grid-template-columns:minmax(0, 1.1fr) minmax(260px, 0.9fr);
+  gap:18px;
+  margin-top:14px;
+}
+
+.portfolio-side {
+  display:grid;
+  gap:18px;
+}
+
 .analytics-grid {
   display:grid;
   grid-template-columns:repeat(auto-fit, minmax(140px, 1fr));
@@ -1009,6 +1171,12 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
   margin-top:8px;
   font-size:24px;
   font-weight:700;
+}
+
+.analytics-subvalue {
+  margin-top:6px;
+  color:var(--muted);
+  font-size:12px;
 }
 
 .paper-section-title {
@@ -1124,6 +1292,27 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
   margin-top:12px;
 }
 
+.trade-notes-card {
+  border:1px solid var(--line);
+  border-radius:18px;
+  padding:16px;
+  background:rgba(12, 23, 41, 0.92);
+}
+
+.metric-list {
+  display:grid;
+  gap:10px;
+}
+
+.metric-row {
+  display:flex;
+  justify-content:space-between;
+  gap:12px;
+  align-items:center;
+  color:#dbe7f5;
+  font-size:14px;
+}
+
 .journal-item {
   border:1px solid var(--line);
   border-radius:14px;
@@ -1171,11 +1360,20 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
 }
 
 .alert-controls {
-  display:flex;
-  align-items:center;
+  display:grid;
+  grid-template-columns:repeat(auto-fit, minmax(140px, 1fr));
   gap:8px;
-  flex-wrap:wrap;
   margin-top:12px;
+}
+
+.alert-direction {
+  width:100%;
+}
+
+.alert-helper {
+  margin-top:8px;
+  color:var(--muted);
+  font-size:12px;
 }
 
 .alert-direction {
@@ -1287,6 +1485,17 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
     padding:16px;
   }
 
+  .price-card-grid,
+  .portfolio-grid {
+    grid-template-columns:1fr;
+  }
+
+  .chart-tool-row,
+  .watch-toolbar {
+    flex-direction:column;
+    align-items:stretch;
+  }
+
   .strategy,
   .tf-bar,
   .preset-bar {
@@ -1337,7 +1546,7 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
     </div>
   </div>
 
-  <div id="marketView" class="view-panel">
+  <div id="marketView" class="view-panel market-stack">
   <div id="heroCard" class="hero-card">
     <div class="hero-eyebrow">Trading Workspace</div>
     <div class="hero-title">Search a stock or company name to begin.</div>
@@ -1402,39 +1611,48 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
   <div id="result" class="result-shell"></div>
   <div id="status"></div>
 
-  <div class="chart-bar">
-    <div>
-      <div class="chart-title" id="chartTitle">Price Chart</div>
-      <div class="chart-meta-row">
-        <div class="chart-meta" id="chartMeta">Waiting for ticker selection</div>
-        <div class="session-badge closed" id="sessionBadge">Closed</div>
-      </div>
-    </div>
-  </div>
-  <div id="chart"></div>
-
-  <div class="chart-controls">
-    <div class="section-head">
+  <div class="chart-shell">
+    <div class="chart-bar">
       <div>
-        <div class="section-kicker">Chart Controls</div>
-        <div class="section-title">Tune the view without reloading the whole page</div>
+        <div class="chart-title" id="chartTitle">Price Chart</div>
+        <div class="chart-meta-row">
+          <div class="chart-meta" id="chartMeta">Waiting for ticker selection</div>
+          <div class="session-badge closed" id="sessionBadge">Closed</div>
+        </div>
       </div>
-      <div class="helper-pill">Pinch or scroll to zoom, double-click to reset</div>
     </div>
-    <div class="helper-text">Timeframe changes update the candles. Presets change which indicator overlays are visible so the chart stays easier to read.</div>
-  <div class="tf-bar" id="tfBar">
-    <button data-tf="1m">1M</button>
-    <button data-tf="5m" class="active">5M</button>
-    <button data-tf="15m">15M</button>
+    <div id="chart"></div>
+
+    <div class="chart-controls">
+      <div class="section-head">
+        <div>
+          <div class="section-kicker">Chart Controls</div>
+          <div class="section-title">Tune the view without reloading the whole page</div>
+        </div>
+        <div class="helper-pill">Pinch or scroll to zoom, double-click to reset</div>
+      </div>
+      <div class="chart-tool-row">
+        <div class="helper-text">Timeframe changes update the candles. Presets shape the overlays, and the drawing toolbar lets you mark your own levels.</div>
+        <div class="chart-tool-actions">
+          <button id="zoneToggleBtn" class="chart-tool-btn active" onclick="toggleChartZones()">Hide Zones</button>
+        </div>
+      </div>
+      <div class="tf-bar" id="tfBar">
+        <button data-tf="1m">1M</button>
+        <button data-tf="5m" class="active">5M</button>
+        <button data-tf="15m">15M</button>
+      </div>
+
+      <div class="preset-bar" id="presetBar">
+        <button data-preset="trend" class="active">Trend Preset</button>
+        <button data-preset="momentum">Momentum Preset</button>
+        <button data-preset="mean">Mean Reversion</button>
+      </div>
+      <div id="indicatorToggleBar" class="indicator-toggle-bar"></div>
+    </div>
   </div>
 
-  <div class="preset-bar" id="presetBar">
-    <button data-preset="trend" class="active">Trend Preset</button>
-    <button data-preset="momentum">Momentum Preset</button>
-    <button data-preset="mean">Mean Reversion</button>
-  </div>
-  <div id="indicatorToggleBar" class="indicator-toggle-bar"></div>
-  </div>
+  <div id="marketPulse" class="insight-card market-pulse-card"></div>
 
   <div id="marketInsights" class="insights-shell"></div>
 
@@ -1487,6 +1705,18 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
     <h4>Watchlist</h4>
     <button class="watch-close" onclick="closeWatchlist()">Close</button>
   </div>
+  <div class="watch-subhead">
+    <div id="watchStats" class="watch-stats">No saved tickers yet.</div>
+    <div class="watch-toolbar">
+      <div class="helper-pill">Sort saved names fast</div>
+      <select id="watchSort" class="watch-sort" onchange="setWatchSort(this.value)">
+        <option value="change_desc">Biggest Movers</option>
+        <option value="change_asc">Laggers</option>
+        <option value="symbol_asc">Ticker A-Z</option>
+        <option value="price_desc">Highest Price</option>
+      </select>
+    </div>
+  </div>
   <div id="watchlist"></div>
 </div>
 
@@ -1524,11 +1754,17 @@ let authMode = "login";
 let currentUser = null;
 let lastChartState = null;
 let liveUpdateTimer = null;
+let latestAnalyzedSignal = null;
+let latestAnalyzedLevels = null;
+let watchSort = "change_desc";
 let indicatorVisibility = {
   ema9: true,
   ema20: true,
   vwap: true,
   rsi: false
+};
+let chartToolState = {
+  zones: true
 };
 const WATCHLIST_STORAGE_KEY = "trading-app-watchlist";
 const PAPER_POSITIONS_STORAGE_KEY = "trading-app-paper-positions";
@@ -1576,6 +1812,7 @@ function setOnboardingVisible(visible){
 function renderMarketEmptyState(title="Search a stock or company name to begin.", copy="You will see the latest price move, chart, signal, key levels, and recent news once a ticker is analyzed."){
     const result = document.getElementById("result");
     const insights = document.getElementById("marketInsights");
+    const pulse = document.getElementById("marketPulse");
     result.innerHTML = `
       <div class="empty-state">
         <div class="empty-title">${title}</div>
@@ -1589,6 +1826,13 @@ function renderMarketEmptyState(title="Search a stock or company name to begin."
     `;
     if(insights){
       insights.innerHTML = "";
+    }
+    if(pulse){
+      pulse.innerHTML = `
+        <div class="section-kicker">Market Pulse</div>
+        <div class="section-title">Waiting for your first live workspace view</div>
+        <div class="section-copy">Search a stock to unlock the pulse summary, chart zones, and lower insight cards.</div>
+      `;
     }
   }
 
@@ -1795,6 +2039,7 @@ function updateQuoteDisplay(price){
 
   renderPortfolioContext();
   renderPaperPositions();
+  renderMarketPulse();
 }
 
 function updateLiveChartPrice(price, timestamp){
@@ -2130,6 +2375,93 @@ function renderTradeSignal(signal){
   `;
 }
 
+function formatPercent(value){
+  const amount = Number(value || 0);
+  return `${amount >= 0 ? "+" : ""}${amount.toFixed(2)}%`;
+}
+
+function getTickerSnapshot(ticker){
+  return watchlistData.find(item => item.ticker === ticker) || null;
+}
+
+function getCurrentIndicatorSnapshot(){
+  if(!lastChartState?.candles?.length || !lastChartState?.indicators){
+    return null;
+  }
+  const candles = lastChartState.candles;
+  const indicators = lastChartState.indicators;
+  const lastIndex = candles.length - 1;
+  return {
+    price: candles[lastIndex]?.close ?? null,
+    ema9: indicators.ema9?.[lastIndex] ?? null,
+    ema20: indicators.ema20?.[lastIndex] ?? null,
+    vwap: indicators.vwap?.[lastIndex] ?? null,
+    rsi14: indicators.rsi14?.[lastIndex] ?? null
+  };
+}
+
+function getSortedWatchlistData(){
+  const rows = watchlist.map(ticker => {
+    const snapshot = getTickerSnapshot(ticker);
+    return {
+      ticker,
+      price: Number(snapshot?.price || 0),
+      change: Number(snapshot?.change || 0),
+      sparkline: snapshot?.sparkline || []
+    };
+  });
+
+  rows.sort((a, b) => {
+    if(watchSort === "change_asc") return a.change - b.change;
+    if(watchSort === "price_desc") return b.price - a.price;
+    if(watchSort === "symbol_asc") return a.ticker.localeCompare(b.ticker);
+    return Math.abs(b.change) - Math.abs(a.change) || b.change - a.change;
+  });
+
+  return rows;
+}
+
+function renderMarketPulse(){
+  const container = document.getElementById("marketPulse");
+  if(!container){
+    return;
+  }
+
+  const sorted = getSortedWatchlistData();
+  const strongest = sorted.find(item => item.change > 0);
+  const weakest = [...sorted].reverse().find(item => item.change < 0);
+  const focus = latestAnalyzedSnapshot;
+  const signal = latestAnalyzedSignal;
+
+  container.innerHTML = `
+    <div class="section-kicker">Market Pulse</div>
+    <div class="section-title">A quick read on what matters right now</div>
+    <div class="section-copy">Built from your current search, watchlist movers, and setup grading so the app feels more like a workspace than a feed.</div>
+    <div class="pulse-grid">
+      <div class="pulse-item">
+        <div class="pulse-title">Current Focus</div>
+        <div class="pulse-value">${focus ? focus.ticker : "--"}</div>
+        <div class="pulse-meta">${focus ? `${formatPercent(focus.change)} on the day` : "Analyze a ticker to anchor the page."}</div>
+      </div>
+      <div class="pulse-item">
+        <div class="pulse-title">Setup Quality</div>
+        <div class="pulse-value">${signal ? `${signal.grade} ${signal.action}` : "--"}</div>
+        <div class="pulse-meta">${signal ? (signal.reason || "No setup reason yet.") : "Setup grading appears here after analysis."}</div>
+      </div>
+      <div class="pulse-item">
+        <div class="pulse-title">Strongest Watchlist Move</div>
+        <div class="pulse-value">${strongest ? strongest.ticker : "--"}</div>
+        <div class="pulse-meta">${strongest ? `${formatPercent(strongest.change)} | $${strongest.price.toFixed(2)}` : "Add names to your watchlist to surface movers."}</div>
+      </div>
+      <div class="pulse-item">
+        <div class="pulse-title">Weakest Watchlist Move</div>
+        <div class="pulse-value">${weakest ? weakest.ticker : "--"}</div>
+        <div class="pulse-meta">${weakest ? `${formatPercent(weakest.change)} | $${weakest.price.toFixed(2)}` : "Lagging names will show here automatically."}</div>
+      </div>
+    </div>
+  `;
+}
+
 function formatLongDate(value){
   if(!value){
     return "Not available yet";
@@ -2155,7 +2487,7 @@ function renderEventsSection(events){
   const calendar = Array.isArray(events.economic_calendar) ? events.economic_calendar.slice(0, 4) : [];
 
   return `
-    <details class="details-panel">
+    <details class="details-panel insight-card">
       <summary>Market Events</summary>
       <div class="details-body">
         <div class="event-grid">
@@ -2185,7 +2517,7 @@ function renderNewsSection(news){
   const articles = Array.isArray(news.articles) ? news.articles.slice(0, 3) : [];
 
   return `
-    <details class="details-panel" ${articles.length ? "open" : ""}>
+    <details class="details-panel insight-card" ${articles.length ? "open" : ""}>
       <summary>Latest News</summary>
       <div class="details-body">
         <div class="indicator-meta">${news.driver || "No fresh headlines were available."}</div>
@@ -2205,14 +2537,56 @@ function renderNewsSection(news){
 function renderPaperActions(ticker){
   return `
     <div class="alert-controls">
-      <select id="alertDirection" class="alert-direction">
-        <option value="above">Alert Above</option>
-        <option value="below">Alert Below</option>
+      <select id="alertType" class="alert-direction" onchange="syncAlertInputs()">
+        <option value="price_above">Price Above</option>
+        <option value="price_below">Price Below</option>
+        <option value="ema9_above">Cross Above EMA 9</option>
+        <option value="ema9_below">Cross Below EMA 9</option>
+        <option value="vwap_above">Reclaim VWAP</option>
+        <option value="vwap_below">Lose VWAP</option>
+        <option value="rsi_above_70">RSI Above 70</option>
+        <option value="rsi_below_30">RSI Below 30</option>
       </select>
       <input id="alertPrice" class="paper-qty" type="number" min="0" step="0.01" value="${latestQuotes[ticker] || ""}" />
       <button class="paper-btn close" onclick="addAlertForCurrentTicker()">Add Alert</button>
     </div>
+    <div id="alertHelper" class="alert-helper">Price alerts trigger off the latest mark. Indicator alerts follow the live chart state for this ticker.</div>
   `;
+}
+
+function syncAlertInputs(){
+  const type = document.getElementById("alertType")?.value || "price_above";
+  const input = document.getElementById("alertPrice");
+  const helper = document.getElementById("alertHelper");
+  const isPriceAlert = type.startsWith("price_");
+
+  if(input){
+    input.disabled = !isPriceAlert;
+    input.style.opacity = isPriceAlert ? "1" : "0.55";
+    if(!isPriceAlert){
+      input.value = "";
+    }else if(!input.value && lastTicker && latestQuotes[lastTicker]){
+      input.value = latestQuotes[lastTicker];
+    }
+  }
+
+  if(helper){
+    helper.innerText = isPriceAlert
+      ? "Price alerts trigger off the latest mark for this ticker."
+      : "Indicator alerts trigger from the live chart state for the currently analyzed ticker.";
+  }
+}
+
+function setWatchSort(value){
+  watchSort = value || "change_desc";
+  renderWatch();
+}
+
+function toggleChartZones(){
+  chartToolState.zones = !chartToolState.zones;
+  document.getElementById("zoneToggleBtn")?.classList.toggle("active", chartToolState.zones);
+  document.getElementById("zoneToggleBtn").innerText = chartToolState.zones ? "Hide Zones" : "Show Zones";
+  renderCurrentChart();
 }
 
 function openWatchlist(){
@@ -2532,6 +2906,36 @@ function renderChart(ticker, candles, indicators, sourceLabel, sessionLabel){
     }
   };
 
+  const zoneShapes = [];
+  if(chartToolState.zones && latestAnalyzedLevels && ticker === lastTicker){
+    const support = Number(latestAnalyzedLevels.support);
+    const resistance = Number(latestAnalyzedLevels.resistance);
+    if(Number.isFinite(support)){
+      zoneShapes.push({
+        type: "line",
+        xref: "paper",
+        x0: 0,
+        x1: 1,
+        yref: "y",
+        y0: support,
+        y1: support,
+        line: { color: "#22c55e", width: 1.2, dash: "dot" }
+      });
+    }
+    if(Number.isFinite(resistance)){
+      zoneShapes.push({
+        type: "line",
+        xref: "paper",
+        x0: 0,
+        x1: 1,
+        yref: "y",
+        y0: resistance,
+        y1: resistance,
+        line: { color: "#ef4444", width: 1.2, dash: "dot" }
+      });
+    }
+  }
+
   if(hasRsi){
     layout.yaxis2 = {
       side: "right",
@@ -2573,18 +2977,27 @@ function renderChart(ticker, candles, indicators, sourceLabel, sessionLabel){
       y: 0.22,
       showarrow: false,
       font: { size: 10, color: "#94a3b8" }
-    }];
-  }
+      }];
+    }
+
+  layout.shapes = [...(layout.shapes || []), ...zoneShapes];
 
   const plotConfig = {
     responsive: true,
     displayModeBar: true,
     scrollZoom: true,
     doubleClick: "reset",
+    editable: true,
     modeBarButtonsToRemove: [
       "select2d",
       "lasso2d",
-      "autoScale2d",
+      "autoScale2d"
+    ],
+    modeBarButtonsToAdd: [
+      "drawline",
+      "drawopenpath",
+      "drawrect",
+      "eraseshape",
       "toggleSpikelines"
     ]
   };
@@ -2665,13 +3078,14 @@ function formatMoney(value){
   return `${amount >= 0 ? "+" : "-"}$${Math.abs(amount).toFixed(2)}`;
 }
 
-function renderAnalyticsCard(label, value, tone=""){
+function renderAnalyticsCard(label, value, tone="", subvalue=""){
   return `
-    <div class="analytics-card">
-      <div class="analytics-label">${label}</div>
-      <div class="analytics-value ${tone}">${value}</div>
-    </div>
-  `;
+      <div class="analytics-card">
+        <div class="analytics-label">${label}</div>
+        <div class="analytics-value ${tone}">${value}</div>
+        ${subvalue ? `<div class="analytics-subvalue">${subvalue}</div>` : ""}
+      </div>
+    `;
 }
 
 function renderEquityCurve(){
@@ -2691,19 +3105,37 @@ function renderEquityCurve(){
     yValues.push(Number(equity.toFixed(2)));
   });
 
-  Plotly.newPlot(container, [{
+  const peakValues = [];
+  let peak = yValues[0];
+  yValues.forEach(value => {
+    peak = Math.max(peak, value);
+    peakValues.push(peak);
+  });
+
+  Plotly.react(container, [{
     x: xValues,
     y: yValues,
     type: "scatter",
     mode: "lines+markers",
     line: { color: "#34d399", width: 3, shape: "spline" },
     marker: { size: 6, color: "#34d399" },
+    fill: "tozeroy",
+    fillcolor: "rgba(52, 211, 153, 0.12)",
     hovertemplate: "Point: %{x}<br>Equity: $%{y:.2f}<extra></extra>"
+  },{
+    x: xValues,
+    y: peakValues,
+    type: "scatter",
+    mode: "lines",
+    line: { color: "#60a5fa", width: 1.5, dash: "dot" },
+    hoverinfo: "skip",
+    name: "Peak Equity"
   }], {
     paper_bgcolor: "#08101d",
     plot_bgcolor: "#08101d",
     margin: { l: 24, r: 18, t: 18, b: 42 },
     font: { color: "#94a3b8" },
+    showlegend: false,
     xaxis: { gridcolor: "#1e293b", automargin: true },
     yaxis: { gridcolor: "#1e293b", automargin: true, tickprefix: "$" }
   }, {
@@ -2720,36 +3152,35 @@ function renderTradeJournal(){
 
   if(!paperHistory.length){
     container.innerHTML = `
-      <details class="details-panel">
-        <summary>Trade Journal</summary>
-        <div class="details-body">
-          <div class="paper-empty">Closed trades with notes, timing, and realized P&L will appear here.</div>
-        </div>
-      </details>
+      <div class="trade-notes-card">
+        <div class="paper-title">Trade Journal</div>
+        <div class="paper-subtitle">Closed trades with notes, timing, and realized P&L will appear here.</div>
+      </div>
     `;
     return;
   }
 
   container.innerHTML = `
-    <details class="details-panel">
-      <summary>Trade Journal</summary>
-      <div class="details-body">
-        ${paperHistory.slice(0, 12).map(item => `
-          <div class="journal-item">
-            <div class="journal-top">
-              <div>
-                <div class="paper-symbol">${item.ticker} | ${item.side}</div>
-                <div class="paper-details">Opened ${formatLongDate(item.openedAt)} | Closed ${formatLongDate(item.closedAt)}</div>
+      <div class="trade-notes-card">
+        <div class="paper-title">Trade Journal</div>
+        <div class="paper-subtitle">Your latest exits, notes, and realized outcomes.</div>
+        <div class="journal-list">
+          ${paperHistory.slice(0, 12).map(item => `
+            <div class="journal-item">
+              <div class="journal-top">
+                <div>
+                  <div class="paper-symbol">${item.ticker} | ${item.side}</div>
+                  <div class="paper-details">Opened ${formatLongDate(item.openedAt)} | Closed ${formatLongDate(item.closedAt)}</div>
+                </div>
+                <div class="paper-details ${item.realized >= 0 ? "up" : "down"}">${formatMoney(item.realized)}</div>
               </div>
-              <div class="paper-details ${item.realized >= 0 ? "up" : "down"}">${formatMoney(item.realized)}</div>
+              <div class="paper-details">Qty ${item.qty} | Entry $${item.entry.toFixed(2)} | Exit $${item.exit.toFixed(2)}</div>
+              ${item.note ? `<div class="journal-note">${item.note}</div>` : ""}
             </div>
-            <div class="paper-details">Qty ${item.qty} | Entry $${item.entry.toFixed(2)} | Exit $${item.exit.toFixed(2)}</div>
-            ${item.note ? `<div class="journal-note">${item.note}</div>` : ""}
-          </div>
-        `).join("")}
+          `).join("")}
+        </div>
       </div>
-    </details>
-  `;
+    `;
 }
 
 function renderPaperPositions(){
@@ -2763,88 +3194,106 @@ function renderPaperPositions(){
   let winningTrades = 0;
   let grossWins = 0;
   let grossLosses = 0;
+  let bestTrade = null;
+  let worstTrade = null;
+  let todayRealized = 0;
+  const todayKey = new Date().toDateString();
   paperHistory.forEach(item => {
-    const value = Number(item.realized || 0);
-    realizedPnl += value;
-    if(value > 0){
-      winningTrades += 1;
-      grossWins += value;
-    }else if(value < 0){
-      grossLosses += Math.abs(value);
-    }
-  });
-  const profitFactor = grossLosses ? (grossWins / grossLosses).toFixed(2) : (grossWins ? "Inf" : "0.00");
-
-  if(!paperPositions.length){
-    summary.innerText = "No open paper positions yet. Use the market page to analyze a ticker first, then place a paper trade here.";
-    list.innerHTML = `
-      <div class="analytics-grid">
-        ${renderAnalyticsCard("Open P&L", "$0.00")}
-        ${renderAnalyticsCard("Realized P&L", formatMoney(realizedPnl), realizedPnl >= 0 ? "up" : "down")}
-        ${renderAnalyticsCard("Win Rate", paperHistory.length ? `${Math.round((winningTrades / paperHistory.length) * 100)}%` : "0%")}
-        ${renderAnalyticsCard("Open Trades", "0")}
-        ${renderAnalyticsCard("Profit Factor", profitFactor)}
-      </div>
-      <div class="paper-empty">Analyze a ticker on the market page, then use Paper Buy or Paper Sell here to simulate the position cleanly.</div>
-    `;
-  } else {
-    let totalPnl = 0;
-    let longExposure = 0;
-    let shortExposure = 0;
-    let openMarkup = "";
-
-    paperPositions.forEach(position => {
-      const markPrice = getPaperMarkPrice(position.ticker) || position.entry;
-      const pnl = position.side === "BUY"
-        ? (markPrice - position.entry) * position.qty
-        : (position.entry - markPrice) * position.qty;
-      totalPnl += pnl;
-      const notional = markPrice * position.qty;
-      if(position.side === "BUY"){
-        longExposure += notional;
-      }else{
-        shortExposure += notional;
+      const value = Number(item.realized || 0);
+      realizedPnl += value;
+      if(new Date(item.closedAt).toDateString() === todayKey){
+        todayRealized += value;
       }
+      if(value > 0){
+        winningTrades += 1;
+        grossWins += value;
+      }else if(value < 0){
+        grossLosses += Math.abs(value);
+      }
+      if(!bestTrade || value > Number(bestTrade.realized || 0)){
+        bestTrade = item;
+      }
+      if(!worstTrade || value < Number(worstTrade.realized || 0)){
+        worstTrade = item;
+      }
+    });
+  const profitFactor = grossLosses ? (grossWins / grossLosses).toFixed(2) : (grossWins ? "Inf" : "0.00");
+  const winRate = paperHistory.length ? `${Math.round((winningTrades / paperHistory.length) * 100)}%` : "0%";
+  const averageWinner = winningTrades ? grossWins / winningTrades : 0;
+  const losingTrades = paperHistory.filter(item => Number(item.realized || 0) < 0).length;
+  const averageLoser = losingTrades ? grossLosses / losingTrades : 0;
 
-      openMarkup += `
-        <div class="paper-item">
-          <div>
-            <div class="paper-symbol">${position.ticker} | ${position.side}</div>
-            <div class="paper-details">
-              Qty ${position.qty} | Entry $${position.entry.toFixed(2)} | Mark $${markPrice.toFixed(2)}
-            </div>
-            <div class="paper-details ${pnl >= 0 ? "up" : "down"}">
-              Unrealized ${formatMoney(pnl)}
-            </div>
-          </div>
-          <div>
-            <button class="paper-btn close" onclick="closePaperPosition('${position.id}')">Close</button>
+  let totalPnl = 0;
+  let longExposure = 0;
+  let shortExposure = 0;
+  let openMarkup = "";
+
+  paperPositions.forEach(position => {
+    const markPrice = getPaperMarkPrice(position.ticker) || position.entry;
+    const pnl = position.side === "BUY"
+      ? (markPrice - position.entry) * position.qty
+      : (position.entry - markPrice) * position.qty;
+    totalPnl += pnl;
+    const notional = markPrice * position.qty;
+    if(position.side === "BUY"){
+      longExposure += notional;
+    }else{
+      shortExposure += notional;
+    }
+
+    openMarkup += `
+      <div class="paper-item">
+        <div>
+          <div class="paper-symbol">${position.ticker} | ${position.side}</div>
+          <div class="paper-details">Qty ${position.qty} | Entry $${position.entry.toFixed(2)} | Mark $${markPrice.toFixed(2)}</div>
+          <div class="paper-details ${pnl >= 0 ? "up" : "down"}">Unrealized ${formatMoney(pnl)}</div>
+        </div>
+        <div>
+          <button class="paper-btn close" onclick="closePaperPosition('${position.id}')">Close</button>
+        </div>
+      </div>
+    `;
+  });
+
+  summary.innerText = paperPositions.length
+    ? `${paperPositions.length} open position${paperPositions.length === 1 ? "" : "s"} | Shared across your devices`
+    : "No open paper positions yet. Use the market page to analyze a ticker first, then place a paper trade here.";
+
+  list.innerHTML = `
+    <div class="portfolio-grid">
+      <div>
+        <div class="analytics-grid">
+          ${renderAnalyticsCard("Open P&L", formatMoney(totalPnl), totalPnl >= 0 ? "up" : "down", "Marked to latest price")}
+          ${renderAnalyticsCard("Realized P&L", formatMoney(realizedPnl), realizedPnl >= 0 ? "up" : "down", "Closed positions only")}
+          ${renderAnalyticsCard("Daily P&L", formatMoney(todayRealized), todayRealized >= 0 ? "up" : "down", "Today's closed trades")}
+          ${renderAnalyticsCard("Win Rate", winRate, "", `${paperHistory.length} closed trades`)}
+          ${renderAnalyticsCard("Open Trades", String(paperPositions.length), "", `${paperPositions.length ? "Live positions are being marked" : "No open exposure"}`)}
+          ${renderAnalyticsCard("Profit Factor", profitFactor, "", "Gross wins / gross losses")}
+        </div>
+        <div class="paper-section-title">Open Positions</div>
+        ${openMarkup || '<div class="paper-empty">Analyze a ticker on the market page, then use Paper Buy or Paper Sell here to simulate the position cleanly.</div>'}
+      </div>
+      <div class="portfolio-side">
+        <div class="trade-notes-card">
+          <div class="paper-title">Performance Snapshot</div>
+          <div class="paper-subtitle">A faster read on quality, sizing, and recent outcomes.</div>
+          <div class="metric-list">
+            <div class="metric-row"><span>Long Exposure</span><strong>$${longExposure.toFixed(2)}</strong></div>
+            <div class="metric-row"><span>Short Exposure</span><strong>$${shortExposure.toFixed(2)}</strong></div>
+            <div class="metric-row"><span>Average Winner</span><strong class="${averageWinner >= 0 ? "up" : "down"}">${formatMoney(averageWinner)}</strong></div>
+            <div class="metric-row"><span>Average Loser</span><strong class="${averageLoser > 0 ? "down" : ""}">-${averageLoser.toFixed(2)}</strong></div>
+            <div class="metric-row"><span>Best Trade</span><strong class="${bestTrade && Number(bestTrade.realized) >= 0 ? "up" : ""}">${bestTrade ? `${bestTrade.ticker} ${formatMoney(bestTrade.realized)}` : "--"}</strong></div>
+            <div class="metric-row"><span>Worst Trade</span><strong class="${worstTrade && Number(worstTrade.realized) < 0 ? "down" : ""}">${worstTrade ? `${worstTrade.ticker} ${formatMoney(worstTrade.realized)}` : "--"}</strong></div>
           </div>
         </div>
-      `;
-    });
-
-    const winRate = paperHistory.length ? `${Math.round((winningTrades / paperHistory.length) * 100)}%` : "0%";
-    summary.innerText = `${paperPositions.length} open position${paperPositions.length === 1 ? "" : "s"} | Shared across your devices`;
-    list.innerHTML = `
-      <div class="analytics-grid">
-        ${renderAnalyticsCard("Open P&L", formatMoney(totalPnl), totalPnl >= 0 ? "up" : "down")}
-        ${renderAnalyticsCard("Realized P&L", formatMoney(realizedPnl), realizedPnl >= 0 ? "up" : "down")}
-        ${renderAnalyticsCard("Win Rate", winRate)}
-        ${renderAnalyticsCard("Long Exposure", `$${longExposure.toFixed(2)}`)}
-        ${renderAnalyticsCard("Short Exposure", `$${shortExposure.toFixed(2)}`)}
-        ${renderAnalyticsCard("Open Trades", String(paperPositions.length))}
-        ${renderAnalyticsCard("Profit Factor", profitFactor)}
       </div>
-      <div class="paper-section-title">Open Positions</div>
-      ${openMarkup}
-    `;
-  }
+    </div>
+  `;
 
   if(paperHistory.length){
     const avgClosed = realizedPnl / paperHistory.length;
     history.innerHTML = `
-      <details class="details-panel">
+      <details class="details-panel" open>
         <summary>Closed Trade History</summary>
         <div class="details-body">
           <div class="analytics-grid">
@@ -2852,7 +3301,7 @@ function renderPaperPositions(){
             ${renderAnalyticsCard("Average Closed P&L", formatMoney(avgClosed), avgClosed >= 0 ? "up" : "down")}
           </div>
           <div class="alert-list">
-            ${paperHistory.slice(0, 6).map(item => `
+            ${paperHistory.slice(0, 8).map(item => `
               <div class="alert-item">
                 <div>
                   <div class="paper-symbol">${item.ticker} | ${item.side}</div>
@@ -2943,9 +3392,9 @@ function addAlertForCurrentTicker(){
     return;
   }
 
-  const direction = document.getElementById("alertDirection")?.value || "above";
+  const type = document.getElementById("alertType")?.value || "price_above";
   const target = Number(document.getElementById("alertPrice")?.value || 0);
-  if(!target){
+  if(type.startsWith("price_") && !target){
     setStatus("Enter an alert price first.", "warning");
     return;
   }
@@ -2954,8 +3403,8 @@ function addAlertForCurrentTicker(){
     {
       id: `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
       ticker: lastTicker,
-      direction,
-      target,
+      type,
+      target: type.startsWith("price_") ? target : null,
       status: "active",
       createdAt: new Date().toISOString()
     },
@@ -2984,10 +3433,38 @@ function maybeNotifyAlert(alert, markPrice){
   }
 
   if(Notification.permission === "granted"){
-    new Notification(`${alert.ticker} ${alert.direction === "above" ? "broke above" : "fell below"} $${alert.target}`, {
-      body: `Latest price: $${markPrice.toFixed(2)}`
+    new Notification(`${alert.ticker} alert triggered`, {
+      body: `${getAlertLabel(alert)} | Latest price: $${markPrice.toFixed(2)}`
     });
   }
+}
+
+function getAlertLabel(alert){
+  const type = alert.type || (alert.direction ? `price_${alert.direction}` : "price_above");
+  if(type === "price_above") return `Price above $${Number(alert.target).toFixed(2)}`;
+  if(type === "price_below") return `Price below $${Number(alert.target).toFixed(2)}`;
+  if(type === "ema9_above") return "Price crossed above EMA 9";
+  if(type === "ema9_below") return "Price crossed below EMA 9";
+  if(type === "vwap_above") return "Price reclaimed VWAP";
+  if(type === "vwap_below") return "Price lost VWAP";
+  if(type === "rsi_above_70") return "RSI moved above 70";
+  if(type === "rsi_below_30") return "RSI moved below 30";
+  return "Alert";
+}
+
+function evaluateIndicatorAlert(alert, markPrice){
+  const snapshot = getCurrentIndicatorSnapshot();
+  if(!snapshot || alert.ticker !== lastTicker){
+    return false;
+  }
+  const type = alert.type || "";
+  if(type === "ema9_above") return markPrice > snapshot.ema9;
+  if(type === "ema9_below") return markPrice < snapshot.ema9;
+  if(type === "vwap_above") return markPrice > snapshot.vwap;
+  if(type === "vwap_below") return markPrice < snapshot.vwap;
+  if(type === "rsi_above_70") return Number(snapshot.rsi14) >= 70;
+  if(type === "rsi_below_30") return Number(snapshot.rsi14) <= 30;
+  return false;
 }
 
 function checkAlerts(){
@@ -3003,9 +3480,10 @@ function checkAlerts(){
       return alert;
     }
 
-    const hit = alert.direction === "above"
-      ? markPrice >= alert.target
-      : markPrice <= alert.target;
+    const type = alert.type || (alert.direction ? `price_${alert.direction}` : "price_above");
+    const hit = type.startsWith("price_")
+      ? (type === "price_above" ? markPrice >= Number(alert.target) : markPrice <= Number(alert.target))
+      : evaluateIndicatorAlert(alert, markPrice);
 
     if(!hit){
       return alert;
@@ -3126,6 +3604,7 @@ async function loadWatchlistData(){
     });
     renderPaperPositions();
     checkAlerts();
+    renderMarketPulse();
   }catch(err){
     console.log("Watchlist data load failed", err);
     watchlistData = [];
@@ -3189,28 +3668,47 @@ function updateWatchButton(ticker){
 
 function renderWatch(){
   const el=document.getElementById("watchlist");
+  const stats = document.getElementById("watchStats");
   el.innerHTML="";
 
   if(!watchlist.length){
     el.innerHTML = '<div class="watch-empty">No saved tickers yet.</div>';
+    if(stats){
+      stats.innerText = "Add a few names to start sorting movers and laggers.";
+    }
     return;
   }
 
-  watchlist.forEach(t=>{
-    const snapshot = watchlistData.find(item => item.ticker === t);
+  const rows = getSortedWatchlistData();
+  const topMover = rows[0];
+  if(stats){
+    stats.innerText = topMover && topMover.price
+      ? `${rows.length} saved | Top mover ${topMover.ticker} ${formatPercent(topMover.change)}`
+      : `${rows.length} saved | Waiting for fresh prices`;
+  }
+
+  rows.forEach(item=>{
+    const t = item.ticker;
+    const snapshot = getTickerSnapshot(t);
     const row = document.createElement("div");
     row.className = "watch-item";
 
     const ticker = document.createElement("div");
     ticker.className = "watch-ticker";
     const sparkline = snapshot ? renderSparkline(snapshot.sparkline, snapshot.change >= 0) : "";
+    const momentumLabel = snapshot
+      ? (snapshot.change >= 2 ? "Strong" : snapshot.change <= -2 ? "Weak" : "Balanced")
+      : "Loading";
     ticker.innerHTML = `
       <div class="watch-main">
         <div class="watch-copy">
           <div class="watch-symbol">${t}</div>
-          <div class="watch-details">
-            ${snapshot ? `$${snapshot.price} ` : ""}
-            ${snapshot ? `<span class="${snapshot.change >= 0 ? "watch-change-up" : "watch-change-down"}">${snapshot.change >= 0 ? "+" : ""}${snapshot.change}%</span>` : "Loading..."}
+          <div class="watch-meta-row">
+            <div class="watch-details">
+              ${snapshot ? `$${snapshot.price} ` : ""}
+              ${snapshot ? `<span class="${snapshot.change >= 0 ? "watch-change-up" : "watch-change-down"}">${formatPercent(snapshot.change)}</span>` : "Loading..."}
+            </div>
+            <div class="watch-mini-badge">${momentumLabel}</div>
           </div>
         </div>
         ${sparkline}
@@ -3329,27 +3827,33 @@ async function analyze(sym){
       dollarChange: d.dollar_change,
       change: d.change
     };
+    latestAnalyzedSignal = d.indicators?.trade_signal || null;
+    latestAnalyzedLevels = d.levels || null;
     checkAlerts();
     renderAlerts();
     renderPortfolioContext();
+    renderMarketPulse();
     setOnboardingVisible(false);
 
     document.getElementById("result").innerHTML = `
       <div class="card">
         <div class="ticker-label">${d.ticker}</div>
-        <div class="price-row">
-          <div id="livePrice" class="price">$${d.price}</div>
-          <div id="liveChange" class="change-pill ${d.change>=0?'up':'down'}">
-            <span class="trend-arrow">${getTrendArrow(d.change)}</span>
-            <span>${d.dollar_change>=0?'+':''}$${Math.abs(d.dollar_change).toFixed(2)} | ${d.change>=0?'+':''}${d.change}%</span>
+        <div class="price-card-grid">
+          <div class="signal-column">
+            <div class="price-row">
+              <div id="livePrice" class="price">$${d.price}</div>
+              <div id="liveChange" class="change-pill ${d.change>=0?'up':'down'}">
+                <span class="trend-arrow">${getTrendArrow(d.change)}</span>
+                <span>${d.dollar_change>=0?'+':''}$${Math.abs(d.dollar_change).toFixed(2)} | ${d.change>=0?'+':''}${d.change}%</span>
+              </div>
+            </div>
+            <div id="watchAction">${getWatchButtonMarkup(d.ticker)}</div>
+            ${renderPaperActions(d.ticker)}
+          </div>
+          <div class="plan-column">
+            ${renderTradeSignal(d.indicators?.trade_signal)}
           </div>
         </div>
-
-        <div id="watchAction">${getWatchButtonMarkup(d.ticker)}</div>
-
-        ${renderPaperActions(d.ticker)}
-
-        ${renderTradeSignal(d.indicators?.trade_signal)}
 
         <div class="section">
           <div class="section-title-row">
@@ -3369,6 +3873,7 @@ async function analyze(sym){
           </div>
         </div>
       `;
+    syncAlertInputs();
 
     document.getElementById("marketInsights").innerHTML = `
       <div class="insights-grid">
@@ -3472,7 +3977,7 @@ function renderAlerts(){
     item.className = "alert-item";
     item.innerHTML = `
       <div>
-        <div class="paper-symbol">${alert.ticker} | ${alert.direction === "above" ? "Above" : "Below"} $${Number(alert.target).toFixed(2)}</div>
+        <div class="paper-symbol">${alert.ticker} | ${getAlertLabel(alert)}</div>
         <div class="paper-details">Triggered at $${Number(alert.triggeredPrice).toFixed(2)}</div>
       </div>
       <div>

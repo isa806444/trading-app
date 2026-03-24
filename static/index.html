@@ -2264,7 +2264,7 @@ function hideSuggestions(){
 }
 
 function chooseSuggestion(symbol, label){
-  document.getElementById("ticker").value = label || symbol;
+  document.getElementById("ticker").value = symbol;
   hideSuggestions();
   analyze(symbol);
 }

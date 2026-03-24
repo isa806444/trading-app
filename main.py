@@ -863,6 +863,8 @@ def search_symbols(query):
     if not api_key or len(query.strip()) < 1:
         return []
 
+    normalized_query = query.strip().upper()
+
     try:
         response = requests.get(
             f"{TWELVE_DATA_BASE_URL}/symbol_search",
@@ -879,20 +881,80 @@ def search_symbols(query):
         matches = payload.get("data") or []
         results = []
 
+        allowed_exchanges = {"NASDAQ", "NYSE", "AMEX", "ARCA"}
+
         for item in matches:
             symbol = (item.get("symbol") or "").strip()
             name = (item.get("instrument_name") or item.get("name") or "").strip()
             exchange = (item.get("exchange") or "").strip()
             country = (item.get("country") or "").strip()
-            if symbol and name:
-                results.append({
-                    "symbol": symbol,
-                    "name": name,
-                    "exchange": exchange,
-                    "country": country
-                })
+            instrument_type = str(item.get("instrument_type") or "").strip().lower()
+            normalized_symbol = symbol.upper()
+            normalized_name = name.upper()
 
-        return results
+            if not symbol or not name:
+                continue
+            if country and country.upper() not in {"USA", "UNITED STATES"}:
+                continue
+            if exchange and exchange.upper() not in allowed_exchanges:
+                continue
+            if instrument_type and instrument_type not in {"common_stock", "stock", "dr"}:
+                continue
+            if not normalized_symbol.replace(".", "").replace("-", "").isalnum():
+                continue
+
+            score = 0
+            if normalized_symbol == normalized_query:
+                score += 120
+            elif normalized_symbol.startswith(normalized_query):
+                score += 90
+            elif normalized_query in normalized_symbol:
+                score += 60
+
+            if normalized_name == normalized_query:
+                score += 110
+            elif normalized_name.startswith(normalized_query):
+                score += 85
+            elif normalized_query in normalized_name:
+                score += 50
+
+            if exchange.upper() == "NASDAQ":
+                score += 8
+            elif exchange.upper() == "NYSE":
+                score += 6
+
+            if len(normalized_symbol) <= 5:
+                score += 4
+
+            if score <= 0:
+                continue
+
+            results.append({
+                "symbol": symbol,
+                "name": name,
+                "exchange": exchange,
+                "country": country,
+                "score": score
+            })
+
+        results.sort(key=lambda item: (-item["score"], len(item["symbol"]), item["symbol"]))
+        deduped = []
+        seen_symbols = set()
+
+        for item in results:
+            if item["symbol"] in seen_symbols:
+                continue
+            seen_symbols.add(item["symbol"])
+            deduped.append({
+                "symbol": item["symbol"],
+                "name": item["name"],
+                "exchange": item["exchange"],
+                "country": item["country"]
+            })
+            if len(deduped) >= 6:
+                break
+
+        return deduped
     except Exception as exc:
         print("Symbol search error:", exc)
         return []

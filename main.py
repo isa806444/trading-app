@@ -597,6 +597,45 @@ def summarize_news_driver(change, headlines):
     return f"Possible driver today: {category}."
 
 
+def build_news_impact(headlines, earnings):
+    positive_words = {"beats", "beat", "upgrade", "surge", "record", "strong", "growth", "raises", "partnership"}
+    negative_words = {"miss", "downgrade", "cuts", "probe", "lawsuit", "recall", "weak", "drop", "warning"}
+    urgency_bonus = 0
+    next_earnings = parse_event_datetime((earnings or {}).get("next_earnings_date"))
+    if next_earnings:
+        days_until = (next_earnings.date() - datetime.now(DEMO_TIMEZONE).date()).days
+        if 0 <= days_until <= 7:
+            urgency_bonus = 1
+
+    score = urgency_bonus
+    for headline in headlines[:5]:
+        words = set(str(headline).lower().replace("-", " ").split())
+        score += len(words & positive_words)
+        score -= len(words & negative_words)
+
+    if score >= 3:
+        label = "High positive impact"
+        reason = "Headline mix is skewing bullish and could shape near-term attention."
+    elif score <= -3:
+        label = "High negative impact"
+        reason = "Headline mix is skewing bearish and may keep pressure on the name."
+    elif abs(score) >= 1:
+        label = "Moderate impact"
+        reason = "News flow is active enough to matter, but it is not one-sided."
+    else:
+        label = "Low impact"
+        reason = "Headline flow looks light or mixed right now."
+
+    if urgency_bonus:
+        reason += " Upcoming earnings are close, so reactions can be sharper."
+
+    return {
+        "score": score,
+        "label": label,
+        "reason": reason
+    }
+
+
 def fetch_stock_news(symbol, change):
     cache_key = f"news:{symbol}"
     cached = get_cache_entry(news_cache, cache_key, NEWS_CACHE_TTL)
@@ -1211,8 +1250,8 @@ def build_trade_signal(change, bias, strategy, candles):
     elif bias == "Bearish":
         bearish_confirmations.append("overall session bias is bearish")
 
-    long_score = len(bullish_confirmations)
-    short_score = len(bearish_confirmations)
+    long_score = len(bullish_confirmations) + (1 if last_close > prev_close else 0)
+    short_score = len(bearish_confirmations) + (1 if last_close < prev_close else 0)
     dominant_score = max(long_score, short_score)
     opposing_score = min(long_score, short_score)
 
@@ -1265,7 +1304,9 @@ def build_trade_signal(change, bias, strategy, candles):
         "grade": grade,
         "strength": strength,
         "confirmations": confirmations[:4],
-        "reason": reason
+        "reason": reason,
+        "score": dominant_score,
+        "confidence": min(95, 45 + (dominant_score * 10) - (opposing_score * 5))
     }
 
 
@@ -1292,6 +1333,10 @@ def analyze_strategy(symbol, strategy):
     trade_signal = build_trade_signal(change, bias, strategy, signal_candles)
     news = fetch_stock_news(symbol, change)
     events = fetch_market_events(symbol)
+    news["impact"] = build_news_impact(
+        [article.get("title", "") for article in news.get("articles", [])],
+        events.get("earnings") if isinstance(events, dict) else {}
+    )
 
     if strategy == "scalp":
         entry = round(price * 1.001, 2)

@@ -1648,6 +1648,11 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
         <button data-preset="momentum">Momentum Preset</button>
         <button data-preset="mean">Mean Reversion</button>
       </div>
+      <div class="alert-controls">
+        <input id="compareTickers" class="paper-qty paper-note" type="text" maxlength="24" placeholder="Compare tickers, ex: MSFT,NVDA" />
+        <button class="paper-btn close" onclick="applyComparison()">Compare</button>
+        <button class="ghost-btn" onclick="clearComparison()">Clear Compare</button>
+      </div>
       <div id="indicatorToggleBar" class="indicator-toggle-bar"></div>
     </div>
   </div>
@@ -1678,25 +1683,49 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
       <button class="paper-btn sell" onclick="addPaperTrade('SELL')">Paper Sell</button>
     </div>
   </div>
-  <div class="paper-panel">
-    <div class="paper-head">
-      <div>
-        <div class="paper-title">Portfolio Dashboard</div>
-        <div class="paper-subtitle">Paper trading analytics and position tracking</div>
+    <div class="paper-panel">
+      <div class="paper-head">
+        <div>
+          <div class="paper-title">Portfolio Dashboard</div>
+          <div class="paper-subtitle">Paper trading analytics and position tracking</div>
+        </div>
+        <div class="chart-tool-actions">
+          <button class="ghost-btn" onclick="exportTrades('csv')">Export CSV</button>
+          <button class="ghost-btn" onclick="exportTrades('json')">Export JSON</button>
+        </div>
       </div>
+      <div class="paper-summary" id="paperSummary">No open paper positions yet.</div>
+      <div id="equityChart" class="equity-chart"></div>
+      <div class="paper-list" id="paperPositions"></div>
+      <div class="paper-history" id="paperHistory"></div>
+      <div id="tradeJournal" class="journal-list"></div>
     </div>
-    <div class="paper-summary" id="paperSummary">No open paper positions yet.</div>
-    <div id="equityChart" class="equity-chart"></div>
-    <div class="paper-list" id="paperPositions"></div>
-    <div class="paper-history" id="paperHistory"></div>
-    <div id="tradeJournal" class="journal-list"></div>
+  </div>
+
+  <div id="scannerView" class="view-panel hidden">
+    <div class="control-card">
+      <div class="section-head">
+        <div>
+          <div class="section-kicker">Scanner</div>
+          <div class="section-title">Surface movers and setups without searching one-by-one</div>
+        </div>
+        <div class="helper-pill">Uses your watchlist first to stay lighter on API usage</div>
+      </div>
+      <div class="alert-controls">
+        <input id="scannerTickers" class="paper-qty paper-note" type="text" maxlength="80" placeholder="Optional custom list, ex: AAPL,MSFT,NVDA,TSLA" />
+        <button class="analyze-btn" onclick="runScanner()">Run Scanner</button>
+      </div>
+      <div class="helper-text">Scanner looks for strongest movers, setup grades, and quick relative strength using your current market data path.</div>
+    </div>
+    <div id="scannerResults" class="insights-shell"></div>
   </div>
   </div>
 
   <div class="bottom-nav">
-    <button id="marketNav" class="active" onclick="switchView('market')">Market</button>
-    <button id="portfolioNav" onclick="switchView('portfolio')">Portfolio</button>
-  </div>
+      <button id="marketNav" class="active" onclick="switchView('market')">Market</button>
+      <button id="portfolioNav" onclick="switchView('portfolio')">Portfolio</button>
+      <button id="scannerNav" onclick="switchView('scanner')">Scanner</button>
+    </div>
 
 </div>
 
@@ -1770,6 +1799,7 @@ const WATCHLIST_STORAGE_KEY = "trading-app-watchlist";
 const PAPER_POSITIONS_STORAGE_KEY = "trading-app-paper-positions";
 const PAPER_HISTORY_STORAGE_KEY = "trading-app-paper-history";
 const ALERTS_STORAGE_KEY = "trading-app-alerts";
+const LAYOUT_PREFS_STORAGE_KEY = "trading-app-layout-prefs";
 const STARTING_EQUITY = 10000;
 let paperPositions = [];
 let paperHistory = [];
@@ -1779,6 +1809,9 @@ let serverStateEnabled = false;
 let latestAnalyzedSnapshot = null;
 let searchSuggestions = [];
 let searchDebounce = null;
+let comparisonSymbols = [];
+let comparisonSeries = [];
+const DEFAULT_SCANNER_UNIVERSE = ["AAPL", "MSFT", "NVDA", "AMZN", "META", "TSLA", "AMD", "GOOGL"];
 const intradayEtFormatter = new Intl.DateTimeFormat("en-US", {
   timeZone: "America/New_York",
   month: "numeric",
@@ -1954,6 +1987,7 @@ function applyIndicatorPreset(preset){
     indicatorVisibility = { ema9: false, ema20: true, vwap: true, rsi: true };
   }
   renderIndicatorToggles();
+  saveLayoutPrefs();
 }
 
 function renderIndicatorToggles(){
@@ -1976,6 +2010,7 @@ function toggleIndicator(key){
   indicatorVisibility[key] = !indicatorVisibility[key];
   renderIndicatorToggles();
   renderCurrentChart();
+  saveLayoutPrefs();
 }
 
 function renderCurrentChart(){
@@ -2209,6 +2244,40 @@ function saveAlerts(){
   }
 }
 
+function saveLayoutPrefs(){
+  try{
+    localStorage.setItem(LAYOUT_PREFS_STORAGE_KEY, JSON.stringify({
+      strategy,
+      timeframe,
+      indicatorPreset,
+      indicatorVisibility,
+      currentView,
+      watchSort,
+      chartZones: chartToolState.zones,
+      comparisonSymbols
+    }));
+  }catch(err){
+    console.log("Layout prefs save failed", err);
+  }
+}
+
+function loadLayoutPrefs(){
+  try{
+    const raw = localStorage.getItem(LAYOUT_PREFS_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    if(parsed.strategy) strategy = parsed.strategy;
+    if(parsed.timeframe) timeframe = parsed.timeframe;
+    if(parsed.indicatorPreset) indicatorPreset = parsed.indicatorPreset;
+    if(parsed.indicatorVisibility) indicatorVisibility = { ...indicatorVisibility, ...parsed.indicatorVisibility };
+    if(parsed.watchSort) watchSort = parsed.watchSort;
+    if(Array.isArray(parsed.comparisonSymbols)) comparisonSymbols = parsed.comparisonSymbols.slice(0, 3);
+    if(typeof parsed.chartZones === "boolean") chartToolState.zones = parsed.chartZones;
+    if(parsed.currentView) currentView = parsed.currentView;
+  }catch(err){
+    console.log("Layout prefs load failed", err);
+  }
+}
+
 function mergeUniqueStrings(...lists){
   const merged = [];
   lists.flat().forEach(item => {
@@ -2353,16 +2422,16 @@ function renderTradeSignal(signal){
     "wait";
   const confirmations = Array.isArray(signal.confirmations) ? signal.confirmations : [];
 
-  return `
-    <div class="section">
-      <div class="section-title-row">
-        <div>Setup Grade</div>
-        <div class="helper-pill">${signal.strength || "Mixed"} conviction</div>
-      </div>
-      <div class="signal-row">
-        <div class="grade-chip ${chipClass}">${signal.grade || "C"}</div>
-        <div class="signal-chip ${chipClass}">${signal.action}</div>
-      </div>
+    return `
+      <div class="section">
+        <div class="section-title-row">
+          <div>Setup Grade</div>
+          <div class="helper-pill">${signal.strength || "Mixed"} conviction${signal.confidence ? ` | ${signal.confidence}%` : ""}</div>
+        </div>
+        <div class="signal-row">
+          <div class="grade-chip ${chipClass}">${signal.grade || "C"}</div>
+          <div class="signal-chip ${chipClass}">${signal.action}</div>
+        </div>
       <div class="signal-supporting">
         <div class="indicator-meta">${signal.reason}</div>
         ${confirmations.length ? `
@@ -2462,6 +2531,156 @@ function renderMarketPulse(){
   `;
 }
 
+async function applyComparison(){
+  const input = document.getElementById("compareTickers");
+  const raw = input?.value || "";
+  const symbols = raw.split(",").map(item => item.trim().toUpperCase()).filter(Boolean).filter(item => item !== lastTicker);
+  comparisonSymbols = [...new Set(symbols)].slice(0, 3);
+  saveLayoutPrefs();
+  await loadCandles(lastTicker);
+}
+
+async function clearComparison(){
+  comparisonSymbols = [];
+  comparisonSeries = [];
+  const input = document.getElementById("compareTickers");
+  if(input){
+    input.value = "";
+  }
+  saveLayoutPrefs();
+  renderCurrentChart();
+}
+
+async function loadComparisonSeries(){
+  comparisonSeries = [];
+  if(!lastTicker || !comparisonSymbols.length){
+    return;
+  }
+
+  const colors = ["#f97316", "#38bdf8", "#facc15"];
+  const requests = comparisonSymbols.map(async (symbol, index) => {
+    try{
+      const res = await fetch(`/candles?ticker=${symbol}&tf=${timeframe}`);
+      const payload = await res.json();
+      const candles = Array.isArray(payload.candles) ? payload.candles : [];
+      if(!candles.length){
+        return null;
+      }
+      const base = candles[0].close || 1;
+      return {
+        symbol,
+        color: colors[index % colors.length],
+        points: candles.map(candle => ({
+          x: new Date(candle.time * 1000),
+          y: Number((((candle.close / base) - 1) * 100).toFixed(2))
+        }))
+      };
+    }catch(err){
+      console.log("Comparison load failed", err);
+      return null;
+    }
+  });
+
+  comparisonSeries = (await Promise.all(requests)).filter(Boolean);
+}
+
+function buildScannerGrade(snapshot){
+  const move = Number(snapshot.change || 0);
+  if(Math.abs(move) >= 3) return { grade: "A", note: "Strong trend pressure" };
+  if(Math.abs(move) >= 1.25) return { grade: "B", note: "Tradable directional move" };
+  return { grade: "C", note: "Balanced or quiet" };
+}
+
+async function runScanner(){
+  const container = document.getElementById("scannerResults");
+  const input = document.getElementById("scannerTickers");
+  const custom = (input?.value || "").split(",").map(item => item.trim().toUpperCase()).filter(Boolean);
+  const universe = [...new Set(custom.length ? custom : (watchlist.length ? watchlist : DEFAULT_SCANNER_UNIVERSE))].slice(0, 10);
+
+  if(!universe.length){
+    container.innerHTML = '<div class="empty-state"><div class="empty-title">Scanner needs a few symbols</div><div class="empty-copy">Add names to your watchlist or type a custom list to run the scanner.</div></div>';
+    return;
+  }
+
+  container.innerHTML = '<div class="empty-state"><div class="empty-title">Scanning symbols...</div><div class="empty-copy">Pulling current snapshots and ranking movers.</div></div>';
+
+  try{
+    const params = new URLSearchParams({ tickers: universe.join(",") });
+    const res = await fetch(`/watchlist/data?${params.toString()}`);
+    const rows = await res.json();
+    rows.sort((a, b) => Math.abs(Number(b.change || 0)) - Math.abs(Number(a.change || 0)));
+
+    container.innerHTML = `
+      <div class="insights-grid">
+        ${rows.map(item => {
+          const setup = buildScannerGrade(item);
+          return `
+            <div class="insight-card market-pulse-card">
+              <div class="section-kicker">Scanner Hit</div>
+              <div class="section-title">${item.ticker}</div>
+              <div class="pulse-grid">
+                <div class="pulse-item">
+                  <div class="pulse-title">Price</div>
+                  <div class="pulse-value">$${Number(item.price || 0).toFixed(2)}</div>
+                  <div class="pulse-meta">${formatPercent(item.change || 0)} on the day</div>
+                </div>
+                <div class="pulse-item">
+                  <div class="pulse-title">Setup Grade</div>
+                  <div class="pulse-value">${setup.grade}</div>
+                  <div class="pulse-meta">${setup.note}</div>
+                </div>
+              </div>
+              <div class="chart-tool-actions" style="margin-top:12px;">
+                <button class="paper-btn close" onclick="switchView('market'); analyze('${item.ticker}')">Open ${item.ticker}</button>
+              </div>
+            </div>
+          `;
+        }).join("")}
+      </div>
+    `;
+  }catch(err){
+    console.log("Scanner failed", err);
+    container.innerHTML = '<div class="empty-state"><div class="empty-title">Scanner could not load</div><div class="empty-copy">Try again in a moment or use a smaller custom symbol list.</div></div>';
+  }
+}
+
+function exportTrades(format){
+  const payload = {
+    exported_at: new Date().toISOString(),
+    starting_equity: STARTING_EQUITY,
+    open_positions: paperPositions,
+    closed_trades: paperHistory
+  };
+
+  let blob;
+  let filename;
+  if(format === "json"){
+    blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    filename = "trading-app-portfolio.json";
+  }else{
+    const header = "ticker,side,qty,entry,exit,realized,opened_at,closed_at,note";
+    const rows = paperHistory.map(item => [
+      item.ticker,
+      item.side,
+      item.qty,
+      item.entry,
+      item.exit,
+      item.realized,
+      item.openedAt,
+      item.closedAt,
+      `"${String(item.note || "").replace(/"/g, '""')}"`
+    ].join(","));
+    blob = new Blob([[header, ...rows].join("\n")], { type: "text/csv" });
+    filename = "trading-app-portfolio.csv";
+  }
+
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
 function formatLongDate(value){
   if(!value){
     return "Not available yet";
@@ -2515,12 +2734,18 @@ function renderNewsSection(news){
   }
 
   const articles = Array.isArray(news.articles) ? news.articles.slice(0, 3) : [];
+  const impact = news.impact || null;
 
   return `
     <details class="details-panel insight-card" ${articles.length ? "open" : ""}>
       <summary>Latest News</summary>
       <div class="details-body">
         <div class="indicator-meta">${news.driver || "No fresh headlines were available."}</div>
+        ${impact ? `
+          <div class="analytics-grid" style="margin-top:12px;">
+            ${renderAnalyticsCard("News Impact", impact.label || "Mixed", impact.score >= 1 ? "up" : impact.score <= -1 ? "down" : "", impact.reason || "")}
+          </div>
+        ` : ""}
         <div class="news-list">
           ${articles.length ? articles.map(article => `
             <div class="news-item">
@@ -2603,13 +2828,16 @@ function switchView(view){
   currentView = view;
   document.getElementById("marketView").classList.toggle("hidden", view !== "market");
   document.getElementById("portfolioView").classList.toggle("hidden", view !== "portfolio");
+  document.getElementById("scannerView").classList.toggle("hidden", view !== "scanner");
   document.getElementById("marketNav").classList.toggle("active", view === "market");
   document.getElementById("portfolioNav").classList.toggle("active", view === "portfolio");
+  document.getElementById("scannerNav").classList.toggle("active", view === "scanner");
   if(view === "market"){
     startLiveUpdates();
   }else{
     stopLiveUpdates();
   }
+  saveLayoutPrefs();
 }
 
 function renderPortfolioContext(){
@@ -2859,6 +3087,22 @@ function renderChart(ticker, candles, indicators, sourceLabel, sessionLabel){
     traces.push(buildLineTrace(xValues, chartIndicators.vwap, "VWAP", "#fb923c", 2));
   }
 
+  comparisonSeries.forEach(series => {
+    if(!series?.points?.length){
+      return;
+    }
+    traces.push({
+      x: series.points.map(point => point.x),
+      y: series.points.map(point => point.y),
+      type: "scatter",
+      mode: "lines",
+      name: `${series.symbol} %`,
+      line: { color: series.color, width: 2, shape: "spline" },
+      hovertemplate: `${series.symbol}: %{y:.2f}%<extra></extra>`,
+      yaxis: hasRsi ? "y3" : "y"
+    });
+  });
+
   const hasRsi = indicatorVisibility.rsi && chartIndicators?.rsi14?.some(v => v !== null && v !== undefined);
   if(hasRsi){
     traces.push(buildLineTrace(xValues, chartIndicators.rsi14, "RSI 14", "#c084fc", 2, "y2"));
@@ -2979,6 +3223,17 @@ function renderChart(ticker, candles, indicators, sourceLabel, sessionLabel){
       font: { size: 10, color: "#94a3b8" }
       }];
     }
+
+  if(comparisonSeries.length){
+    layout.yaxis3 = {
+      side: "left",
+      overlaying: "y",
+      showgrid: false,
+      zeroline: false,
+      tickfont: { size: 10, color: "#94a3b8" },
+      title: { text: "% change", font: { size: 10, color: "#94a3b8" } }
+    };
+  }
 
   layout.shapes = [...(layout.shapes || []), ...zoneShapes];
 
@@ -3506,41 +3761,12 @@ function checkAlerts(){
   }
 }
 
-function renderAlerts(){
-  const summary = document.getElementById("alertSummary");
-  const list = document.getElementById("alertList");
-  list.innerHTML = "";
-
-  if(!alerts.length){
-    summary.innerText = "No alerts yet.";
-    list.innerHTML = '<div class="paper-empty">Create a price alert from the current ticker card.</div>';
-    return;
-  }
-
-  const active = alerts.filter(alert => alert.status === "active").length;
-  summary.innerText = `${active} active alert${active === 1 ? "" : "s"} · ${alerts.length - active} triggered`;
-
-  alerts.slice(0, 8).forEach(alert => {
-    const item = document.createElement("div");
-    item.className = "alert-item";
-    item.innerHTML = `
-      <div>
-        <div class="paper-symbol">${alert.ticker} · ${alert.direction === "above" ? "Above" : "Below"} $${Number(alert.target).toFixed(2)}</div>
-        <div class="paper-details">${alert.status === "active" ? "Active" : `Triggered at $${Number(alert.triggeredPrice).toFixed(2)}`}</div>
-      </div>
-      <div>
-        <button class="paper-btn close" onclick="removeAlert('${alert.id}')">Remove</button>
-      </div>
-    `;
-    list.appendChild(item);
-  });
-}
-
 document.addEventListener("click", (e)=>{
   if(e.target.dataset.s){
     strategy = e.target.dataset.s;
     document.querySelectorAll("#strategyBar button").forEach(b=>b.classList.remove("active"));
     e.target.classList.add("active");
+    saveLayoutPrefs();
     if(lastTicker) analyze(lastTicker);
   }
 
@@ -3548,6 +3774,7 @@ document.addEventListener("click", (e)=>{
     timeframe = e.target.dataset.tf;
     document.querySelectorAll("#tfBar button").forEach(b=>b.classList.remove("active"));
     e.target.classList.add("active");
+    saveLayoutPrefs();
     if(lastTicker) loadCandles(lastTicker);
   }
 
@@ -3734,6 +3961,7 @@ async function loadCandles(ticker){
   const cRes = await fetch(`/candles?ticker=${ticker}&tf=${timeframe}`);
   const payload = await cRes.json();
   const visibleCandles = Array.isArray(payload.candles) ? payload.candles : [];
+  await loadComparisonSeries();
 
   if(Array.isArray(visibleCandles) && visibleCandles.length){
     const sourceLabel =
@@ -3989,8 +4217,16 @@ function renderAlerts(){
 }
 
 async function initializeApp(){
+  loadLayoutPrefs();
   setAuthMode("login");
   renderIndicatorToggles();
+  document.querySelectorAll("#strategyBar button").forEach(button => button.classList.toggle("active", button.dataset.s === strategy));
+  document.querySelectorAll("#tfBar button").forEach(button => button.classList.toggle("active", button.dataset.tf === timeframe));
+  document.querySelectorAll("#presetBar button").forEach(button => button.classList.toggle("active", button.dataset.preset === indicatorPreset));
+  document.getElementById("watchSort").value = watchSort;
+  document.getElementById("zoneToggleBtn").classList.toggle("active", chartToolState.zones);
+  document.getElementById("zoneToggleBtn").innerText = chartToolState.zones ? "Hide Zones" : "Show Zones";
+  document.getElementById("compareTickers").value = comparisonSymbols.join(",");
   loadPaperPositions();
   loadPaperHistory();
   loadAlerts();
@@ -4001,8 +4237,12 @@ async function initializeApp(){
   setOnboardingVisible(true);
   showChartMessage("Search for a ticker, then click Analyze to load the chart.");
   renderPortfolioContext();
-  switchView("market");
+  renderMarketPulse();
+  switchView(currentView || "market");
   await loadWatchlist();
+  if(currentView === "scanner"){
+    await runScanner();
+  }
 }
 
 initializeApp();

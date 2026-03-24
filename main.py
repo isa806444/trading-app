@@ -22,6 +22,7 @@ TWELVE_DATA_BASE_URL = "https://api.twelvedata.com"
 TWELVE_DATA_API_KEY_ENV = "TWELVE_DATA_API_KEY"
 DATABASE_URL_ENV = "DATABASE_URL"
 QUOTE_CACHE_TTL = 60
+LIVE_PRICE_CACHE_TTL = 1
 CANDLE_CACHE_TTL = 120
 INDICATOR_CACHE_TTL = 900
 NEWS_CACHE_TTL = 900
@@ -831,6 +832,32 @@ def fetch_twelve_data_candles(symbol, tf):
     return candles
 
 
+def fetch_twelve_data_price(symbol):
+    api_key = get_twelve_data_api_key()
+    if not api_key:
+        return None
+
+    response = requests.get(
+        f"{TWELVE_DATA_BASE_URL}/price",
+        params={
+            "apikey": api_key,
+            "symbol": symbol,
+            "format": "JSON",
+        },
+        timeout=10,
+    )
+    response.raise_for_status()
+    payload = response.json()
+
+    if payload.get("status") == "error":
+        raise ValueError(payload.get("message", "Unknown Twelve Data price error"))
+
+    price = payload.get("price")
+    if price is None:
+        return None
+    return round(float(price), 2)
+
+
 def search_symbols(query):
     api_key = get_twelve_data_api_key()
     if not api_key or len(query.strip()) < 1:
@@ -1029,6 +1056,54 @@ def get_data(symbol):
     return get_demo_market(symbol, "5m")["quote"]
 
 
+def get_live_price(symbol):
+    cache_key = f"live:{symbol}"
+    cached = get_cache_entry(quote_cache, cache_key, LIVE_PRICE_CACHE_TTL)
+    if cached and not cached["stale"]:
+        return {
+            "price": cached["data"]["price"],
+            "source": "cache",
+            "is_cached": True,
+            "is_stale": False,
+            "cache_age_seconds": cached["age_seconds"]
+        }
+
+    try:
+        live_price = fetch_twelve_data_price(symbol)
+        if live_price is not None:
+            set_cache_entry(quote_cache, cache_key, {"price": live_price})
+            return {
+                "price": live_price,
+                "source": "live",
+                "is_cached": False,
+                "is_stale": False,
+                "cache_age_seconds": 0
+            }
+    except Exception as exc:
+        print("Live price fetch error:", exc)
+
+    if cached:
+        return {
+            "price": cached["data"]["price"],
+            "source": "cache",
+            "is_cached": True,
+            "is_stale": True,
+            "cache_age_seconds": cached["age_seconds"]
+        }
+
+    market = get_data(symbol)
+    if market:
+        return {
+            "price": market["data"]["price"],
+            "source": market["source"],
+            "is_cached": market["cached"],
+            "is_stale": market["stale"],
+            "cache_age_seconds": market["age_seconds"]
+        }
+
+    return None
+
+
 def build_trade_signal(change, bias, strategy, candles):
     closes = [c["close"] for c in candles]
     ema9 = calculate_ema(closes, 9)
@@ -1190,6 +1265,7 @@ def analyze_strategy(symbol, strategy):
     return {
         "ticker": symbol,
         "price": price,
+        "open_price": open_price,
         "dollar_change": dollar_change,
         "change": change,
         "bias": bias,
@@ -1387,6 +1463,27 @@ def candles():
         "is_stale": False,
         "cache_age_seconds": 0,
         "warning": "Live market data is unavailable, so this chart is using demo data."
+    })
+
+
+@app.route("/live-price")
+def live_price():
+    symbol = request.args.get("ticker")
+    if not symbol:
+        return jsonify({"error": "Missing ticker"}), 400
+
+    result = get_live_price(symbol.upper())
+    if not result:
+        return jsonify({"error": "No live price"}), 500
+
+    return jsonify({
+        "ticker": symbol.upper(),
+        "price": result["price"],
+        "data_source": result["source"],
+        "is_cached": result["is_cached"],
+        "is_stale": result["is_stale"],
+        "cache_age_seconds": result["cache_age_seconds"],
+        "timestamp": int(time.time())
     })
 
 

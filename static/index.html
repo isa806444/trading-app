@@ -1512,6 +1512,7 @@ let currentView = "market";
 let authMode = "login";
 let currentUser = null;
 let lastChartState = null;
+let liveUpdateTimer = null;
 let indicatorVisibility = {
   ema9: true,
   ema20: true,
@@ -1738,6 +1739,125 @@ function setLastUpdated(message){
 function setChartMeta(ticker, sourceLabel){
   document.getElementById("chartTitle").innerText = ticker ? `${ticker} Candlestick Chart` : "Price Chart";
   document.getElementById("chartMeta").innerText = `${timeframe.toUpperCase()} timeframe ET${sourceLabel ? ` - ${sourceLabel}` : ""}`;
+}
+
+function getTimeframeStepSeconds(){
+  if(timeframe === "1m") return 60;
+  if(timeframe === "15m") return 900;
+  return 300;
+}
+
+function getBucketStart(unixSeconds){
+  const step = getTimeframeStepSeconds();
+  return unixSeconds - (unixSeconds % step);
+}
+
+function updateQuoteDisplay(price){
+  if(!latestAnalyzedSnapshot){
+    return;
+  }
+
+  latestAnalyzedSnapshot.price = Number(price.toFixed(2));
+  const openPrice = Number(latestAnalyzedSnapshot.openPrice || price);
+  const dollarChange = Number((price - openPrice).toFixed(2));
+  const pctChange = openPrice ? Number((((price - openPrice) / openPrice) * 100).toFixed(2)) : 0;
+  latestAnalyzedSnapshot.dollarChange = dollarChange;
+  latestAnalyzedSnapshot.change = pctChange;
+  latestQuotes[latestAnalyzedSnapshot.ticker] = latestAnalyzedSnapshot.price;
+
+  const priceEl = document.getElementById("livePrice");
+  const changeEl = document.getElementById("liveChange");
+  if(priceEl){
+    priceEl.innerText = `$${latestAnalyzedSnapshot.price.toFixed(2)}`;
+  }
+  if(changeEl){
+    changeEl.className = `change-pill ${pctChange >= 0 ? "up" : "down"}`;
+    changeEl.innerHTML = `
+      <span class="trend-arrow">${getTrendArrow(pctChange)}</span>
+      <span>${dollarChange >= 0 ? "+" : ""}$${Math.abs(dollarChange).toFixed(2)} | ${pctChange >= 0 ? "+" : ""}${pctChange}%</span>
+    `;
+  }
+
+  renderPortfolioContext();
+  renderPaperPositions();
+}
+
+function updateLiveChartPrice(price, timestamp){
+  if(!lastChartState || !Array.isArray(lastChartState.candles) || !lastChartState.candles.length){
+    return;
+  }
+
+  const candles = lastChartState.candles.map(candle => ({ ...candle }));
+  const bucketStart = getBucketStart(timestamp);
+  const lastCandle = candles[candles.length - 1];
+
+  if(lastCandle.time === bucketStart){
+    lastCandle.close = Number(price.toFixed(2));
+    lastCandle.high = Math.max(lastCandle.high, lastCandle.close);
+    lastCandle.low = Math.min(lastCandle.low, lastCandle.close);
+  }else if(bucketStart > lastCandle.time){
+    candles.push({
+      time: bucketStart,
+      open: lastCandle.close,
+      high: Number(price.toFixed(2)),
+      low: Number(price.toFixed(2)),
+      close: Number(price.toFixed(2)),
+      volume: 0
+    });
+  }else{
+    return;
+  }
+
+  const visibleCandles = timeframe === "1m" ? candles.slice(-390) : timeframe === "15m" ? candles.slice(-26) : candles.slice(-78);
+  lastChartState = {
+    ...lastChartState,
+    candles: visibleCandles
+  };
+  renderChart(
+    lastChartState.ticker,
+    lastChartState.candles,
+    buildChartIndicators(lastChartState.candles),
+    "Live tick update",
+    lastChartState.sessionLabel
+  );
+}
+
+async function pollLivePrice(){
+  if(!lastTicker || currentView !== "market" || document.hidden){
+    return;
+  }
+
+  try{
+    const res = await fetch(`/live-price?ticker=${encodeURIComponent(lastTicker)}`);
+    const payload = await res.json();
+    if(!res.ok || payload.error){
+      return;
+    }
+    const price = Number(payload.price);
+    if(!Number.isFinite(price)){
+      return;
+    }
+    updateQuoteDisplay(price);
+    updateLiveChartPrice(price, Number(payload.timestamp || Math.floor(Date.now() / 1000)));
+    setLastUpdated(`Live tick ${new Date().toLocaleTimeString()}`);
+  }catch(err){
+    console.log("Live price poll failed", err);
+  }
+}
+
+function stopLiveUpdates(){
+  if(liveUpdateTimer){
+    clearInterval(liveUpdateTimer);
+    liveUpdateTimer = null;
+  }
+}
+
+function startLiveUpdates(){
+  stopLiveUpdates();
+  if(!lastTicker){
+    return;
+  }
+  liveUpdateTimer = setInterval(pollLivePrice, 1000);
 }
 
 function setSessionBadge(sessionLabel){
@@ -2096,6 +2216,11 @@ function switchView(view){
   document.getElementById("portfolioView").classList.toggle("hidden", view !== "portfolio");
   document.getElementById("marketNav").classList.toggle("active", view === "market");
   document.getElementById("portfolioNav").classList.toggle("active", view === "portfolio");
+  if(view === "market"){
+    startLiveUpdates();
+  }else{
+    stopLiveUpdates();
+  }
 }
 
 function renderPortfolioContext(){
@@ -2214,10 +2339,92 @@ function buildLineTrace(xValues, yValues, name, color, width=2, axis="y"){
   };
 }
 
+function calculateChartEma(values, period){
+  if(!values.length){
+    return [];
+  }
+  const multiplier = 2 / (period + 1);
+  const results = [];
+  let ema = values[0];
+  values.forEach((value, index) => {
+    ema = index === 0 ? value : ((value - ema) * multiplier) + ema;
+    results.push(Number(ema.toFixed(4)));
+  });
+  return results;
+}
+
+function calculateChartVwap(candles){
+  let cumulativePv = 0;
+  let cumulativeVolume = 0;
+  return candles.map(candle => {
+    const typical = (candle.high + candle.low + candle.close) / 3;
+    const volume = Number(candle.volume || 0);
+    cumulativePv += typical * volume;
+    cumulativeVolume += volume;
+    const value = cumulativeVolume > 0 ? cumulativePv / cumulativeVolume : candle.close;
+    return Number(value.toFixed(4));
+  });
+}
+
+function calculateChartRsi(values, period=14){
+  if(!values.length){
+    return [];
+  }
+  const rsi = [null];
+  const gains = [];
+  const losses = [];
+  let avgGain = null;
+  let avgLoss = null;
+
+  for(let index = 1; index < values.length; index += 1){
+    const delta = values[index] - values[index - 1];
+    const gain = Math.max(delta, 0);
+    const loss = Math.abs(Math.min(delta, 0));
+    gains.push(gain);
+    losses.push(loss);
+
+    if(index < period){
+      rsi.push(null);
+      continue;
+    }
+
+    if(index === period){
+      avgGain = gains.slice(-period).reduce((sum, value) => sum + value, 0) / period;
+      avgLoss = losses.slice(-period).reduce((sum, value) => sum + value, 0) / period;
+    }else{
+      avgGain = ((avgGain * (period - 1)) + gain) / period;
+      avgLoss = ((avgLoss * (period - 1)) + loss) / period;
+    }
+
+    if(avgLoss === 0){
+      rsi.push(100);
+    }else{
+      const rs = avgGain / avgLoss;
+      rsi.push(Number((100 - (100 / (1 + rs))).toFixed(2)));
+    }
+  }
+
+  while(rsi.length < values.length){
+    rsi.push(null);
+  }
+  return rsi;
+}
+
+function buildChartIndicators(candles){
+  const closes = candles.map(candle => candle.close);
+  return {
+    ema9: calculateChartEma(closes, 9),
+    ema20: calculateChartEma(closes, 20),
+    vwap: calculateChartVwap(candles),
+    rsi14: calculateChartRsi(closes, 14)
+  };
+}
+
 function renderChart(ticker, candles, indicators, sourceLabel, sessionLabel){
   const container = document.getElementById("chart");
   container.innerHTML = "";
-  lastChartState = { ticker, candles, indicators, sourceLabel, sessionLabel };
+  const chartIndicators = indicators || buildChartIndicators(candles);
+  lastChartState = { ticker, candles, indicators: chartIndicators, sourceLabel, sessionLabel };
   setChartMeta(ticker, sourceLabel);
   setSessionBadge(sessionLabel || "Closed");
   const etLabels = candles.map(c => formatEtLabel(c.time));
@@ -2254,19 +2461,19 @@ function renderChart(ticker, candles, indicators, sourceLabel, sessionLabel){
     yaxis: "y"
   }];
 
-  if(indicators?.ema9?.length && indicatorVisibility.ema9){
-    traces.push(buildLineTrace(xValues, indicators.ema9, "EMA 9", "#f59e0b", 2));
+  if(chartIndicators?.ema9?.length && indicatorVisibility.ema9){
+    traces.push(buildLineTrace(xValues, chartIndicators.ema9, "EMA 9", "#f59e0b", 2));
   }
-  if(indicators?.ema20?.length && indicatorVisibility.ema20){
-    traces.push(buildLineTrace(xValues, indicators.ema20, "EMA 20", "#60a5fa", 2));
+  if(chartIndicators?.ema20?.length && indicatorVisibility.ema20){
+    traces.push(buildLineTrace(xValues, chartIndicators.ema20, "EMA 20", "#60a5fa", 2));
   }
-  if(indicators?.vwap?.length && indicatorVisibility.vwap){
-    traces.push(buildLineTrace(xValues, indicators.vwap, "VWAP", "#fb923c", 2));
+  if(chartIndicators?.vwap?.length && indicatorVisibility.vwap){
+    traces.push(buildLineTrace(xValues, chartIndicators.vwap, "VWAP", "#fb923c", 2));
   }
 
-  const hasRsi = indicatorVisibility.rsi && indicators?.rsi14?.some(v => v !== null && v !== undefined);
+  const hasRsi = indicatorVisibility.rsi && chartIndicators?.rsi14?.some(v => v !== null && v !== undefined);
   if(hasRsi){
-    traces.push(buildLineTrace(xValues, indicators.rsi14, "RSI 14", "#c084fc", 2, "y2"));
+    traces.push(buildLineTrace(xValues, chartIndicators.rsi14, "RSI 14", "#c084fc", 2, "y2"));
   }
 
   const layout = {
@@ -2355,7 +2562,7 @@ function renderChart(ticker, candles, indicators, sourceLabel, sessionLabel){
     }];
   }
 
-  Plotly.newPlot(container, traces, layout, {
+  Plotly.react(container, traces, layout, {
     responsive: true,
     displayModeBar: true,
     scrollZoom: true,
@@ -3067,6 +3274,7 @@ async function analyze(sym){
     const d = await res.json();
 
     if(!d || d.error){
+      stopLiveUpdates();
       setOnboardingVisible(true);
       renderMarketEmptyState("Market data is temporarily unavailable.", "The app could not build the ticker card yet, but you can try Refresh Now in a moment or search a different symbol.");
       showChartMessage("No chart data is available yet. Try Refresh Now after a moment.");
@@ -3097,6 +3305,7 @@ async function analyze(sym){
     latestAnalyzedSnapshot = {
       ticker: d.ticker,
       price: d.price,
+      openPrice: d.open_price,
       dollarChange: d.dollar_change,
       change: d.change
     };
@@ -3109,8 +3318,8 @@ async function analyze(sym){
       <div class="card">
         <div class="ticker-label">${d.ticker}</div>
         <div class="price-row">
-          <div class="price">$${d.price}</div>
-          <div class="change-pill ${d.change>=0?'up':'down'}">
+          <div id="livePrice" class="price">$${d.price}</div>
+          <div id="liveChange" class="change-pill ${d.change>=0?'up':'down'}">
             <span class="trend-arrow">${getTrendArrow(d.change)}</span>
             <span>${d.dollar_change>=0?'+':''}$${Math.abs(d.dollar_change).toFixed(2)} | ${d.change>=0?'+':''}${d.change}%</span>
           </div>
@@ -3150,8 +3359,10 @@ async function analyze(sym){
     renderPaperPositions();
 
     await loadCandles(t);
+    startLiveUpdates();
   }catch(err){
     console.log(err);
+    stopLiveUpdates();
     setOnboardingVisible(true);
     renderMarketEmptyState("Something went wrong while loading market data.", "The search controls still work, but this request did not complete. Try again in a moment.");
     setLastUpdated("Update failed");
@@ -3183,6 +3394,14 @@ document.getElementById("ticker").addEventListener("input", (e)=>{
 document.addEventListener("click", (e)=>{
   if(!e.target.closest(".search-wrap")){
     hideSuggestions();
+  }
+});
+
+document.addEventListener("visibilitychange", () => {
+  if(document.hidden){
+    stopLiveUpdates();
+  }else if(currentView === "market" && lastTicker){
+    startLiveUpdates();
   }
 });
 

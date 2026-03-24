@@ -2422,7 +2422,6 @@ function buildChartIndicators(candles){
 
 function renderChart(ticker, candles, indicators, sourceLabel, sessionLabel){
   const container = document.getElementById("chart");
-  container.innerHTML = "";
   const chartIndicators = indicators || buildChartIndicators(candles);
   lastChartState = { ticker, candles, indicators: chartIndicators, sourceLabel, sessionLabel };
   setChartMeta(ticker, sourceLabel);
@@ -2562,7 +2561,7 @@ function renderChart(ticker, candles, indicators, sourceLabel, sessionLabel){
     }];
   }
 
-  Plotly.react(container, traces, layout, {
+  const plotConfig = {
     responsive: true,
     displayModeBar: true,
     scrollZoom: true,
@@ -2573,7 +2572,13 @@ function renderChart(ticker, candles, indicators, sourceLabel, sessionLabel){
       "autoScale2d",
       "toggleSpikelines"
     ]
-  });
+  };
+
+  if(container.data && container.layout){
+    Plotly.react(container, traces, layout, plotConfig);
+  }else{
+    Plotly.newPlot(container, traces, layout, plotConfig);
+  }
 }
 
 function getPaperMarkPrice(ticker){

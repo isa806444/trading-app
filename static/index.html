@@ -500,6 +500,15 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
   box-shadow:none;
 }
 
+.insights-shell {
+  margin-top:18px;
+}
+
+.insights-grid {
+  display:grid;
+  gap:18px;
+}
+
 .empty-state {
   display:flex;
   flex-direction:column;
@@ -1427,6 +1436,8 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
   <div id="indicatorToggleBar" class="indicator-toggle-bar"></div>
   </div>
 
+  <div id="marketInsights" class="insights-shell"></div>
+
   <details id="messagesPanel" class="messages-panel details-panel">
     <summary>Messages</summary>
     <div class="paper-subtitle">Triggered alerts will appear here</div>
@@ -1563,19 +1574,23 @@ function setOnboardingVisible(visible){
 }
 
 function renderMarketEmptyState(title="Search a stock or company name to begin.", copy="You will see the latest price move, chart, signal, key levels, and recent news once a ticker is analyzed."){
-  const result = document.getElementById("result");
-  result.innerHTML = `
-    <div class="empty-state">
-      <div class="empty-title">${title}</div>
+    const result = document.getElementById("result");
+    const insights = document.getElementById("marketInsights");
+    result.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-title">${title}</div>
       <div class="empty-copy">${copy}</div>
       <div class="empty-grid">
         <div class="empty-tip">Use a ticker like <strong>AAPL</strong> or a company name like <strong>Apple</strong>.</div>
         <div class="empty-tip">Switch timeframe and indicator preset after loading the chart to focus on trend, momentum, or mean reversion.</div>
         <div class="empty-tip">Save strong names to the watchlist or create an alert from the ticker card when a setup looks interesting.</div>
+        </div>
       </div>
-    </div>
-  `;
-}
+    `;
+    if(insights){
+      insights.innerHTML = "";
+    }
+  }
 
 function setAuthMode(mode){
   authMode = mode === "signup" ? "signup" : "login";
@@ -3341,20 +3356,24 @@ async function analyze(sym){
             <div>Trade Plan</div>
             <div class="helper-pill">${strategy.toUpperCase()} setup</div>
           </div>
-          <div class="indicator-meta">Entry: ${d.plan.entry}</div>
-          <div class="indicator-meta">Stop: ${d.plan.stop}</div>
-          <div class="indicator-meta">Targets: ${d.plan.targets.join(", ")}</div>
-        </div>
+            <div class="indicator-meta">Entry: ${d.plan.entry}</div>
+            <div class="indicator-meta">Stop: ${d.plan.stop}</div>
+            <div class="indicator-meta">Targets: ${d.plan.targets.join(", ")}</div>
+          </div>
 
+          <div class="section">
+            <div class="section-title-row">
+              <div>Why This Setup</div>
+            </div>
+            <div class="indicator-meta">${d.summary}</div>
+          </div>
+        </div>
+      `;
+
+    document.getElementById("marketInsights").innerHTML = `
+      <div class="insights-grid">
         ${renderEventsSection(d.events)}
         ${renderNewsSection(d.news)}
-
-        <div class="section">
-          <div class="section-title-row">
-            <div>Why This Setup</div>
-          </div>
-          <div class="indicator-meta">${d.summary}</div>
-        </div>
       </div>
     `;
 

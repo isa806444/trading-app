@@ -1542,6 +1542,8 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
       <div id="authSummary" class="auth-summary">Using local mode</div>
       <button id="authBtn" class="auth-btn" onclick="openAuthModal()">Sign In</button>
       <button id="logoutBtn" class="logout-btn hidden" onclick="logoutUser()">Logout</button>
+      <button id="upgradeBtn" class="auth-btn hidden" onclick="startPremiumCheckout()">Upgrade</button>
+      <button id="manageBillingBtn" class="logout-btn hidden" onclick="openBillingPortal()">Manage Billing</button>
       <button class="watch-toggle" onclick="openWatchlist()">Watchlist</button>
     </div>
   </div>
@@ -1781,6 +1783,8 @@ let indicatorPreset = "trend";
 let currentView = "market";
 let authMode = "login";
 let currentUser = null;
+let billingEnabled = false;
+let premiumPriceCents = 999;
 let lastChartState = null;
 let liveUpdateTimer = null;
 let latestAnalyzedSignal = null;
@@ -1892,15 +1896,25 @@ function renderAuthState(){
   const summary = document.getElementById("authSummary");
   const authBtn = document.getElementById("authBtn");
   const logoutBtn = document.getElementById("logoutBtn");
+  const upgradeBtn = document.getElementById("upgradeBtn");
+  const manageBillingBtn = document.getElementById("manageBillingBtn");
+  const premiumPrice = (premiumPriceCents / 100).toFixed(2);
 
   if(currentUser){
-    summary.innerText = `Signed in as ${currentUser.display_name || currentUser.email}`;
+    const premiumLabel = currentUser.is_premium
+      ? `Premium active${currentUser.premium_current_period_end ? ` until ${formatLongDate(currentUser.premium_current_period_end)}` : ""}`
+      : `Free plan${billingEnabled ? ` | Premium $${premiumPrice}/mo` : ""}`;
+    summary.innerText = `${currentUser.display_name || currentUser.email} | ${premiumLabel}`;
     authBtn.classList.add("hidden");
     logoutBtn.classList.remove("hidden");
+    upgradeBtn.classList.toggle("hidden", !billingEnabled || !!currentUser.is_premium);
+    manageBillingBtn.classList.toggle("hidden", !billingEnabled || !currentUser.is_premium);
   }else{
-    summary.innerText = "Using local mode";
+    summary.innerText = billingEnabled ? `Using local mode | Premium $${premiumPrice}/mo` : "Using local mode";
     authBtn.classList.remove("hidden");
     logoutBtn.classList.add("hidden");
+    upgradeBtn.classList.add("hidden");
+    manageBillingBtn.classList.add("hidden");
   }
 }
 
@@ -1910,11 +1924,14 @@ async function refreshAuthStatus(){
     const payload = await res.json();
     currentUser = payload.authenticated ? payload.user : null;
     serverStateEnabled = !!payload.database_enabled && !!payload.authenticated;
+    billingEnabled = !!payload.stripe_enabled;
+    premiumPriceCents = Number(payload.premium_price_cents || 999);
     renderAuthState();
   }catch(err){
     console.log("Auth status load failed", err);
     currentUser = null;
     serverStateEnabled = false;
+    billingEnabled = false;
     renderAuthState();
   }
 }
@@ -1975,6 +1992,75 @@ async function logoutUser(){
   renderAlerts();
   renderAuthState();
   setStatus("Signed out. The app is back in local mode on this device.", "ok");
+}
+
+async function startPremiumCheckout(){
+  if(!currentUser){
+    openAuthModal();
+    setStatus("Sign in first, then you can upgrade to Premium.", "warning");
+    return;
+  }
+
+  try{
+    const res = await fetch("/billing/create-checkout-session", { method: "POST" });
+    const payload = await res.json();
+    if(!res.ok || payload.error || !payload.url){
+      setStatus(payload.error || "Could not start premium checkout right now.", "warning");
+      return;
+    }
+    window.location.href = payload.url;
+  }catch(err){
+    console.log("Checkout start failed", err);
+    setStatus("Could not start premium checkout right now.", "warning");
+  }
+}
+
+async function openBillingPortal(){
+  try{
+    const res = await fetch("/billing/create-portal-session", { method: "POST" });
+    const payload = await res.json();
+    if(!res.ok || payload.error || !payload.url){
+      setStatus(payload.error || "Could not open billing management right now.", "warning");
+      return;
+    }
+    window.location.href = payload.url;
+  }catch(err){
+    console.log("Billing portal failed", err);
+    setStatus("Could not open billing management right now.", "warning");
+  }
+}
+
+async function handleCheckoutReturn(){
+  const params = new URLSearchParams(window.location.search);
+  const checkoutState = params.get("checkout");
+  const sessionId = params.get("session_id");
+  if(!checkoutState){
+    return;
+  }
+
+  if(checkoutState === "canceled"){
+    setStatus("Premium checkout was canceled.", "warning");
+  }else if(checkoutState === "success" && sessionId){
+    try{
+      const res = await fetch(`/billing/checkout-status?session_id=${encodeURIComponent(sessionId)}`);
+      const payload = await res.json();
+      if(res.ok && payload.user){
+        currentUser = payload.user;
+        renderAuthState();
+        setStatus("Premium is active on your account now.", "ok");
+      }else{
+        setStatus(payload.error || "Checkout finished, but premium could not be verified yet.", "warning");
+      }
+    }catch(err){
+      console.log("Checkout return failed", err);
+      setStatus("Checkout finished, but premium could not be verified yet.", "warning");
+    }
+  }
+
+  const cleanedUrl = new URL(window.location.href);
+  cleanedUrl.searchParams.delete("checkout");
+  cleanedUrl.searchParams.delete("session_id");
+  window.history.replaceState({}, "", cleanedUrl.toString());
 }
 
 function applyIndicatorPreset(preset){
@@ -4231,6 +4317,7 @@ async function initializeApp(){
   loadPaperHistory();
   loadAlerts();
   await refreshAuthStatus();
+  await handleCheckoutReturn();
   renderPaperPositions();
   renderAlerts();
   renderMarketEmptyState();

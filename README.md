@@ -53,6 +53,9 @@ Then edit `.env` and set:
 
 ```text
 TWELVE_DATA_API_KEY=your_real_twelve_data_key
+STRIPE_PUBLISHABLE_KEY=your_stripe_publishable_key
+STRIPE_SECRET_KEY=your_stripe_secret_key
+STRIPE_PREMIUM_PRICE_CENTS=999
 ```
 
 ## Run
@@ -77,6 +80,9 @@ This project is set up for Render with `render.yaml`.
 
 ```text
 TWELVE_DATA_API_KEY=your_real_twelve_data_key
+STRIPE_PUBLISHABLE_KEY=your_stripe_publishable_key
+STRIPE_SECRET_KEY=your_stripe_secret_key
+STRIPE_PREMIUM_PRICE_CENTS=999
 ```
 
 4. Deploy the service.
@@ -98,6 +104,7 @@ gunicorn main:app
 ## Notes
 
 - Market data now prefers Twelve Data when `TWELVE_DATA_API_KEY` is set.
+- Premium billing uses Stripe Checkout and Stripe Customer Portal when the Stripe keys are configured.
 - The CBOE SKEW Index uses a separate market-data fetch path.
 - If the provider is unavailable, the app falls back to cached data and then demo data.
 - The strategy output is still placeholder logic, not real financial advice or broker-connected execution.

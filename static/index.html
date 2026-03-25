@@ -1859,7 +1859,13 @@ let portfolioCoachState = null;
 let portfolioReviewState = [];
 let portfolioStreakState = null;
 let communityState = { leaderboard: [], journals: [], heatmap: [], following: [] };
+let comparisonSeriesCache = {};
+let scannerCache = {};
+let scannerCacheTime = 0;
 const DEFAULT_SCANNER_UNIVERSE = ["AAPL", "MSFT", "NVDA", "AMZN", "META", "TSLA", "AMD", "GOOGL"];
+const LIVE_POLL_INTERVAL_MS = 5000;
+const SEARCH_DEBOUNCE_MS = 400;
+const SCANNER_CACHE_MS = 30000;
 const intradayEtFormatter = new Intl.DateTimeFormat("en-US", {
   timeZone: "America/New_York",
   month: "numeric",
@@ -2285,7 +2291,7 @@ function startLiveUpdates(){
   if(!lastTicker){
     return;
   }
-  liveUpdateTimer = setInterval(pollLivePrice, 1000);
+  liveUpdateTimer = setInterval(pollLivePrice, LIVE_POLL_INTERVAL_MS);
 }
 
 function setSessionBadge(sessionLabel){
@@ -3266,6 +3272,15 @@ async function loadComparisonSeries(){
 
   const colors = ["#f97316", "#38bdf8", "#facc15"];
   const requests = comparisonSymbols.map(async (symbol, index) => {
+    const cacheKey = `${symbol}:${timeframe}`;
+    const cached = comparisonSeriesCache[cacheKey];
+    if(cached && (Date.now() - cached.timestamp) < 60000){
+      return {
+        symbol,
+        color: colors[index % colors.length],
+        points: cached.points
+      };
+    }
     try{
       const res = await fetch(`/candles?ticker=${symbol}&tf=${timeframe}`);
       const payload = await res.json();
@@ -3274,13 +3289,18 @@ async function loadComparisonSeries(){
         return null;
       }
       const base = candles[0].close || 1;
+      const points = candles.map(candle => ({
+        x: new Date(candle.time * 1000),
+        y: Number((((candle.close / base) - 1) * 100).toFixed(2))
+      }));
+      comparisonSeriesCache[cacheKey] = {
+        points,
+        timestamp: Date.now()
+      };
       return {
         symbol,
         color: colors[index % colors.length],
-        points: candles.map(candle => ({
-          x: new Date(candle.time * 1000),
-          y: Number((((candle.close / base) - 1) * 100).toFixed(2))
-        }))
+        points
       };
     }catch(err){
       console.log("Comparison load failed", err);
@@ -3302,7 +3322,8 @@ async function runScanner(){
   const container = document.getElementById("scannerResults");
   const input = document.getElementById("scannerTickers");
   const custom = (input?.value || "").split(",").map(item => item.trim().toUpperCase()).filter(Boolean);
-  const universe = [...new Set(custom.length ? custom : (watchlist.length ? watchlist : DEFAULT_SCANNER_UNIVERSE))].slice(0, 10);
+  const universe = [...new Set(custom.length ? custom : (watchlist.length ? watchlist : DEFAULT_SCANNER_UNIVERSE))].slice(0, 6);
+  const cacheKey = universe.join(",");
 
   if(!universe.length){
     container.innerHTML = '<div class="empty-state"><div class="empty-title">Scanner needs a few symbols</div><div class="empty-copy">Add names to your watchlist or type a custom list to run the scanner.</div></div>';
@@ -3312,9 +3333,17 @@ async function runScanner(){
   container.innerHTML = '<div class="empty-state"><div class="empty-title">Scanning symbols...</div><div class="empty-copy">Pulling current snapshots and ranking movers.</div></div>';
 
   try{
-    const params = new URLSearchParams({ tickers: universe.join(",") });
-    const res = await fetch(`/scanner?${params.toString()}`);
-    const payload = await res.json();
+    let payload;
+    const cached = scannerCache[cacheKey];
+    if(cached && (Date.now() - scannerCacheTime) < SCANNER_CACHE_MS){
+      payload = cached;
+    }else{
+      const params = new URLSearchParams({ tickers: universe.join(",") });
+      const res = await fetch(`/scanner?${params.toString()}`);
+      payload = await res.json();
+      scannerCache[cacheKey] = payload;
+      scannerCacheTime = Date.now();
+    }
     const rows = Array.isArray(payload.rows) ? payload.rows : [];
     latestHotList = Array.isArray(payload.hot_list) ? payload.hot_list : [];
 
@@ -3620,6 +3649,11 @@ function renderSuggestions(){
 
 async function fetchSuggestions(query){
   if(query.trim().length < 2){
+    searchSuggestions = [];
+    renderSuggestions();
+    return;
+  }
+  if(/^[A-Za-z]{1,5}$/.test(query.trim())){
     searchSuggestions = [];
     renderSuggestions();
     return;
@@ -4895,7 +4929,7 @@ document.getElementById("ticker").addEventListener("input", (e)=>{
   if(searchDebounce){
     clearTimeout(searchDebounce);
   }
-  searchDebounce = setTimeout(() => fetchSuggestions(value), 180);
+  searchDebounce = setTimeout(() => fetchSuggestions(value), SEARCH_DEBOUNCE_MS);
 });
 
 document.getElementById("riskProfile").addEventListener("change", (e) => {

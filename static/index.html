@@ -99,6 +99,36 @@ body {
   line-height:1.4;
 }
 
+.hero-chip-row {
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+  margin-top:14px;
+}
+
+.hero-chip {
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  padding:7px 11px;
+  border-radius:999px;
+  border:1px solid rgba(51, 81, 118, 0.55);
+  background:rgba(9, 18, 33, 0.74);
+  color:#dbe7f5;
+  font-size:12px;
+  font-weight:600;
+}
+
+.hero-chip.live {
+  border-color:#1f7a45;
+  background:rgba(6, 46, 22, 0.82);
+}
+
+.hero-chip.premium {
+  border-color:#7c3aed;
+  background:rgba(59, 7, 100, 0.55);
+}
+
 .control-card,
 .chart-controls,
 .result-shell {
@@ -1008,6 +1038,47 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
   font-weight:700;
 }
 
+.premium-card {
+  border:1px solid rgba(124, 58, 237, 0.5);
+  border-radius:18px;
+  padding:14px;
+  background:
+    radial-gradient(circle at top right, rgba(168, 85, 247, 0.18), transparent 35%),
+    linear-gradient(180deg, rgba(34, 16, 58, 0.96), rgba(18, 11, 34, 0.96));
+}
+
+.premium-title-row {
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:10px;
+}
+
+.premium-badge {
+  display:inline-flex;
+  align-items:center;
+  padding:5px 10px;
+  border-radius:999px;
+  font-size:11px;
+  font-weight:700;
+  letter-spacing:0.06em;
+  text-transform:uppercase;
+  border:1px solid rgba(196, 181, 253, 0.45);
+  color:#f5f3ff;
+  background:rgba(109, 40, 217, 0.45);
+}
+
+.premium-perks {
+  display:grid;
+  gap:8px;
+  margin-top:12px;
+}
+
+.premium-perk {
+  color:#ddd6fe;
+  font-size:13px;
+}
+
 .compact-copy {
   color:var(--muted);
   font-size:13px;
@@ -1171,6 +1242,24 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
   font-size:28px;
   font-weight:800;
   color:#f8fafc;
+}
+
+.mover-summary-grid {
+  display:grid;
+  grid-template-columns:repeat(auto-fit, minmax(180px, 1fr));
+  gap:12px;
+  margin-bottom:18px;
+}
+
+.mover-summary-card {
+  border:1px solid var(--line);
+  border-radius:18px;
+  padding:14px;
+  background:rgba(9, 18, 33, 0.72);
+}
+
+.mover-summary-card .pulse-value {
+  font-size:22px;
 }
 
 .action-card-grid {
@@ -1455,6 +1544,42 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
   border:1px solid var(--line);
   border-radius:14px;
   background:rgba(12, 23, 41, 0.92);
+  align-items:start;
+}
+
+.alert-item.triggered {
+  border-color:rgba(245, 158, 11, 0.5);
+  background:
+    radial-gradient(circle at top right, rgba(245, 158, 11, 0.12), transparent 28%),
+    rgba(12, 23, 41, 0.95);
+}
+
+.alert-topline {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex-wrap:wrap;
+}
+
+.alert-status-pill {
+  display:inline-flex;
+  align-items:center;
+  padding:4px 8px;
+  border-radius:999px;
+  font-size:11px;
+  font-weight:700;
+  text-transform:uppercase;
+  letter-spacing:0.06em;
+  color:#fef3c7;
+  background:rgba(146, 64, 14, 0.5);
+  border:1px solid rgba(245, 158, 11, 0.45);
+}
+
+.alert-meta {
+  margin-top:6px;
+  color:#cbd5e1;
+  font-size:13px;
+  line-height:1.45;
 }
 
 .alert-controls {
@@ -1654,7 +1779,12 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
   <div id="heroCard" class="hero-card compact">
     <div class="hero-eyebrow">Trading Workspace</div>
     <div class="hero-title">Trade the stock in front of you.</div>
-    <div class="hero-copy">Search, read the move, and act. The page stays focused on price, setup, chart, and news.</div>
+    <div class="hero-copy">Search, read the move, and act. The page stays focused on price, setup, chart, and the few things that matter most.</div>
+    <div class="hero-chip-row">
+      <div class="hero-chip live" id="providerChip">Market data connected</div>
+      <div class="hero-chip" id="alertsChip">Alerts idle</div>
+      <div class="hero-chip premium" id="premiumChip">Free plan</div>
+    </div>
     <div class="action-card-grid">
       <div class="hero-step"><strong>Search</strong><span>Ticker or company name</span></div>
       <div class="hero-step"><strong>Analyze</strong><span>Signal, levels, and chart</span></div>
@@ -1871,8 +2001,8 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
       <button id="marketNav" class="active" onclick="switchView('market')">Market</button>
       <button id="portfolioNav" onclick="switchView('portfolio')">Portfolio</button>
       <button id="liveNav" onclick="switchView('live')">Live</button>
-      <button id="scannerNav" onclick="switchView('scanner')">Scanner</button>
-      <button id="communityNav" onclick="switchView('community')">Community</button>
+      <button id="scannerNav" onclick="switchView('scanner')">Movers</button>
+      <button id="communityNav" onclick="switchView('community')">Community+</button>
     </div>
 
 </div>
@@ -1882,6 +2012,18 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
     <div class="mini-label">Profile</div>
     <div class="profile-title">Account & Settings</div>
     <div id="authSummary" class="auth-summary">Using local mode</div>
+  </div>
+  <div class="profile-block premium-card">
+    <div class="premium-title-row">
+      <div class="profile-title" style="font-size:16px;">Premium</div>
+      <div id="premiumStatusBadge" class="premium-badge">Free</div>
+    </div>
+    <div id="premiumCardCopy" class="compact-copy" style="margin-top:8px;">Upgrade to unlock the premium side of the workspace on your account.</div>
+    <div class="premium-perks">
+      <div class="premium-perk">Advanced coaching and community tools</div>
+      <div class="premium-perk">Cleaner account-based sync across devices</div>
+      <div class="premium-perk">Discord opens after upgrade success</div>
+    </div>
   </div>
   <div class="profile-block">
     <div class="profile-actions">
@@ -2039,6 +2181,15 @@ function setStatus(message, tone=""){
   el.innerHTML = `<div class="status ${tone}">${message}</div>`;
 }
 
+function updateProviderChip(label, tone=""){
+  const chip = document.getElementById("providerChip");
+  if(!chip){
+    return;
+  }
+  chip.innerText = label;
+  chip.classList.toggle("live", tone !== "warning");
+}
+
 function setOnboardingVisible(visible){
   const hero = document.getElementById("heroCard");
   if(hero){
@@ -2135,6 +2286,9 @@ function renderAuthState(){
   const logoutBtn = document.getElementById("logoutBtn");
   const upgradeBtn = document.getElementById("upgradeBtn");
   const manageBillingBtn = document.getElementById("manageBillingBtn");
+  const premiumStatusBadge = document.getElementById("premiumStatusBadge");
+  const premiumCardCopy = document.getElementById("premiumCardCopy");
+  const premiumChip = document.getElementById("premiumChip");
   const premiumPrice = (premiumPriceCents / 100).toFixed(2);
 
   if(currentUser){
@@ -2146,12 +2300,22 @@ function renderAuthState(){
     logoutBtn.classList.remove("hidden");
     upgradeBtn.classList.toggle("hidden", !billingEnabled || !!currentUser.is_premium);
     manageBillingBtn.classList.toggle("hidden", !billingEnabled || !currentUser.is_premium);
+    if(premiumStatusBadge) premiumStatusBadge.innerText = currentUser.is_premium ? "Active" : "Free";
+    if(premiumCardCopy) premiumCardCopy.innerText = currentUser.is_premium
+      ? "Your account is on Premium and ready for the advanced side of the workspace."
+      : `Upgrade to Premium for $${premiumPrice}/month to unlock the premium side of the workspace.`;
+    if(premiumChip) premiumChip.innerText = currentUser.is_premium ? "Premium active" : "Free plan";
   }else{
     summary.innerText = billingEnabled ? `Using local mode | Premium $${premiumPrice}/mo` : "Using local mode";
     authBtn.classList.remove("hidden");
     logoutBtn.classList.add("hidden");
     upgradeBtn.classList.add("hidden");
     manageBillingBtn.classList.add("hidden");
+    if(premiumStatusBadge) premiumStatusBadge.innerText = "Free";
+    if(premiumCardCopy) premiumCardCopy.innerText = billingEnabled
+      ? `Sign in to upgrade for $${premiumPrice}/month and unlock the premium side of the workspace.`
+      : "Sign in to keep your account synced across devices.";
+    if(premiumChip) premiumChip.innerText = billingEnabled ? `Premium $${premiumPrice}/mo` : "Free plan";
   }
 }
 
@@ -3425,8 +3589,17 @@ function buildScannerGrade(snapshot){
 
 async function runScanner(){
   const container = document.getElementById("scannerResults");
+  const scannerTitle = document.querySelector("#scannerView .section-title");
+  const scannerCopy = document.querySelector("#scannerView .compact-copy");
   const universe = [...new Set([...watchlist, ...TOP_MOVERS_UNIVERSE])].slice(0, 10);
   const cacheKey = universe.join(",");
+
+  if(scannerTitle){
+    scannerTitle.innerText = "Today's top movers from the tracked liquid universe";
+  }
+  if(scannerCopy){
+    scannerCopy.innerText = "A tighter top-10 board built to surface the names actually moving today.";
+  }
 
   if(!universe.length){
     container.innerHTML = '<div class="empty-state"><div class="empty-title">Scanner needs a few symbols</div><div class="empty-copy">Add names to your watchlist or type a custom list to run the scanner.</div></div>';
@@ -3449,12 +3622,32 @@ async function runScanner(){
     }
     const rows = Array.isArray(payload.rows) ? payload.rows : [];
     latestHotList = Array.isArray(payload.hot_list) ? payload.hot_list : [];
+    const best = rows[0] || null;
+    const hottest = latestHotList[0] || null;
+    const avgMove = rows.length ? (rows.reduce((sum, item) => sum + Math.abs(Number(item.change || 0)), 0) / rows.length) : 0;
 
     container.innerHTML = `
       <div class="insights-grid">
         <div class="insight-card market-pulse-card" style="grid-column:1 / -1;">
           <div class="section-kicker">Daily Hot List</div>
           <div class="section-title">Highest-priority names right now</div>
+          <div class="mover-summary-grid">
+            <div class="mover-summary-card">
+              <div class="pulse-title">Top Rank</div>
+              <div class="pulse-value">${best ? best.ticker : "--"}</div>
+              <div class="pulse-meta">${best ? `${formatPercent(best.change || 0)} | $${Number(best.price || 0).toFixed(2)}` : "Top mover shows here."}</div>
+            </div>
+            <div class="mover-summary-card">
+              <div class="pulse-title">Best Setup</div>
+              <div class="pulse-value">${hottest ? hottest.ticker : "--"}</div>
+              <div class="pulse-meta">${hottest ? `${hottest.setup_grade || "--"} ${hottest.setup_action || ""}` : "Hot list leader appears here."}</div>
+            </div>
+            <div class="mover-summary-card">
+              <div class="pulse-title">Avg Move</div>
+              <div class="pulse-value">${rows.length ? `${avgMove.toFixed(2)}%` : "--"}</div>
+              <div class="pulse-meta">${rows.length ? `${rows.length} names in the board` : "Board stats appear here."}</div>
+            </div>
+          </div>
           <div class="confirmation-list">
             ${latestHotList.length ? latestHotList.map(item => `<div class="confirmation-pill">${item.ticker} | ${item.momentum_score?.value || "--"} score | ${item.why_moving?.drivers?.[0] || "No catalyst read yet"}</div>`).join("") : '<div class="paper-empty">Hot list will populate after the scanner finds stronger movers.</div>'}
           </div>
@@ -3706,6 +3899,12 @@ function switchView(view){
   }
   if(view === "community"){
     loadCommunity();
+  }
+  const liveSummary = document.getElementById("liveTradingSummary");
+  if(liveSummary){
+    liveSummary.innerText = currentUser?.is_premium
+      ? "Broker-ready order ticket. Connect a supported broker to unlock live execution later."
+      : "Live trading stays broker-locked. Premium keeps the full account experience cleaner when broker access is added later.";
   }
   saveLayoutPrefs();
 }
@@ -4688,6 +4887,10 @@ async function loadWatchlist(){
 async function loadWatchlistData(){
   if(!watchlist.length){
     watchlistData = [];
+    const alertsChip = document.getElementById("alertsChip");
+    if(alertsChip){
+      alertsChip.innerText = "Alerts idle";
+    }
     return;
   }
 
@@ -4846,17 +5049,21 @@ async function loadCandles(ticker){
     renderChart(ticker, visibleCandles, payload.indicators || {}, sourceLabel, sessionLabel);
 
     if(payload.is_demo){
+      updateProviderChip("Demo data", "warning");
       setLastUpdated("Demo candles loaded just now");
       setStatus("Live market data is unavailable, so this chart is using demo candles.", "warning");
     }else if(payload.warning){
+      updateProviderChip(payload.is_cached ? "Cached data" : "Provider warning", "warning");
       if(payload.is_stale || payload.is_cached){
         setLastUpdated(`Cached candles ${formatAge(payload.cache_age_seconds)}`);
       }
       setStatus(payload.warning, "warning");
     }else if(payload.is_stale){
+      updateProviderChip("Cached real data", "warning");
       setLastUpdated(`Cached candles ${formatAge(payload.cache_age_seconds)}`);
       setStatus(`Showing cached candles from ${Math.round(payload.cache_age_seconds)}s ago.`, "warning");
     }else if(payload.data_source === "live"){
+      updateProviderChip("Live market data");
       setLastUpdated(`Live candles updated at ${liveEtTimeFormatter.format(new Date())} ET`);
     }
   }else{
@@ -4902,17 +5109,21 @@ async function analyze(sym){
     let statusTone = "ok";
 
     if(d.is_demo){
+      updateProviderChip("Demo data", "warning");
       statusMessage = "Live market data is unavailable, so this result is using demo data.";
       statusTone = "warning";
       setLastUpdated("Demo quote loaded just now");
     }else if(d.is_stale){
+      updateProviderChip("Cached real data", "warning");
       statusMessage = `Showing cached quote data from ${Math.round(d.cache_age_seconds)}s ago because live data is temporarily unavailable.`;
       statusTone = "warning";
       setLastUpdated(`Cached quote ${formatAge(d.cache_age_seconds)}`);
     }else if(d.is_cached){
+      updateProviderChip("Cached real data", "warning");
       statusMessage = `Showing recent cached quote data from ${Math.round(d.cache_age_seconds)}s ago.`;
       setLastUpdated(`Cached quote ${formatAge(d.cache_age_seconds)}`);
     }else{
+      updateProviderChip("Live market data");
       setLastUpdated(`Live quote just updated at ${liveEtTimeFormatter.format(new Date())} ET`);
     }
 
@@ -5078,6 +5289,7 @@ function renderAlerts(){
   const summary = document.getElementById("alertSummary");
   const list = document.getElementById("alertList");
   const panel = document.getElementById("messagesPanel");
+  const alertsChip = document.getElementById("alertsChip");
   list.innerHTML = "";
 
   const triggered = alerts.filter(alert => alert.status === "triggered");
@@ -5086,6 +5298,9 @@ function renderAlerts(){
   if(!triggered.length){
     if(panel){
       panel.open = false;
+    }
+    if(alertsChip){
+      alertsChip.innerText = activeAlerts.length ? `${activeAlerts.length} alert${activeAlerts.length === 1 ? "" : "s"} armed` : "Alerts idle";
     }
     summary.innerText = activeAlerts.length
       ? `${activeAlerts.length} active alert${activeAlerts.length === 1 ? "" : "s"} | No triggered messages yet.`
@@ -5097,16 +5312,22 @@ function renderAlerts(){
   if(panel){
     panel.open = true;
   }
+  if(alertsChip){
+    alertsChip.innerText = `${triggered.length} alert${triggered.length === 1 ? "" : "s"} triggered`;
+  }
   summary.innerText = `${activeAlerts.length} active alert${activeAlerts.length === 1 ? "" : "s"} | ${triggered.length} message${triggered.length === 1 ? "" : "s"}`;
 
   triggered.slice(0, 8).forEach(alert => {
     const item = document.createElement("div");
-    item.className = "alert-item";
+    item.className = "alert-item triggered";
     item.innerHTML = `
       <div>
-        <div class="paper-symbol">${alert.ticker} | ${getAlertLabel(alert)}</div>
-        <div class="paper-details">Triggered at $${Number(alert.triggeredPrice).toFixed(2)}</div>
-        <div class="paper-details">${alert.triggerMessage || alert.contextMessage || "Saved alert condition hit."}</div>
+        <div class="alert-topline">
+          <div class="paper-symbol">${alert.ticker} | ${getAlertLabel(alert)}</div>
+          <div class="alert-status-pill">Triggered</div>
+        </div>
+        <div class="alert-meta">Triggered at $${Number(alert.triggeredPrice).toFixed(2)}</div>
+        <div class="alert-meta">${alert.triggerMessage || alert.contextMessage || "Saved alert condition hit."}</div>
       </div>
       <div>
         <button class="paper-btn close" onclick="removeAlert('${alert.id}')">Dismiss</button>
@@ -5118,6 +5339,14 @@ function renderAlerts(){
 
 async function initializeApp(){
   loadLayoutPrefs();
+  const scannerTitle = document.querySelector("#scannerView .section-title");
+  const scannerCopy = document.querySelector("#scannerView .compact-copy");
+  if(scannerTitle){
+    scannerTitle.innerText = "Today's top movers from the tracked liquid universe";
+  }
+  if(scannerCopy){
+    scannerCopy.innerText = "A tighter top-10 board built to surface the names actually moving today.";
+  }
   setAuthMode("login");
   renderIndicatorToggles();
   document.getElementById("discordLinkInput").value = getDiscordLink();

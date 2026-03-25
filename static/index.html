@@ -1729,12 +1729,36 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
     </div>
     <div id="scannerResults" class="insights-shell"></div>
   </div>
+
+  <div id="communityView" class="view-panel hidden">
+    <div class="control-card">
+      <div class="section-head">
+        <div>
+          <div class="section-kicker">Community</div>
+          <div class="section-title">Learn from disciplined traders, not hype</div>
+        </div>
+        <div class="helper-pill">Public sharing is opt-in</div>
+      </div>
+      <div class="alert-controls">
+        <input id="publicAlias" class="paper-qty paper-note" type="text" maxlength="40" placeholder="Public alias" />
+        <button class="paper-btn close" onclick="saveCommunityProfile()">Save Public Profile</button>
+      </div>
+      <div class="alert-controls" style="justify-content:flex-start;">
+        <label class="paper-details" style="display:flex; align-items:center; gap:8px;">
+          <input id="publicProfileToggle" type="checkbox" style="width:auto; flex:none;" />
+          Share my paper-trading profile publicly
+        </label>
+      </div>
+    </div>
+    <div id="communityResults" class="insights-shell"></div>
+  </div>
   </div>
 
   <div class="bottom-nav">
       <button id="marketNav" class="active" onclick="switchView('market')">Market</button>
       <button id="portfolioNav" onclick="switchView('portfolio')">Portfolio</button>
       <button id="scannerNav" onclick="switchView('scanner')">Scanner</button>
+      <button id="communityNav" onclick="switchView('community')">Community</button>
     </div>
 
 </div>
@@ -1833,6 +1857,8 @@ let comparisonSeries = [];
 let latestHotList = [];
 let portfolioCoachState = null;
 let portfolioReviewState = [];
+let portfolioStreakState = null;
+let communityState = { leaderboard: [], journals: [], heatmap: [], following: [] };
 const DEFAULT_SCANNER_UNIVERSE = ["AAPL", "MSFT", "NVDA", "AMZN", "META", "TSLA", "AMD", "GOOGL"];
 const intradayEtFormatter = new Intl.DateTimeFormat("en-US", {
   timeZone: "America/New_York",
@@ -2467,6 +2493,7 @@ async function loadPortfolioInsights(){
   if(!serverStateEnabled){
     portfolioReviewState = buildLocalTradeReviews();
     portfolioCoachState = buildLocalTradingCoach();
+    portfolioStreakState = buildLocalStreaks();
     return;
   }
   try{
@@ -2474,10 +2501,12 @@ async function loadPortfolioInsights(){
     const payload = await res.json();
     portfolioCoachState = payload.coach || null;
     portfolioReviewState = Array.isArray(payload.reviews) ? payload.reviews : [];
+    portfolioStreakState = payload.streaks || null;
   }catch(err){
     console.log("Portfolio insights load failed", err);
     portfolioReviewState = buildLocalTradeReviews();
     portfolioCoachState = buildLocalTradingCoach();
+    portfolioStreakState = buildLocalStreaks();
   }
 }
 
@@ -2560,6 +2589,44 @@ function buildLocalTradingCoach(){
     summary: tips[0],
     tips: tips.slice(0, 3)
   };
+}
+
+function buildLocalStreaks(){
+  if(!paperHistory.length){
+    return { current_streak: 0, best_streak: 0, disciplined_days: 0, badges: [] };
+  }
+  const dayMap = new Map();
+  paperHistory.forEach(item => {
+    const closedAt = item.closedAt ? new Date(item.closedAt) : new Date();
+    const key = closedAt.toDateString();
+    const realized = Number(item.realized || 0);
+    const entry = Number(item.entry || 0);
+    const qty = Number(item.qty || 0);
+    const notional = Math.max(entry * qty, 1);
+    const disciplined = realized >= 0 || (Math.abs(realized) / notional) <= 0.0125;
+    const row = dayMap.get(key) || [];
+    row.push(disciplined);
+    dayMap.set(key, row);
+  });
+  const ordered = Array.from(dayMap.entries()).sort((a, b) => new Date(a[0]) - new Date(b[0]));
+  let current = 0;
+  let best = 0;
+  let disciplinedDays = 0;
+  ordered.forEach(([, flags]) => {
+    const good = flags.every(Boolean);
+    if(good){
+      disciplinedDays += 1;
+      current += 1;
+      best = Math.max(best, current);
+    }else{
+      current = 0;
+    }
+  });
+  const badges = [];
+  if(disciplinedDays >= 3) badges.push("3-Day Discipline");
+  if(disciplinedDays >= 5) badges.push("Steady Hands");
+  if(best >= 7) badges.push("Weekly Lock-In");
+  return { current_streak: current, best_streak: best, disciplined_days: disciplinedDays, badges };
 }
 
 function formatEtLabel(unixSeconds){
@@ -2876,6 +2943,157 @@ function renderCoachCard(){
       </div>
     </div>
   `;
+}
+
+function renderStreakCard(){
+  const container = document.getElementById("portfolioCoach");
+  if(!container){
+    return;
+  }
+  const streak = portfolioStreakState || { current_streak: 0, best_streak: 0, disciplined_days: 0, badges: [] };
+  const coachMarkup = container.innerHTML;
+  container.innerHTML = `
+    <div class="analytics-grid" style="margin-bottom:14px;">
+      ${renderAnalyticsCard("Current Streak", String(streak.current_streak || 0), "", "Disciplined trading days")}
+      ${renderAnalyticsCard("Best Streak", String(streak.best_streak || 0))}
+      ${renderAnalyticsCard("Disciplined Days", String(streak.disciplined_days || 0))}
+      ${renderAnalyticsCard("Badges", String((streak.badges || []).length), "", (streak.badges || []).join(" | ") || "None yet")}
+    </div>
+    ${coachMarkup}
+  `;
+}
+
+async function loadCommunity(){
+  try{
+    const res = await fetch("/community");
+    const payload = await res.json();
+    communityState = {
+      leaderboard: payload.leaderboard || [],
+      journals: payload.journals || [],
+      heatmap: payload.heatmap || [],
+      following: payload.following || []
+    };
+    if(currentUser){
+      document.getElementById("publicAlias").value = currentUser.public_alias || currentUser.display_name || "";
+      document.getElementById("publicProfileToggle").checked = !!currentUser.public_profile;
+    }
+    renderCommunity();
+  }catch(err){
+    console.log("Community load failed", err);
+  }
+}
+
+function renderCommunity(){
+  const container = document.getElementById("communityResults");
+  if(!container){
+    return;
+  }
+  const leaderboard = communityState.leaderboard || [];
+  const journals = communityState.journals || [];
+  const heatmap = communityState.heatmap || [];
+  container.innerHTML = `
+    <div class="insights-grid">
+      <div class="insight-card market-pulse-card" style="grid-column:1 / -1;">
+        <div class="section-kicker">Copy Smart Traders</div>
+        <div class="section-title">Ranked by consistency, profit factor, and realized paper-trade results</div>
+        <div class="alert-list">
+          ${leaderboard.length ? leaderboard.map(item => `
+            <div class="alert-item">
+              <div>
+                <div class="paper-symbol">${item.display_name}</div>
+                <div class="paper-details">Score ${item.score} | Win rate ${item.win_rate}% | Profit factor ${item.profit_factor} | Streak ${item.streak}</div>
+              </div>
+              <div>
+                <button class="paper-btn close" onclick="${communityState.following.includes(item.user_id) ? `followTrader(${item.user_id}, 'unfollow')` : `followTrader(${item.user_id}, 'follow')`}">${communityState.following.includes(item.user_id) ? "Following" : "Follow"}</button>
+              </div>
+            </div>
+          `).join("") : '<div class="paper-empty">Public trader rankings will appear as users opt in.</div>'}
+        </div>
+      </div>
+      <div class="insight-card market-pulse-card">
+        <div class="section-kicker">Public Trade Journals</div>
+        <div class="section-title">See how other traders are explaining their paper trades</div>
+        <div class="alert-list">
+          ${journals.length ? journals.map(item => `
+            <div class="alert-item">
+              <div>
+                <div class="paper-symbol">${item.display_name} | ${item.ticker} ${item.side}</div>
+                <div class="paper-details">${item.note || "No note added."}</div>
+              </div>
+              <div class="paper-details ${Number(item.realized || 0) >= 0 ? "up" : "down"}">${formatMoney(item.realized || 0)}</div>
+            </div>
+          `).join("") : '<div class="paper-empty">No public journal entries yet.</div>'}
+        </div>
+      </div>
+      <div class="insight-card market-pulse-card">
+        <div class="section-kicker">Crowd Sentiment Heatmap</div>
+        <div class="section-title">What public traders are leaning into right now</div>
+        <div class="alert-list">
+          ${heatmap.length ? heatmap.map(item => `
+            <div class="alert-item">
+              <div>
+                <div class="paper-symbol">${item.ticker}</div>
+                <div class="paper-details">Bullish ${item.bullish} | Bearish ${item.bearish}</div>
+              </div>
+              <div class="paper-details">${item.confidence} trader${item.confidence === 1 ? "" : "s"}</div>
+            </div>
+          `).join("") : '<div class="paper-empty">Heatmap builds as public users share their positions.</div>'}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+async function saveCommunityProfile(){
+  if(!currentUser){
+    openAuthModal();
+    setStatus("Sign in first so your profile settings can be saved.", "warning");
+    return;
+  }
+  try{
+    const res = await fetch("/community/profile", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        public_alias: document.getElementById("publicAlias")?.value || "",
+        public_profile: !!document.getElementById("publicProfileToggle")?.checked
+      })
+    });
+    const payload = await res.json();
+    if(res.ok && payload.user){
+      currentUser = payload.user;
+      renderAuthState();
+      await loadCommunity();
+      setStatus("Community profile updated.", "ok");
+    }else{
+      setStatus(payload.error || "Could not save your community profile.", "warning");
+    }
+  }catch(err){
+    console.log("Community profile save failed", err);
+    setStatus("Could not save your community profile.", "warning");
+  }
+}
+
+async function followTrader(userId, action){
+  if(!currentUser){
+    openAuthModal();
+    setStatus("Sign in first so followed traders stay tied to your account.", "warning");
+    return;
+  }
+  try{
+    const res = await fetch("/community/follow", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: userId, action })
+    });
+    const payload = await res.json();
+    if(res.ok){
+      communityState.following = payload.following || [];
+      renderCommunity();
+    }
+  }catch(err){
+    console.log("Follow trader failed", err);
+  }
 }
 
 function renderTradeReviewCards(){
@@ -3336,13 +3554,18 @@ function switchView(view){
   document.getElementById("marketView").classList.toggle("hidden", view !== "market");
   document.getElementById("portfolioView").classList.toggle("hidden", view !== "portfolio");
   document.getElementById("scannerView").classList.toggle("hidden", view !== "scanner");
+  document.getElementById("communityView").classList.toggle("hidden", view !== "community");
   document.getElementById("marketNav").classList.toggle("active", view === "market");
   document.getElementById("portfolioNav").classList.toggle("active", view === "portfolio");
   document.getElementById("scannerNav").classList.toggle("active", view === "scanner");
+  document.getElementById("communityNav").classList.toggle("active", view === "community");
   if(view === "market"){
     startLiveUpdates();
   }else{
     stopLiveUpdates();
+  }
+  if(view === "community"){
+    loadCommunity();
   }
   saveLayoutPrefs();
 }
@@ -4079,6 +4302,7 @@ function renderPaperPositions(){
 
   renderEquityCurve();
   renderCoachCard();
+  renderStreakCard();
   renderTradeJournal();
 }
 

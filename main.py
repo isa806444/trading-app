@@ -170,6 +170,8 @@ def initialize_database():
                 cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS premium_status TEXT NOT NULL DEFAULT 'free'")
                 cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS premium_plan TEXT")
                 cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS premium_current_period_end TIMESTAMPTZ")
+                cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS public_profile BOOLEAN NOT NULL DEFAULT FALSE")
+                cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS public_alias TEXT")
                 cursor.execute(
                     """
                     CREATE TABLE IF NOT EXISTS user_state (
@@ -358,7 +360,7 @@ def get_user_by_email(email):
                     """
                     SELECT id, email, display_name, password_hash, created_at,
                            stripe_customer_id, stripe_subscription_id, premium_status,
-                           premium_plan, premium_current_period_end
+                           premium_plan, premium_current_period_end, public_profile, public_alias
                     FROM users
                     WHERE email = %s
                     """,
@@ -378,7 +380,9 @@ def get_user_by_email(email):
             "stripe_subscription_id": row[6],
             "premium_status": row[7] or "free",
             "premium_plan": row[8],
-            "premium_current_period_end": row[9].isoformat() if row[9] else None
+            "premium_current_period_end": row[9].isoformat() if row[9] else None,
+            "public_profile": bool(row[10]) if row[10] is not None else False,
+            "public_alias": row[11] or row[2]
         }
     except Exception as exc:
         print("User lookup failed:", exc)
@@ -399,7 +403,7 @@ def get_user_by_id(user_id):
                     """
                     SELECT id, email, display_name, created_at,
                            stripe_customer_id, stripe_subscription_id, premium_status,
-                           premium_plan, premium_current_period_end
+                           premium_plan, premium_current_period_end, public_profile, public_alias
                     FROM users
                     WHERE id = %s
                     """,
@@ -418,7 +422,9 @@ def get_user_by_id(user_id):
             "stripe_subscription_id": row[5],
             "premium_status": row[6] or "free",
             "premium_plan": row[7],
-            "premium_current_period_end": row[8].isoformat() if row[8] else None
+            "premium_current_period_end": row[8].isoformat() if row[8] else None,
+            "public_profile": bool(row[9]) if row[9] is not None else False,
+            "public_alias": row[10] or row[2]
         }
     except Exception as exc:
         print("User load by id failed:", exc)
@@ -440,7 +446,9 @@ def serialize_user(user):
         "premium_status": user.get("premium_status", "free"),
         "premium_plan": user.get("premium_plan"),
         "premium_current_period_end": user.get("premium_current_period_end"),
-        "is_premium": user.get("premium_status") == "active"
+        "is_premium": user.get("premium_status") == "active",
+        "public_profile": bool(user.get("public_profile")),
+        "public_alias": user.get("public_alias") or user["display_name"]
     }
 
 
@@ -483,6 +491,29 @@ def update_user_billing_fields(user_id, premium_status="free", premium_plan=None
         conn.close()
     except Exception as exc:
         print("Billing update failed:", exc)
+
+
+def update_user_profile_fields(user_id, public_profile=None, public_alias=None):
+    if not database_enabled or not user_id:
+        return
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return
+        with conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE users
+                    SET public_profile = COALESCE(%s, public_profile),
+                        public_alias = COALESCE(%s, public_alias)
+                    WHERE id = %s
+                    """,
+                    (public_profile, public_alias, user_id)
+                )
+        conn.close()
+    except Exception as exc:
+        print("Profile update failed:", exc)
 
 
 def sync_user_subscription_from_stripe(user):
@@ -2025,6 +2056,152 @@ def build_trading_coach(history):
     }
 
 
+def load_following_traders():
+    return load_state_list("following_traders")
+
+
+def save_following_traders(data):
+    save_state_list("following_traders", data)
+
+
+def compute_streaks(history):
+    if not history:
+        return {
+            "current_streak": 0,
+            "best_streak": 0,
+            "disciplined_days": 0,
+            "badges": []
+        }
+
+    day_scores = {}
+    for trade in history:
+        closed = parse_event_datetime(trade.get("closedAt")) or datetime.now(DEMO_TIMEZONE)
+        day_key = closed.date().isoformat()
+        realized = float(trade.get("realized") or 0)
+        entry = float(trade.get("entry") or 0)
+        qty = float(trade.get("qty") or 0)
+        notional = max(entry * qty, 1)
+        risk_ratio = abs(realized) / notional
+        disciplined = realized >= 0 or risk_ratio <= 0.0125
+        day_scores.setdefault(day_key, []).append(disciplined)
+
+    ordered_days = sorted(day_scores.items())
+    current = 0
+    best = 0
+    disciplined_days = 0
+    for _, flags in ordered_days:
+        good_day = all(flags)
+        if good_day:
+            disciplined_days += 1
+            current += 1
+            best = max(best, current)
+        else:
+            current = 0
+
+    badges = []
+    if disciplined_days >= 3:
+        badges.append("3-Day Discipline")
+    if disciplined_days >= 5:
+        badges.append("Steady Hands")
+    if best >= 7:
+        badges.append("Weekly Lock-In")
+
+    return {
+        "current_streak": current,
+        "best_streak": best,
+        "disciplined_days": disciplined_days,
+        "badges": badges
+    }
+
+
+def get_public_user_rows():
+    if not database_enabled:
+        return []
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return []
+        with conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT id, display_name, COALESCE(public_alias, display_name) AS public_alias
+                    FROM users
+                    WHERE public_profile = TRUE
+                    ORDER BY created_at DESC
+                    """
+                )
+                rows = cursor.fetchall()
+        conn.close()
+        return rows or []
+    except Exception as exc:
+        print("Public user query failed:", exc)
+        return []
+
+
+def build_public_leaderboard():
+    leaderboard = []
+    journals = []
+    sentiment = {}
+    for user_id, display_name, public_alias in get_public_user_rows():
+        history = load_paper_history() if not database_enabled else load_state_list("paper_history", user_id=user_id)
+        positions = load_paper_positions() if not database_enabled else load_state_list("paper_positions", user_id=user_id)
+        if not history and not positions:
+            continue
+
+        realized = sum(float(item.get("realized") or 0) for item in history)
+        wins = [item for item in history if float(item.get("realized") or 0) > 0]
+        losses = [abs(float(item.get("realized") or 0)) for item in history if float(item.get("realized") or 0) < 0]
+        win_rate = round((len(wins) / len(history)) * 100, 1) if history else 0
+        profit_factor = round(sum(float(item.get("realized") or 0) for item in wins) / max(sum(losses), 1), 2) if history else 0
+        consistency = round((win_rate * 0.55) + (min(profit_factor, 3) * 15), 1)
+        score = round(realized * 0.4 + consistency * 3, 1)
+        streaks = compute_streaks(history)
+
+        leaderboard.append({
+            "user_id": user_id,
+            "display_name": public_alias or display_name,
+            "realized_pnl": round(realized, 2),
+            "win_rate": win_rate,
+            "profit_factor": profit_factor,
+            "consistency": consistency,
+            "score": score,
+            "streak": streaks["current_streak"]
+        })
+
+        for trade in history[:4]:
+            journals.append({
+                "user_id": user_id,
+                "display_name": public_alias or display_name,
+                "ticker": trade.get("ticker"),
+                "side": trade.get("side"),
+                "note": trade.get("note") or "No trade note added.",
+                "realized": round(float(trade.get("realized") or 0), 2),
+                "closed_at": trade.get("closedAt")
+            })
+
+        for position in positions:
+            ticker = str(position.get("ticker") or "").upper().strip()
+            if not ticker:
+                continue
+            bucket = sentiment.setdefault(ticker, {"ticker": ticker, "bullish": 0, "bearish": 0, "confidence": 0})
+            if position.get("side") == "BUY":
+                bucket["bullish"] += 1
+            else:
+                bucket["bearish"] += 1
+            bucket["confidence"] = bucket["bullish"] + bucket["bearish"]
+
+    leaderboard.sort(key=lambda item: (item["score"], item["consistency"], item["realized_pnl"]), reverse=True)
+    journals.sort(key=lambda item: item.get("closed_at") or "", reverse=True)
+    heatmap = list(sentiment.values())
+    heatmap.sort(key=lambda item: item["confidence"], reverse=True)
+    return {
+        "leaderboard": leaderboard[:12],
+        "journals": journals[:16],
+        "heatmap": heatmap[:12]
+    }
+
+
 # =========================
 # STRATEGY ENGINE
 # =========================
@@ -2596,10 +2773,52 @@ def portfolio_insights():
     history = load_paper_history()
     reviews = [review_closed_trade(item) for item in history[:12]]
     coach = build_trading_coach(history)
+    streaks = compute_streaks(history)
     return jsonify({
         "reviews": reviews,
-        "coach": coach
+        "coach": coach,
+        "streaks": streaks
     })
+
+
+@app.route("/community")
+def community():
+    current_user = get_current_user()
+    following = load_following_traders()
+    payload = build_public_leaderboard()
+    payload["following"] = following
+    payload["current_user"] = serialize_user(current_user)
+    return jsonify(payload)
+
+
+@app.route("/community/profile", methods=["POST"])
+def community_profile():
+    current_user = get_current_user()
+    if not current_user:
+        return jsonify({"error": "Sign in first."}), 401
+    payload = request.get_json(silent=True) or {}
+    public_alias = str(payload.get("public_alias") or current_user["display_name"]).strip()[:40]
+    public_profile = bool(payload.get("public_profile"))
+    update_user_profile_fields(current_user["id"], public_profile=public_profile, public_alias=public_alias)
+    fresh = get_user_by_id(current_user["id"])
+    return jsonify({"ok": True, "user": serialize_user(fresh)})
+
+
+@app.route("/community/follow", methods=["POST"])
+def community_follow():
+    current_user = get_current_user()
+    if not current_user:
+        return jsonify({"error": "Sign in first."}), 401
+    payload = request.get_json(silent=True) or {}
+    user_id = int(payload.get("user_id") or 0)
+    action = str(payload.get("action") or "follow").strip().lower()
+    following = [int(item) for item in load_following_traders() if str(item).isdigit()]
+    if action == "unfollow":
+        following = [item for item in following if item != user_id]
+    elif user_id and user_id not in following and user_id != current_user["id"]:
+        following.append(user_id)
+    save_following_traders(following)
+    return jsonify({"ok": True, "following": following})
 
 
 # =========================

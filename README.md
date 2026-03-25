@@ -9,7 +9,7 @@ This project is a lightweight trading dashboard built with Flask, vanilla HTML, 
 - View candlestick charts with timeframe controls
 - Save and remove watchlist tickers with persistence in `watchlist.json`
 - Manual refresh with live/cache/demo status messaging
-- Real market data through Twelve Data when `TWELVE_DATA_API_KEY` is configured
+- Real market data through Polygon when `POLYGON_API_KEY` is configured
 - Demo fallback when no provider key is set or the provider errors
 
 ## Project Structure
@@ -43,7 +43,7 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-6. Create a `.env` file from `.env.example` and add your Twelve Data API key:
+6. Create a `.env` file from `.env.example` and add your market data key:
 
 ```powershell
 copy .env.example .env
@@ -52,6 +52,7 @@ copy .env.example .env
 Then edit `.env` and set:
 
 ```text
+POLYGON_API_KEY=your_real_polygon_api_key
 TWELVE_DATA_API_KEY=your_real_twelve_data_key
 STRIPE_PUBLISHABLE_KEY=your_stripe_publishable_key
 STRIPE_SECRET_KEY=your_stripe_secret_key
@@ -79,6 +80,7 @@ This project is set up for Render with `render.yaml`.
 3. Add the environment variable:
 
 ```text
+POLYGON_API_KEY=your_real_polygon_api_key
 TWELVE_DATA_API_KEY=your_real_twelve_data_key
 STRIPE_PUBLISHABLE_KEY=your_stripe_publishable_key
 STRIPE_SECRET_KEY=your_stripe_secret_key
@@ -103,7 +105,7 @@ gunicorn main:app
 
 ## Notes
 
-- Market data now prefers Twelve Data when `TWELVE_DATA_API_KEY` is set.
+- Market data now prefers Polygon when `POLYGON_API_KEY` is set.
 - Premium billing uses Stripe Checkout and Stripe Customer Portal when the Stripe keys are configured.
 - The CBOE SKEW Index uses a separate market-data fetch path.
 - If the provider is unavailable, the app falls back to cached data and then demo data.

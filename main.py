@@ -21,6 +21,8 @@ WATCHLIST_FILE = "watchlist.json"
 MARKET_CACHE_FILE = "market_cache.json"
 TWELVE_DATA_BASE_URL = "https://api.twelvedata.com"
 TWELVE_DATA_API_KEY_ENV = "TWELVE_DATA_API_KEY"
+POLYGON_BASE_URL = "https://api.polygon.io"
+POLYGON_API_KEY_ENV = "POLYGON_API_KEY"
 DATABASE_URL_ENV = "DATABASE_URL"
 STRIPE_SECRET_KEY_ENV = "STRIPE_SECRET_KEY"
 STRIPE_PUBLISHABLE_KEY_ENV = "STRIPE_PUBLISHABLE_KEY"
@@ -89,6 +91,10 @@ if os.environ.get(STRIPE_SECRET_KEY_ENV, "").strip():
 
 def get_twelve_data_api_key():
     return os.environ.get(TWELVE_DATA_API_KEY_ENV, "").strip()
+
+
+def get_polygon_api_key():
+    return os.environ.get(POLYGON_API_KEY_ENV, "").strip()
 
 
 def get_stripe_secret_key():
@@ -614,6 +620,13 @@ def parse_twelve_timestamp(raw_value):
     return int(dt.replace(tzinfo=DEMO_TIMEZONE).timestamp())
 
 
+def parse_polygon_timestamp(raw_value):
+    try:
+        return int(float(raw_value) / 1000)
+    except (TypeError, ValueError):
+        return int(time.time())
+
+
 def get_et_session_key(unix_seconds):
     dt = datetime.fromtimestamp(unix_seconds, tz=DEMO_TIMEZONE)
     return dt.strftime("%Y-%m-%d")
@@ -1065,7 +1078,153 @@ def fetch_twelve_data_price(symbol):
     return round(float(price), 2)
 
 
+def get_polygon_range_config(tf):
+    if tf == "1m":
+        return {"multiplier": 1, "timespan": "minute", "days": 1}
+    if tf == "5m":
+        return {"multiplier": 5, "timespan": "minute", "days": 5}
+    if tf == "15m":
+        return {"multiplier": 15, "timespan": "minute", "days": 10}
+    if tf == "1d":
+        return {"multiplier": 1, "timespan": "day", "days": 60}
+    return {"multiplier": 5, "timespan": "minute", "days": 5}
+
+
+def fetch_polygon_candles(symbol, tf):
+    api_key = get_polygon_api_key()
+    if not api_key:
+        return None
+
+    config = get_polygon_range_config(tf)
+    end_date = datetime.now(tz=DEMO_TIMEZONE).date()
+    start_date = end_date.fromordinal(end_date.toordinal() - config["days"])
+
+    response = requests.get(
+        f"{POLYGON_BASE_URL}/v2/aggs/ticker/{symbol}/range/{config['multiplier']}/{config['timespan']}/{start_date.isoformat()}/{end_date.isoformat()}",
+        params={
+            "adjusted": "true",
+            "sort": "asc",
+            "limit": 5000,
+            "apiKey": api_key
+        },
+        timeout=15,
+    )
+    response.raise_for_status()
+    payload = response.json()
+
+    results = payload.get("results") or []
+    if not results:
+        return None
+
+    candles = []
+    for row in results:
+        open_price = float(row.get("o", 0))
+        close_price = float(row.get("c", 0))
+        high_price = float(row.get("h", max(open_price, close_price)))
+        low_price = float(row.get("l", min(open_price, close_price)))
+        candles.append({
+            "time": parse_polygon_timestamp(row.get("t")),
+            "open": round(open_price, 2),
+            "high": round(max(high_price, open_price, close_price), 2),
+            "low": round(min(low_price, open_price, close_price), 2),
+            "close": round(close_price, 2),
+            "volume": int(row.get("v", 0))
+        })
+
+    return candles
+
+
+def fetch_polygon_price(symbol):
+    api_key = get_polygon_api_key()
+    if not api_key:
+        return None
+
+    response = requests.get(
+        f"{POLYGON_BASE_URL}/v2/last/trade/{symbol}",
+        params={"apiKey": api_key},
+        timeout=10,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    trade = payload.get("results") or {}
+    price = trade.get("p")
+    if price is None:
+        return None
+    return round(float(price), 2)
+
+
+def search_polygon_symbols(query):
+    api_key = get_polygon_api_key()
+    if not api_key or len(query.strip()) < 1:
+        return []
+
+    response = requests.get(
+        f"{POLYGON_BASE_URL}/v3/reference/tickers",
+        params={
+            "search": query.strip(),
+            "market": "stocks",
+            "active": "true",
+            "limit": 8,
+            "apiKey": api_key
+        },
+        timeout=15
+    )
+    response.raise_for_status()
+    payload = response.json()
+    matches = payload.get("results") or []
+    results = []
+    normalized_query = query.strip().upper()
+
+    for item in matches:
+        symbol = str(item.get("ticker") or "").strip().upper()
+        name = str(item.get("name") or "").strip()
+        market = str(item.get("market") or "").strip().lower()
+        type_label = str(item.get("type") or "").strip().lower()
+
+        if not symbol or not name:
+            continue
+        if market and market != "stocks":
+            continue
+        if type_label and type_label not in {"cs", "common_stock", "adr", "etf"}:
+            continue
+
+        exact_symbol = symbol == normalized_query
+        starts_symbol = symbol.startswith(normalized_query)
+        starts_name = name.upper().startswith(normalized_query)
+        contains_name = normalized_query in name.upper()
+
+        score = 0
+        if exact_symbol:
+            score += 100
+        if starts_symbol:
+            score += 30
+        if starts_name:
+            score += 20
+        if contains_name:
+            score += 10
+
+        results.append({
+            "symbol": symbol,
+            "name": name,
+            "exchange": str(item.get("primary_exchange") or item.get("locale") or "").strip(),
+            "country": "USA",
+            "instrument_type": "stock",
+            "score": score
+        })
+
+    results.sort(key=lambda item: (-item["score"], item["symbol"]))
+    return results[:8]
+
+
 def search_symbols(query):
+    if get_polygon_api_key():
+        try:
+            polygon_results = search_polygon_symbols(query)
+            if polygon_results:
+                return polygon_results
+        except Exception as exc:
+            print("Polygon symbol search error:", exc)
+
     api_key = get_twelve_data_api_key()
     if not api_key or len(query.strip()) < 1:
         return []
@@ -1180,7 +1339,15 @@ def fetch_and_cache_candles(symbol, tf):
         }
 
     try:
-        candle_rows = fetch_twelve_data_candles(symbol, tf)
+        candle_rows = None
+        source = "live"
+
+        if get_polygon_api_key():
+            candle_rows = fetch_polygon_candles(symbol, tf)
+
+        if not candle_rows:
+            candle_rows = fetch_twelve_data_candles(symbol, tf)
+
         if not candle_rows:
             if cached_candles:
                 return {
@@ -1198,13 +1365,13 @@ def fetch_and_cache_candles(symbol, tf):
 
         return {
             "candles": candle_rows,
-            "source": "live",
+            "source": source,
             "cached": False,
             "stale": False,
             "age_seconds": 0
         }
     except Exception as exc:
-        print("Twelve Data candle fetch error:", exc)
+        print("Market candle fetch error:", exc)
         if cached_candles:
             return {
                 "candles": cached_candles["data"],
@@ -1338,7 +1505,11 @@ def get_live_price(symbol):
         }
 
     try:
-        live_price = fetch_twelve_data_price(symbol)
+        live_price = None
+        if get_polygon_api_key():
+            live_price = fetch_polygon_price(symbol)
+        if live_price is None:
+            live_price = fetch_twelve_data_price(symbol)
         if live_price is not None:
             set_cache_entry(quote_cache, cache_key, {"price": live_price})
             return {

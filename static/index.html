@@ -1730,7 +1730,7 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
         <div class="helper-pill">Zoom stays locked in</div>
       </div>
       <div class="chart-tool-row">
-        <div class="helper-text">Change timeframe, overlays, or comparison names here.</div>
+        <div class="helper-text">Change timeframe or overlays here.</div>
         <div class="chart-tool-actions">
           <button id="zoneToggleBtn" class="chart-tool-btn active" onclick="toggleChartZones()">Hide Zones</button>
         </div>
@@ -1741,16 +1741,6 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
         <button data-tf="15m">15M</button>
       </div>
 
-      <div class="preset-bar" id="presetBar">
-        <button data-preset="trend" class="active">Trend Preset</button>
-        <button data-preset="momentum">Momentum Preset</button>
-        <button data-preset="mean">Mean Reversion</button>
-      </div>
-      <div class="alert-controls">
-        <input id="compareTickers" class="paper-qty paper-note" type="text" maxlength="24" placeholder="Compare tickers, ex: MSFT,NVDA" />
-        <button class="paper-btn close" onclick="applyComparison()">Compare</button>
-        <button class="ghost-btn" onclick="clearComparison()">Clear Compare</button>
-      </div>
       <div id="indicatorToggleBar" class="indicator-toggle-bar"></div>
     </div>
   </div>
@@ -1964,7 +1954,7 @@ let lastTicker = null;
 let watchlist = [];
 let watchlistData = [];
 let isLoading = false;
-let indicatorPreset = "trend";
+let indicatorPreset = "momentum";
 let currentView = "market";
 let authMode = "login";
 let currentUser = null;
@@ -1985,8 +1975,8 @@ let riskProfile = "balanced";
 let indicatorVisibility = {
   ema9: true,
   ema20: true,
-  vwap: true,
-  rsi: false
+  vwap: false,
+  rsi: true
 };
 let chartToolState = {
   zones: true
@@ -2007,14 +1997,11 @@ let serverStateEnabled = false;
 let latestAnalyzedSnapshot = null;
 let searchSuggestions = [];
 let searchDebounce = null;
-let comparisonSymbols = [];
-let comparisonSeries = [];
 let latestHotList = [];
 let portfolioCoachState = null;
 let portfolioReviewState = [];
 let portfolioStreakState = null;
 let communityState = { leaderboard: [], journals: [], heatmap: [], following: [] };
-let comparisonSeriesCache = {};
 let scannerCache = {};
 let scannerCacheTime = 0;
 const DEFAULT_SCANNER_UNIVERSE = ["AAPL", "MSFT", "NVDA", "AMZN", "META", "TSLA", "AMD", "GOOGL"];
@@ -2034,6 +2021,13 @@ const intradayAxisFormatter = new Intl.DateTimeFormat("en-US", {
   timeZone: "America/New_York",
   hour: "numeric",
   minute: "2-digit",
+  hour12: true
+});
+const liveEtTimeFormatter = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/New_York",
+  hour: "numeric",
+  minute: "2-digit",
+  second: "2-digit",
   hour12: true
 });
 function setStatus(message, tone=""){
@@ -2062,7 +2056,7 @@ function renderMarketEmptyState(title="Search a stock or company name to begin."
       <div class="empty-copy">${copy}</div>
       <div class="empty-grid">
         <div class="empty-tip">Use a ticker like <strong>AAPL</strong> or a company name like <strong>Apple</strong>.</div>
-        <div class="empty-tip">Switch timeframe and indicator preset after loading the chart to focus on trend, momentum, or mean reversion.</div>
+        <div class="empty-tip">Switch timeframe after loading the chart to tighten up the view.</div>
         <div class="empty-tip">Save strong names to the watchlist or create an alert from the ticker card when a setup looks interesting.</div>
         </div>
       </div>
@@ -2345,14 +2339,8 @@ async function handleCheckoutReturn(){
 }
 
 function applyIndicatorPreset(preset){
-  indicatorPreset = preset;
-  if(preset === "trend"){
-    indicatorVisibility = { ema9: true, ema20: true, vwap: true, rsi: false };
-  }else if(preset === "momentum"){
-    indicatorVisibility = { ema9: true, ema20: true, vwap: false, rsi: true };
-  }else{
-    indicatorVisibility = { ema9: false, ema20: true, vwap: true, rsi: true };
-  }
+  indicatorPreset = "momentum";
+  indicatorVisibility = { ema9: true, ema20: true, vwap: false, rsi: true };
   renderIndicatorToggles();
   saveLayoutPrefs();
 }
@@ -2501,7 +2489,7 @@ async function pollLivePrice(){
     }
     updateQuoteDisplay(price);
     updateLiveChartPrice(price, Number(payload.timestamp || Math.floor(Date.now() / 1000)));
-    setLastUpdated(`Live tick ${new Date().toLocaleTimeString()}`);
+    setLastUpdated(`Live tick ${liveEtTimeFormatter.format(new Date())} ET`);
   }catch(err){
     console.log("Live price poll failed", err);
   }
@@ -2621,8 +2609,7 @@ function saveLayoutPrefs(){
       indicatorVisibility,
       currentView,
       watchSort,
-      chartZones: chartToolState.zones,
-      comparisonSymbols
+      chartZones: chartToolState.zones
     }));
   }catch(err){
     console.log("Layout prefs save failed", err);
@@ -2636,10 +2623,9 @@ function loadLayoutPrefs(){
     if(parsed.strategy) strategy = parsed.strategy;
     if(parsed.riskProfile) riskProfile = parsed.riskProfile;
     if(parsed.timeframe) timeframe = parsed.timeframe;
-    if(parsed.indicatorPreset) indicatorPreset = parsed.indicatorPreset;
+    indicatorPreset = "momentum";
     if(parsed.indicatorVisibility) indicatorVisibility = { ...indicatorVisibility, ...parsed.indicatorVisibility };
     if(parsed.watchSort) watchSort = parsed.watchSort;
-    if(Array.isArray(parsed.comparisonSymbols)) comparisonSymbols = parsed.comparisonSymbols.slice(0, 3);
     if(typeof parsed.chartZones === "boolean") chartToolState.zones = parsed.chartZones;
     if(parsed.currentView) currentView = parsed.currentView;
   }catch(err){
@@ -3009,48 +2995,6 @@ function renderAiSetupCard(payload){
       <div class="confirmation-list">
         ${(payload.reasoning || []).map(item => `<div class="confirmation-pill">${item}</div>`).join("")}
       </div>
-    </div>
-  `;
-}
-
-function calculatePositionSize(){
-  const accountSize = Number(document.getElementById("positionCalcAccount")?.value || 0);
-  const riskPercent = Number(document.getElementById("positionCalcRisk")?.value || 0);
-  const riskPerShare = Number(document.getElementById("positionCalcRiskPerShare")?.dataset.value || 0);
-  const output = document.getElementById("positionCalcOutput");
-  if(!output){
-    return;
-  }
-
-  if(!accountSize || !riskPercent || !riskPerShare){
-    output.innerText = "Enter account size and risk percent to calculate exact share size.";
-    return;
-  }
-
-  const dollarRisk = accountSize * (riskPercent / 100);
-  const shares = Math.max(0, Math.floor(dollarRisk / riskPerShare));
-  const capital = shares * Number(document.getElementById("positionCalcEntry")?.dataset.value || 0);
-  output.innerText = `${shares} shares | About $${capital.toFixed(2)} position value | $${dollarRisk.toFixed(2)} max planned risk`;
-}
-
-function renderPositionSizeCard(payload){
-  if(!payload){
-    return "";
-  }
-  return `
-    <div class="section">
-      <div class="section-title-row">
-        <div>Position Size Calculator</div>
-        <div class="helper-pill">Risk per share $${Number(payload.risk_per_share || 0).toFixed(2)}</div>
-      </div>
-      <div class="alert-controls">
-        <input id="positionCalcAccount" class="paper-qty" type="number" min="100" step="100" value="10000" oninput="calculatePositionSize()" />
-        <input id="positionCalcRisk" class="paper-qty" type="number" min="0.1" step="0.1" value="1" oninput="calculatePositionSize()" />
-      </div>
-      <div class="paper-details">Account size | Risk % per trade</div>
-      <div id="positionCalcEntry" data-value="${Number(payload.entry || 0).toFixed(2)}" class="hidden"></div>
-      <div id="positionCalcRiskPerShare" data-value="${Number(payload.risk_per_share || 0).toFixed(2)}" class="hidden"></div>
-      <div id="positionCalcOutput" class="indicator-meta">Enter account size and risk percent to calculate exact share size.</div>
     </div>
   `;
 }
@@ -3470,73 +3414,6 @@ function renderMarketPulse(){
       </div>
     </div>
   `;
-}
-
-async function applyComparison(){
-  const input = document.getElementById("compareTickers");
-  const raw = input?.value || "";
-  const symbols = raw.split(",").map(item => item.trim().toUpperCase()).filter(Boolean).filter(item => item !== lastTicker);
-  comparisonSymbols = [...new Set(symbols)].slice(0, 3);
-  saveLayoutPrefs();
-  await loadCandles(lastTicker);
-}
-
-async function clearComparison(){
-  comparisonSymbols = [];
-  comparisonSeries = [];
-  const input = document.getElementById("compareTickers");
-  if(input){
-    input.value = "";
-  }
-  saveLayoutPrefs();
-  renderCurrentChart();
-}
-
-async function loadComparisonSeries(){
-  comparisonSeries = [];
-  if(!lastTicker || !comparisonSymbols.length){
-    return;
-  }
-
-  const colors = ["#f97316", "#38bdf8", "#facc15"];
-  const requests = comparisonSymbols.map(async (symbol, index) => {
-    const cacheKey = `${symbol}:${timeframe}`;
-    const cached = comparisonSeriesCache[cacheKey];
-    if(cached && (Date.now() - cached.timestamp) < 60000){
-      return {
-        symbol,
-        color: colors[index % colors.length],
-        points: cached.points
-      };
-    }
-    try{
-      const res = await fetch(`/candles?ticker=${symbol}&tf=${timeframe}`);
-      const payload = await res.json();
-      const candles = Array.isArray(payload.candles) ? payload.candles : [];
-      if(!candles.length){
-        return null;
-      }
-      const base = candles[0].close || 1;
-      const points = candles.map(candle => ({
-        x: new Date(candle.time * 1000),
-        y: Number((((candle.close / base) - 1) * 100).toFixed(2))
-      }));
-      comparisonSeriesCache[cacheKey] = {
-        points,
-        timestamp: Date.now()
-      };
-      return {
-        symbol,
-        color: colors[index % colors.length],
-        points
-      };
-    }catch(err){
-      console.log("Comparison load failed", err);
-      return null;
-    }
-  });
-
-  comparisonSeries = (await Promise.all(requests)).filter(Boolean);
 }
 
 function buildScannerGrade(snapshot){
@@ -4086,22 +3963,6 @@ function renderChart(ticker, candles, indicators, sourceLabel, sessionLabel){
     traces.push(buildLineTrace(xValues, chartIndicators.vwap, "VWAP", "#fb923c", 2));
   }
 
-  comparisonSeries.forEach(series => {
-    if(!series?.points?.length){
-      return;
-    }
-    traces.push({
-      x: series.points.map(point => point.x),
-      y: series.points.map(point => point.y),
-      type: "scatter",
-      mode: "lines",
-      name: `${series.symbol} %`,
-      line: { color: series.color, width: 2, shape: "spline" },
-      hovertemplate: `${series.symbol}: %{y:.2f}%<extra></extra>`,
-      yaxis: hasRsi ? "y3" : "y"
-    });
-  });
-
   if(hasRsi){
     traces.push(buildLineTrace(xValues, chartIndicators.rsi14, "RSI 14", "#c084fc", 2, "y2"));
   }
@@ -4109,8 +3970,8 @@ function renderChart(ticker, candles, indicators, sourceLabel, sessionLabel){
   const layout = {
     paper_bgcolor: "#020617",
     plot_bgcolor: "#020617",
-    uirevision: `${ticker}:${timeframe}:${indicatorPreset}`,
-    editrevision: `${ticker}:${timeframe}:${indicatorPreset}`,
+    uirevision: `${ticker}:${timeframe}:momentum`,
+    editrevision: `${ticker}:${timeframe}:momentum`,
     margin: { l: 18, r: 72, t: 18, b: 62 },
     font: { color: "#94a3b8" },
     dragmode: "zoom",
@@ -4248,17 +4109,6 @@ function renderChart(ticker, candles, indicators, sourceLabel, sessionLabel){
       font: { size: 10, color: "#94a3b8" }
       }];
     }
-
-  if(comparisonSeries.length){
-    layout.yaxis3 = {
-      side: "left",
-      overlaying: "y",
-      showgrid: false,
-      zeroline: false,
-      tickfont: { size: 10, color: "#94a3b8" },
-      title: { text: "% change", font: { size: 10, color: "#94a3b8" } }
-    };
-  }
 
   layout.shapes = [...(layout.shapes || []), ...zoneShapes];
 
@@ -4803,12 +4653,6 @@ document.addEventListener("click", (e)=>{
     if(lastTicker) loadCandles(lastTicker);
   }
 
-  if(e.target.dataset.preset){
-    applyIndicatorPreset(e.target.dataset.preset);
-    document.querySelectorAll("#presetBar button").forEach(b=>b.classList.remove("active"));
-    e.target.classList.add("active");
-    renderCurrentChart();
-  }
 });
 
 async function loadWatchlist(){
@@ -4986,7 +4830,6 @@ async function loadCandles(ticker){
   const cRes = await fetch(`/candles?ticker=${ticker}&tf=${timeframe}`);
   const payload = await cRes.json();
   const visibleCandles = Array.isArray(payload.candles) ? payload.candles : [];
-  await loadComparisonSeries();
 
   if(Array.isArray(visibleCandles) && visibleCandles.length){
     const sourceLabel =
@@ -5014,7 +4857,7 @@ async function loadCandles(ticker){
       setLastUpdated(`Cached candles ${formatAge(payload.cache_age_seconds)}`);
       setStatus(`Showing cached candles from ${Math.round(payload.cache_age_seconds)}s ago.`, "warning");
     }else if(payload.data_source === "live"){
-      setLastUpdated(`Live candles updated at ${new Date().toLocaleTimeString()}`);
+      setLastUpdated(`Live candles updated at ${liveEtTimeFormatter.format(new Date())} ET`);
     }
   }else{
     showChartMessage("No candle data returned for this ticker and timeframe yet.");
@@ -5070,7 +4913,7 @@ async function analyze(sym){
       statusMessage = `Showing recent cached quote data from ${Math.round(d.cache_age_seconds)}s ago.`;
       setLastUpdated(`Cached quote ${formatAge(d.cache_age_seconds)}`);
     }else{
-      setLastUpdated(`Live quote just updated at ${new Date().toLocaleTimeString()}`);
+      setLastUpdated(`Live quote just updated at ${liveEtTimeFormatter.format(new Date())} ET`);
     }
 
     latestQuotes[t] = d.price;
@@ -5142,12 +4985,10 @@ async function analyze(sym){
           ${renderWhyMovingSection(d.why_moving)}
           ${renderTradeWarningCard(d.trade_warning)}
           ${renderAiSetupCard(d.ai_setup)}
-          ${renderPositionSizeCard(d.position_size)}
           ${renderSmartAlerts(d.smart_alerts)}
         </div>
       `;
     syncAlertInputs();
-    calculatePositionSize();
 
     document.getElementById("marketInsights").innerHTML = `
       <div class="insights-grid">
@@ -5282,13 +5123,12 @@ async function initializeApp(){
   document.getElementById("discordLinkInput").value = getDiscordLink();
   document.getElementById("riskProfile").value = riskProfile;
   syncTradeInputs();
+  applyIndicatorPreset("momentum");
   document.querySelectorAll("#strategyBar button").forEach(button => button.classList.toggle("active", button.dataset.s === strategy));
   document.querySelectorAll("#tfBar button").forEach(button => button.classList.toggle("active", button.dataset.tf === timeframe));
-  document.querySelectorAll("#presetBar button").forEach(button => button.classList.toggle("active", button.dataset.preset === indicatorPreset));
   document.getElementById("watchSort").value = watchSort;
   document.getElementById("zoneToggleBtn").classList.toggle("active", chartToolState.zones);
   document.getElementById("zoneToggleBtn").innerText = chartToolState.zones ? "Hide Zones" : "Show Zones";
-  document.getElementById("compareTickers").value = comparisonSymbols.join(",");
   loadPaperPositions();
   loadPaperHistory();
   loadAlerts();

@@ -199,7 +199,7 @@ body {
 
 .page-tools {
   display:flex;
-  justify-content:flex-end;
+  justify-content:space-between;
   align-items:center;
   gap:10px;
   margin-bottom:10px;
@@ -948,6 +948,79 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
   border-color:var(--line);
 }
 
+.profile-trigger,
+.discord-btn {
+  width:44px;
+  height:44px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  border-radius:14px;
+  background:rgba(12, 23, 41, 0.92);
+  border:1px solid var(--line);
+  color:#e2e8f0;
+}
+
+.discord-btn {
+  background:linear-gradient(180deg, #5865f2, #4854d4);
+  border-color:#7480ff;
+}
+
+.discord-btn svg,
+.profile-trigger svg {
+  width:20px;
+  height:20px;
+  fill:currentColor;
+}
+
+.profile-panel {
+  position:fixed;
+  left:0;
+  top:0;
+  width:min(88vw, 320px);
+  height:100%;
+  background:linear-gradient(180deg, #071221, #04111f);
+  border-right:1px solid var(--line);
+  padding:18px;
+  transform:translateX(-100%);
+  transition:transform 0.25s ease;
+  z-index:22;
+  overflow:auto;
+}
+
+.profile-panel.open {
+  transform:translateX(0);
+}
+
+.profile-header,
+.profile-block {
+  margin-bottom:16px;
+}
+
+.profile-actions,
+.settings-grid {
+  display:grid;
+  gap:10px;
+}
+
+.profile-title {
+  font-size:18px;
+  font-weight:700;
+}
+
+.compact-copy {
+  color:var(--muted);
+  font-size:13px;
+  line-height:1.45;
+}
+
+.mini-label {
+  color:var(--muted);
+  font-size:11px;
+  text-transform:uppercase;
+  letter-spacing:0.08em;
+}
+
 .watch-close {
   background:#1e293b;
   color:#e2e8f0;
@@ -1084,6 +1157,31 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
   background:linear-gradient(180deg, #16304d, #11233b);
   border-color:#335176;
   color:var(--text);
+}
+
+.movers-hero {
+  display:flex;
+  justify-content:space-between;
+  gap:12px;
+  align-items:flex-start;
+  flex-wrap:wrap;
+}
+
+.mover-rank {
+  font-size:28px;
+  font-weight:800;
+  color:#f8fafc;
+}
+
+.action-card-grid {
+  display:grid;
+  grid-template-columns:repeat(auto-fit, minmax(180px, 1fr));
+  gap:12px;
+  margin-top:14px;
+}
+
+.hero-card.compact {
+  padding:18px;
 }
 
 .portfolio-context {
@@ -1534,38 +1632,33 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
 <body>
 
 <div id="watchBackdrop" class="watch-backdrop" onclick="closeWatchlist()"></div>
+<div id="profileBackdrop" class="watch-backdrop" onclick="closeProfilePanel()"></div>
 
 <div class="container">
 
   <div class="page-tools">
     <div class="page-tool-group">
-      <div id="authSummary" class="auth-summary">Using local mode</div>
-      <button id="authBtn" class="auth-btn" onclick="openAuthModal()">Sign In</button>
-      <button id="logoutBtn" class="logout-btn hidden" onclick="logoutUser()">Logout</button>
-      <button id="upgradeBtn" class="auth-btn hidden" onclick="startPremiumCheckout()">Upgrade</button>
-      <button id="manageBillingBtn" class="logout-btn hidden" onclick="openBillingPortal()">Manage Billing</button>
+      <button class="profile-trigger" onclick="openProfilePanel()" aria-label="Open profile and settings">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12c2.76 0 5-2.69 5-6s-2.24-6-5-6-5 2.69-5 6 2.24 6 5 6Zm0 2c-4.42 0-8 2.69-8 6v2h16v-2c0-3.31-3.58-6-8-6Z"/></svg>
+      </button>
+    </div>
+    <div class="page-tool-group">
       <button class="watch-toggle" onclick="openWatchlist()">Watchlist</button>
+      <button class="discord-btn" onclick="openDiscordLink()" aria-label="Open Discord">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.32 4.37A17.43 17.43 0 0 0 16 3l-.2.41a16.1 16.1 0 0 1 3.9 1.34 13.6 13.6 0 0 0-3.4-1.05 12.12 12.12 0 0 0-8.6 0A13.6 13.6 0 0 0 4.3 4.75 16.1 16.1 0 0 1 8.2 3.4L8 3A17.43 17.43 0 0 0 3.68 4.37C.93 8.47.19 12.45.56 16.38A17.73 17.73 0 0 0 5.9 19l1.15-1.58c-.63-.24-1.23-.54-1.79-.89.15.11.31.21.47.3a11.8 11.8 0 0 0 10.54 0c.16-.09.32-.19.47-.3-.56.35-1.16.65-1.79.89L16.1 19a17.73 17.73 0 0 0 5.34-2.62c.43-4.55-.73-8.5-1.12-12.01ZM9.35 14.1c-1.03 0-1.88-.95-1.88-2.13 0-1.17.83-2.13 1.88-2.13 1.06 0 1.9.96 1.88 2.13 0 1.18-.82 2.13-1.88 2.13Zm5.3 0c-1.03 0-1.88-.95-1.88-2.13 0-1.17.83-2.13 1.88-2.13 1.06 0 1.9.96 1.88 2.13 0 1.18-.82 2.13-1.88 2.13Z"/></svg>
+      </button>
     </div>
   </div>
 
   <div id="marketView" class="view-panel market-stack">
-  <div id="heroCard" class="hero-card">
+  <div id="heroCard" class="hero-card compact">
     <div class="hero-eyebrow">Trading Workspace</div>
-    <div class="hero-title">Search a stock or company name to begin.</div>
-    <div class="hero-copy">Use the market page for live context, charting, signals, alerts, and news. Your portfolio page stays focused on paper trades and performance so the app feels lighter to use.</div>
-    <div class="hero-steps">
-      <div class="hero-step">
-        <strong>1. Search</strong>
-        <span>Type a ticker or company name and pick a match from the suggestions.</span>
-      </div>
-      <div class="hero-step">
-        <strong>2. Analyze</strong>
-        <span>Review the signal, key levels, chart overlays, and latest headlines.</span>
-      </div>
-      <div class="hero-step">
-        <strong>3. Track</strong>
-        <span>Save it to your watchlist, set an alert, or move to the portfolio page to paper trade it.</span>
-      </div>
+    <div class="hero-title">Trade the stock in front of you.</div>
+    <div class="hero-copy">Search, read the move, and act. The page stays focused on price, setup, chart, and news.</div>
+    <div class="action-card-grid">
+      <div class="hero-step"><strong>Search</strong><span>Ticker or company name</span></div>
+      <div class="hero-step"><strong>Analyze</strong><span>Signal, levels, and chart</span></div>
+      <div class="hero-step"><strong>Track</strong><span>Watchlist, alerts, and trades</span></div>
     </div>
   </div>
 
@@ -1575,19 +1668,15 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
         <div class="section-kicker">Market Search</div>
         <div class="section-title">Find the stock you want fast</div>
       </div>
-      <div class="helper-pill">Autocomplete supports tickers and full company names</div>
+      <div class="helper-pill">Ticker or company name</div>
     </div>
     <div class="top">
       <div class="search-wrap">
         <input id="ticker" placeholder="Search ticker or company name"/>
         <div id="searchSuggestions" class="search-suggestions hidden"></div>
-        <div class="search-helper">Examples: <strong>AAPL</strong>, <strong>Apple</strong>, <strong>Microsoft</strong>, <strong>NVDA</strong></div>
+        <div class="search-helper">Try `AAPL`, `Apple`, `Microsoft`, or `NVDA`</div>
       </div>
       <button class="analyze-btn" onclick="analyze()">Analyze</button>
-    </div>
-    <div class="helper-row">
-      <div class="helper-text">Pick a strategy style below, then analyze once. The chart only refreshes when you ask it to.</div>
-      <div class="helper-pill">Enter chooses the top match</div>
     </div>
   </div>
 
@@ -1607,9 +1696,9 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
     <button data-s="mean">Mean</button>
   </div>
   <div class="helper-row">
-    <div class="helper-text">Strategy presets shape the trade plan logic. Day is the best starting point if you just want a balanced view.</div>
+    <div class="helper-text">Pick the style and risk you want.</div>
     <div class="alert-controls" style="gap:10px;">
-      <div class="helper-pill">You can switch strategies after analyzing</div>
+      <div class="helper-pill">Balanced by default</div>
       <select id="riskProfile" class="alert-direction">
         <option value="conservative">Conservative Risk</option>
         <option value="balanced" selected>Balanced Risk</option>
@@ -1636,12 +1725,12 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
       <div class="section-head">
         <div>
           <div class="section-kicker">Chart Controls</div>
-          <div class="section-title">Tune the view without reloading the whole page</div>
+          <div class="section-title">Stay on the move, not the menus</div>
         </div>
-        <div class="helper-pill">Pinch or scroll to zoom, double-click to reset</div>
+        <div class="helper-pill">Zoom stays locked in</div>
       </div>
       <div class="chart-tool-row">
-        <div class="helper-text">Timeframe changes update the candles. Presets shape the overlays, and the drawing toolbar lets you mark your own levels.</div>
+        <div class="helper-text">Change timeframe, overlays, or comparison names here.</div>
         <div class="chart-tool-actions">
           <button id="zoneToggleBtn" class="chart-tool-btn active" onclick="toggleChartZones()">Hide Zones</button>
         </div>
@@ -1686,7 +1775,15 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
     <div class="paper-subtitle">Analyze a ticker on the market page and it will show up here.</div>
     <div class="paper-summary" id="portfolioContextSummary">No ticker analyzed yet.</div>
     <div class="paper-controls">
+      <select id="paperInstrument" class="paper-qty" onchange="syncTradeInputs()">
+        <option value="stock">Stock</option>
+        <option value="call">Call Option</option>
+        <option value="put">Put Option</option>
+      </select>
       <input id="paperQty" class="paper-qty" type="number" min="1" step="1" value="1" />
+      <input id="paperStrike" class="paper-qty" type="number" min="0" step="0.01" placeholder="Strike" />
+      <input id="paperPremium" class="paper-qty" type="number" min="0" step="0.01" placeholder="Premium" />
+      <input id="paperExpiry" class="paper-qty" type="date" />
       <input id="paperNote" class="paper-qty paper-note" type="text" maxlength="140" placeholder="Optional trade note" />
       <button class="paper-btn buy" onclick="addPaperTrade('BUY')">Paper Buy</button>
       <button class="paper-btn sell" onclick="addPaperTrade('SELL')">Paper Sell</button>
@@ -1712,20 +1809,46 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
     </div>
   </div>
 
+  <div id="liveView" class="view-panel hidden">
+    <div class="portfolio-context">
+      <div class="paper-title">Real Trading</div>
+      <div class="paper-subtitle">Broker-ready order ticket. Live execution stays locked until a brokerage account is connected.</div>
+      <div class="paper-summary" id="liveTradingSummary">Connect a broker to place real-money stock, call, and put orders.</div>
+      <div class="paper-controls">
+        <select id="liveInstrument" class="paper-qty">
+          <option value="stock">Stock</option>
+          <option value="call">Call Option</option>
+          <option value="put">Put Option</option>
+        </select>
+        <input id="liveQty" class="paper-qty" type="number" min="1" step="1" value="1" />
+        <input id="liveStrike" class="paper-qty" type="number" min="0" step="0.01" placeholder="Strike" />
+        <input id="livePremium" class="paper-qty" type="number" min="0" step="0.01" placeholder="Premium" />
+        <input id="liveExpiry" class="paper-qty" type="date" />
+        <button class="paper-btn buy" onclick="showBrokerBlocked('BUY')">Buy</button>
+        <button class="paper-btn sell" onclick="showBrokerBlocked('SELL')">Sell</button>
+      </div>
+    </div>
+    <div class="paper-panel">
+      <div class="paper-head">
+        <div>
+          <div class="paper-title">Live Brokerage Status</div>
+          <div class="paper-subtitle">Orders, balances, and live positions will appear here after broker setup.</div>
+        </div>
+      </div>
+      <div class="paper-empty">Live trading is intentionally disabled until broker credentials, funding, compliance, and order routing are connected.</div>
+    </div>
+  </div>
+
   <div id="scannerView" class="view-panel hidden">
     <div class="control-card">
-      <div class="section-head">
+      <div class="movers-hero">
         <div>
-          <div class="section-kicker">Scanner</div>
-          <div class="section-title">Surface movers and setups without searching one-by-one</div>
+          <div class="section-kicker">Top Movers</div>
+          <div class="section-title">Today’s top movers from the tracked liquid universe</div>
         </div>
-        <div class="helper-pill">Uses your watchlist first to stay lighter on API usage</div>
+        <button class="analyze-btn" onclick="runScanner()">Refresh Movers</button>
       </div>
-      <div class="alert-controls">
-        <input id="scannerTickers" class="paper-qty paper-note" type="text" maxlength="80" placeholder="Optional custom list, ex: AAPL,MSFT,NVDA,TSLA" />
-        <button class="analyze-btn" onclick="runScanner()">Run Scanner</button>
-      </div>
-      <div class="helper-text">Scanner looks for strongest movers, setup grades, and quick relative strength using your current market data path.</div>
+      <div class="compact-copy">This page refreshes the top daily movers and surfaces new leaders from the tracked list without hammering your data provider.</div>
     </div>
     <div id="scannerResults" class="insights-shell"></div>
   </div>
@@ -1757,10 +1880,40 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
   <div class="bottom-nav">
       <button id="marketNav" class="active" onclick="switchView('market')">Market</button>
       <button id="portfolioNav" onclick="switchView('portfolio')">Portfolio</button>
+      <button id="liveNav" onclick="switchView('live')">Live</button>
       <button id="scannerNav" onclick="switchView('scanner')">Scanner</button>
       <button id="communityNav" onclick="switchView('community')">Community</button>
     </div>
 
+</div>
+
+<div id="profilePanel" class="profile-panel">
+  <div class="profile-header">
+    <div class="mini-label">Profile</div>
+    <div class="profile-title">Account & Settings</div>
+    <div id="authSummary" class="auth-summary">Using local mode</div>
+  </div>
+  <div class="profile-block">
+    <div class="profile-actions">
+      <button id="authBtn" class="auth-btn" onclick="openAuthModal()">Sign In</button>
+      <button id="logoutBtn" class="logout-btn hidden" onclick="logoutUser()">Logout</button>
+      <button id="upgradeBtn" class="auth-btn hidden" onclick="startPremiumCheckout()">Upgrade</button>
+      <button id="manageBillingBtn" class="logout-btn hidden" onclick="openBillingPortal()">Manage Billing</button>
+      <button class="ghost-btn" onclick="closeProfilePanel()">Close</button>
+    </div>
+  </div>
+  <div class="profile-block">
+    <div class="mini-label">Discord</div>
+    <div class="compact-copy">Set the invite link used by the top-right Discord button and the premium success flow.</div>
+    <div class="settings-grid">
+      <input id="discordLinkInput" type="text" placeholder="https://discord.gg/your-server" />
+      <button class="paper-btn close" onclick="saveDiscordSettings()">Save Discord Link</button>
+    </div>
+  </div>
+  <div class="profile-block">
+    <div class="mini-label">Trading</div>
+    <div class="compact-copy">Paper trading is live. Real brokerage trading needs a connected broker, funding, KYC, and order-routing approval.</div>
+  </div>
 </div>
 
 <div id="watchPanel" class="watch">
@@ -1843,7 +1996,9 @@ const PAPER_POSITIONS_STORAGE_KEY = "trading-app-paper-positions";
 const PAPER_HISTORY_STORAGE_KEY = "trading-app-paper-history";
 const ALERTS_STORAGE_KEY = "trading-app-alerts";
 const LAYOUT_PREFS_STORAGE_KEY = "trading-app-layout-prefs";
+const DISCORD_LINK_STORAGE_KEY = "trading-app-discord-link";
 const STARTING_EQUITY = 10000;
+const TOP_MOVERS_UNIVERSE = ["AAPL","NVDA","TSLA","AMD","META","AMZN","MSFT","GOOGL","PLTR","SMCI","COIN","MSTR","RIVN","SOFI","SPY","QQQ"];
 let paperPositions = [];
 let paperHistory = [];
 let alerts = [];
@@ -1866,6 +2021,7 @@ const DEFAULT_SCANNER_UNIVERSE = ["AAPL", "MSFT", "NVDA", "AMZN", "META", "TSLA"
 const LIVE_POLL_INTERVAL_MS = 5000;
 const SEARCH_DEBOUNCE_MS = 400;
 const SCANNER_CACHE_MS = 30000;
+const DEFAULT_DISCORD_LINK = "https://discord.com";
 const intradayEtFormatter = new Intl.DateTimeFormat("en-US", {
   timeZone: "America/New_York",
   month: "numeric",
@@ -1935,6 +2091,43 @@ function openAuthModal(){
   document.getElementById("authModal").classList.add("open");
 }
 
+function openProfilePanel(){
+  document.getElementById("profilePanel").classList.add("open");
+  document.getElementById("profileBackdrop").classList.add("open");
+}
+
+function closeProfilePanel(){
+  document.getElementById("profilePanel").classList.remove("open");
+  document.getElementById("profileBackdrop").classList.remove("open");
+}
+
+function getDiscordLink(){
+  try{
+    return localStorage.getItem(DISCORD_LINK_STORAGE_KEY) || DEFAULT_DISCORD_LINK;
+  }catch(err){
+    return DEFAULT_DISCORD_LINK;
+  }
+}
+
+function saveDiscordSettings(){
+  const value = (document.getElementById("discordLinkInput")?.value || "").trim() || DEFAULT_DISCORD_LINK;
+  try{
+    localStorage.setItem(DISCORD_LINK_STORAGE_KEY, value);
+  }catch(err){
+    console.log("Discord link save failed", err);
+  }
+  setStatus("Discord link saved.", "ok");
+}
+
+function openDiscordLink(openInNewTab=true){
+  const url = getDiscordLink();
+  if(openInNewTab){
+    window.open(url, "_blank", "noopener");
+  }else{
+    window.location.href = url;
+  }
+}
+
 function closeAuthModal(event){
   if(event && event.target && event.target.id !== "authModal"){
     return;
@@ -1966,6 +2159,40 @@ function renderAuthState(){
     upgradeBtn.classList.add("hidden");
     manageBillingBtn.classList.add("hidden");
   }
+}
+
+function syncTradeInputs(){
+  const instrument = document.getElementById("paperInstrument")?.value || "stock";
+  const strike = document.getElementById("paperStrike");
+  const premium = document.getElementById("paperPremium");
+  const expiry = document.getElementById("paperExpiry");
+  const optionMode = instrument !== "stock";
+  [strike, premium, expiry].forEach(input => {
+    if(!input){
+      return;
+    }
+    input.disabled = !optionMode;
+    input.style.opacity = optionMode ? "1" : "0.55";
+  });
+}
+
+function getOptionMarkPrice(position, underlyingPrice){
+  const strike = Number(position.strike || 0);
+  const entryPremium = Number(position.premium || position.entry || 0);
+  const expiry = position.expiry ? new Date(position.expiry) : null;
+  const daysLeft = expiry ? Math.max(0, Math.ceil((expiry - new Date()) / 86400000)) : 14;
+  const timeValue = Math.max(0.1, entryPremium * Math.min(0.9, Math.max(0.25, daysLeft / 30)));
+  if(position.instrument === "call"){
+    return Number((Math.max(underlyingPrice - strike, 0) + timeValue).toFixed(2));
+  }
+  if(position.instrument === "put"){
+    return Number((Math.max(strike - underlyingPrice, 0) + timeValue).toFixed(2));
+  }
+  return underlyingPrice;
+}
+
+function showBrokerBlocked(side){
+  setStatus(`Real ${side} orders need a connected broker, funding, KYC, and order routing before they can be enabled.`, "warning");
 }
 
 async function refreshAuthStatus(){
@@ -2101,6 +2328,7 @@ async function handleCheckoutReturn(){
         currentUser = payload.user;
         renderAuthState();
         setStatus("Premium is active on your account now.", "ok");
+        openDiscordLink(true);
       }else{
         setStatus(payload.error || "Checkout finished, but premium could not be verified yet.", "warning");
       }
@@ -3320,9 +3548,7 @@ function buildScannerGrade(snapshot){
 
 async function runScanner(){
   const container = document.getElementById("scannerResults");
-  const input = document.getElementById("scannerTickers");
-  const custom = (input?.value || "").split(",").map(item => item.trim().toUpperCase()).filter(Boolean);
-  const universe = [...new Set(custom.length ? custom : (watchlist.length ? watchlist : DEFAULT_SCANNER_UNIVERSE))].slice(0, 6);
+  const universe = [...new Set([...watchlist, ...TOP_MOVERS_UNIVERSE])].slice(0, 10);
   const cacheKey = universe.join(",");
 
   if(!universe.length){
@@ -3357,10 +3583,16 @@ async function runScanner(){
           </div>
         </div>
         ${rows.map(item => {
+          const rank = rows.findIndex(row => row.ticker === item.ticker) + 1;
           return `
             <div class="insight-card market-pulse-card">
-              <div class="section-kicker">Scanner Hit</div>
-              <div class="section-title">${item.ticker}</div>
+              <div class="movers-hero">
+                <div>
+                  <div class="section-kicker">Top Mover</div>
+                  <div class="section-title">${item.ticker}</div>
+                </div>
+                <div class="mover-rank">#${rank}</div>
+              </div>
               <div class="pulse-grid">
                 <div class="pulse-item">
                   <div class="pulse-title">Price</div>
@@ -3582,10 +3814,12 @@ function switchView(view){
   currentView = view;
   document.getElementById("marketView").classList.toggle("hidden", view !== "market");
   document.getElementById("portfolioView").classList.toggle("hidden", view !== "portfolio");
+  document.getElementById("liveView").classList.toggle("hidden", view !== "live");
   document.getElementById("scannerView").classList.toggle("hidden", view !== "scanner");
   document.getElementById("communityView").classList.toggle("hidden", view !== "community");
   document.getElementById("marketNav").classList.toggle("active", view === "market");
   document.getElementById("portfolioNav").classList.toggle("active", view === "portfolio");
+  document.getElementById("liveNav").classList.toggle("active", view === "live");
   document.getElementById("scannerNav").classList.toggle("active", view === "scanner");
   document.getElementById("communityNav").classList.toggle("active", view === "community");
   if(view === "market"){
@@ -3875,6 +4109,8 @@ function renderChart(ticker, candles, indicators, sourceLabel, sessionLabel){
   const layout = {
     paper_bgcolor: "#020617",
     plot_bgcolor: "#020617",
+    uirevision: `${ticker}:${timeframe}:${indicatorPreset}`,
+    editrevision: `${ticker}:${timeframe}:${indicatorPreset}`,
     margin: { l: 18, r: 72, t: 18, b: 62 },
     font: { color: "#94a3b8" },
     dragmode: "zoom",
@@ -4238,23 +4474,33 @@ function renderPaperPositions(){
   let openMarkup = "";
 
   paperPositions.forEach(position => {
-    const markPrice = getPaperMarkPrice(position.ticker) || position.entry;
+    const underlyingMark = getPaperMarkPrice(position.ticker) || position.entry;
+    const markPrice = position.instrument && position.instrument !== "stock"
+      ? getOptionMarkPrice(position, underlyingMark)
+      : underlyingMark;
+    const multiplier = position.instrument && position.instrument !== "stock" ? 100 : 1;
     const pnl = position.side === "BUY"
-      ? (markPrice - position.entry) * position.qty
-      : (position.entry - markPrice) * position.qty;
+      ? (markPrice - position.entry) * position.qty * multiplier
+      : (position.entry - markPrice) * position.qty * multiplier;
     totalPnl += pnl;
-    const notional = markPrice * position.qty;
+    const notional = markPrice * position.qty * multiplier;
     if(position.side === "BUY"){
       longExposure += notional;
     }else{
       shortExposure += notional;
     }
 
+    const instrumentLabel = position.instrument === "call"
+      ? `CALL ${position.strike || "--"}`
+      : position.instrument === "put"
+        ? `PUT ${position.strike || "--"}`
+        : position.side;
+
     openMarkup += `
       <div class="paper-item">
         <div>
-          <div class="paper-symbol">${position.ticker} | ${position.side}</div>
-          <div class="paper-details">Qty ${position.qty} | Entry $${position.entry.toFixed(2)} | Mark $${markPrice.toFixed(2)}</div>
+          <div class="paper-symbol">${position.ticker} | ${instrumentLabel} | ${position.side}</div>
+          <div class="paper-details">Qty ${position.qty} | Entry $${position.entry.toFixed(2)} | Mark $${markPrice.toFixed(2)}${position.expiry ? ` | Exp ${position.expiry}` : ""}</div>
           <div class="paper-details ${pnl >= 0 ? "up" : "down"}">Unrealized ${formatMoney(pnl)}</div>
         </div>
         <div>
@@ -4345,10 +4591,22 @@ function addPaperTrade(side){
     setStatus("Analyze a ticker first so the paper trade uses a real mark price.", "warning");
     return;
   }
+  const instrument = document.getElementById("paperInstrument")?.value || "stock";
   const qtyInput = document.getElementById("paperQty");
   const noteInput = document.getElementById("paperNote");
+  const strikeInput = document.getElementById("paperStrike");
+  const premiumInput = document.getElementById("paperPremium");
+  const expiryInput = document.getElementById("paperExpiry");
   const qty = Math.max(1, Number(qtyInput?.value || 1));
   const note = (noteInput?.value || "").trim();
+  const strike = Number(strikeInput?.value || 0);
+  const premium = Number(premiumInput?.value || 0);
+  const expiry = (expiryInput?.value || "").trim();
+  if(instrument !== "stock" && (!strike || !premium)){
+    setStatus("Enter option strike and premium first.", "warning");
+    return;
+  }
+  const entryPrice = instrument === "stock" ? Number(latestQuotes[lastTicker]) : premium;
 
   paperPositions = [
     {
@@ -4356,7 +4614,11 @@ function addPaperTrade(side){
       ticker: lastTicker,
       side,
       qty,
-      entry: Number(latestQuotes[lastTicker]),
+      instrument,
+      strike: instrument === "stock" ? null : strike,
+      premium: instrument === "stock" ? null : premium,
+      expiry: instrument === "stock" ? null : expiry,
+      entry: entryPrice,
       note,
       openedAt: new Date().toISOString()
     },
@@ -4376,10 +4638,14 @@ function closePaperPosition(id){
     return;
   }
 
-  const exit = getPaperMarkPrice(position.ticker) || position.entry;
+  const underlyingMark = getPaperMarkPrice(position.ticker) || position.entry;
+  const exit = position.instrument && position.instrument !== "stock"
+    ? getOptionMarkPrice(position, underlyingMark)
+    : underlyingMark;
+  const multiplier = position.instrument && position.instrument !== "stock" ? 100 : 1;
   const realized = position.side === "BUY"
-    ? (exit - position.entry) * position.qty
-    : (position.entry - exit) * position.qty;
+    ? (exit - position.entry) * position.qty * multiplier
+    : (position.entry - exit) * position.qty * multiplier;
 
   paperHistory = [
     {
@@ -5013,7 +5279,9 @@ async function initializeApp(){
   loadLayoutPrefs();
   setAuthMode("login");
   renderIndicatorToggles();
+  document.getElementById("discordLinkInput").value = getDiscordLink();
   document.getElementById("riskProfile").value = riskProfile;
+  syncTradeInputs();
   document.querySelectorAll("#strategyBar button").forEach(button => button.classList.toggle("active", button.dataset.s === strategy));
   document.querySelectorAll("#tfBar button").forEach(button => button.classList.toggle("active", button.dataset.tf === timeframe));
   document.querySelectorAll("#presetBar button").forEach(button => button.classList.toggle("active", button.dataset.preset === indicatorPreset));

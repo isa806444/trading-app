@@ -707,6 +707,7 @@ def build_chart_indicators(candles):
         "ema20": calculate_ema(closes, 20),
         "vwap": calculate_vwap(candles),
         "rsi14": calculate_rsi(closes, 14),
+        "liquidity_map": build_liquidity_map(candles)
     }
 
 
@@ -1747,6 +1748,283 @@ def build_scanner_row(symbol):
     }
 
 
+def find_swing_levels(candles, tolerance=0.0035):
+    if len(candles) < 7:
+        return []
+
+    candidates = []
+    for index in range(2, len(candles) - 2):
+        candle = candles[index]
+        high = candle["high"]
+        low = candle["low"]
+        if high >= max(c["high"] for c in candles[index - 2:index + 3]):
+            candidates.append(("resistance", high))
+        if low <= min(c["low"] for c in candles[index - 2:index + 3]):
+            candidates.append(("support", low))
+
+    merged = []
+    for level_type, price in candidates:
+        matched = None
+        for item in merged:
+            if item["type"] != level_type:
+                continue
+            if abs(item["price"] - price) / max(price, 1) <= tolerance:
+                matched = item
+                break
+        if matched:
+            matched["hits"] += 1
+            matched["price"] = round((matched["price"] + price) / 2, 2)
+        else:
+            merged.append({"type": level_type, "price": round(price, 2), "hits": 1})
+
+    merged.sort(key=lambda item: (item["hits"], item["price"]), reverse=True)
+    return merged[:6]
+
+
+def build_liquidity_map(candles):
+    levels = find_swing_levels(candles)
+    support = [item for item in levels if item["type"] == "support"][:3]
+    resistance = [item for item in levels if item["type"] == "resistance"][:3]
+    summary_bits = []
+    if resistance:
+        summary_bits.append(f"sell-side liquidity may be clustered near {', '.join(str(item['price']) for item in resistance[:2])}")
+    if support:
+        summary_bits.append(f"buy-side liquidity may be clustered near {', '.join(str(item['price']) for item in support[:2])}")
+    return {
+        "support": support,
+        "resistance": resistance,
+        "summary": " and ".join(summary_bits) + "." if summary_bits else "No clear liquidity clusters were found yet."
+    }
+
+
+def pearson_correlation(series_a, series_b):
+    length = min(len(series_a), len(series_b))
+    if length < 5:
+        return 0
+    a = series_a[-length:]
+    b = series_b[-length:]
+    mean_a = average(a)
+    mean_b = average(b)
+    numerator = sum((x - mean_a) * (y - mean_b) for x, y in zip(a, b))
+    denominator_a = math.sqrt(sum((x - mean_a) ** 2 for x in a))
+    denominator_b = math.sqrt(sum((y - mean_b) ** 2 for y in b))
+    if not denominator_a or not denominator_b:
+        return 0
+    return numerator / (denominator_a * denominator_b)
+
+
+def build_correlation_tracker(symbol, base_candles):
+    closes = [candle["close"] for candle in base_candles]
+    peers = [("SPY", "SPY"), ("QQQ", "QQQ"), ("XLK", "XLK")]
+    rows = []
+    for peer_symbol, label in peers:
+        if peer_symbol == symbol:
+            continue
+        peer_result = fetch_and_cache_candles(peer_symbol, "15m")
+        peer_candles = peer_result["candles"] if peer_result and peer_result["candles"] else build_demo_candles(peer_symbol, "15m")
+        peer_closes = [candle["close"] for candle in peer_candles]
+        corr = pearson_correlation(closes, peer_closes)
+        if corr >= 0.6:
+            relation = "Strong positive"
+        elif corr <= -0.4:
+            relation = "Inverse"
+        else:
+            relation = "Loose"
+        rows.append({
+            "symbol": label,
+            "correlation": round(corr, 2),
+            "relation": relation
+        })
+
+    rows.sort(key=lambda item: abs(item["correlation"]), reverse=True)
+    return {
+        "pairs": rows,
+        "summary": f"{symbol} is currently most tied to {rows[0]['symbol']}." if rows else "Correlation data is unavailable right now."
+    }
+
+
+def build_squeeze_detector(symbol, change, candles, news, momentum_score):
+    volumes = [float(candle.get("volume") or 0) for candle in candles[-30:]]
+    relative_volume = average(volumes[-6:]) / (average(volumes[:-6] or volumes) or 1)
+    headlines = " ".join(article.get("title", "") for article in news.get("articles", [])).lower()
+    social_terms = sum(1 for term in ["reddit", "meme", "retail", "short", "squeeze"] if term in headlines)
+    score = 30
+    score += clamp(relative_volume * 15, 0, 35)
+    score += clamp(abs(change) * 4, 0, 20)
+    score += clamp((momentum_score or {}).get("value", 50) * 0.2, 0, 20)
+    score += social_terms * 6
+    final_score = int(clamp(score, 1, 100))
+    if final_score >= 75:
+        label = "High squeeze watch"
+    elif final_score >= 55:
+        label = "Moderate squeeze watch"
+    else:
+        label = "Low squeeze pressure"
+    return {
+        "score": final_score,
+        "label": label,
+        "summary": f"Squeeze score is {final_score}/100, based on expansion in price, relative volume, and social-style headline language."
+    }
+
+
+def build_earnings_volatility_predictor(candles, earnings, momentum_score):
+    closes = [candle["close"] for candle in candles]
+    atrish = average([(candle["high"] - candle["low"]) for candle in candles[-10:]])
+    avg_price = average(closes[-10:]) or closes[-1] if closes else 1
+    base_move = (atrish / avg_price) * 100 if avg_price else 0
+    next_earnings = parse_event_datetime((earnings or {}).get("next_earnings_date"))
+    urgency_boost = 0
+    if next_earnings:
+        days_until = (next_earnings.date() - datetime.now(DEMO_TIMEZONE).date()).days
+        if 0 <= days_until <= 10:
+            urgency_boost = max(1, 10 - days_until) * 0.35
+    expected_move = round(clamp((base_move * 2.4) + urgency_boost + ((momentum_score.get("value", 50) - 50) * 0.03), 1.2, 18.0), 2)
+    return {
+        "expected_move_percent": expected_move,
+        "summary": f"Expected earnings move is about {expected_move}% based on recent range expansion and event proximity."
+    }
+
+
+def simulate_backtest(candles, strategy):
+    if len(candles) < 25:
+        return {
+            "trades": 0,
+            "win_rate": 0,
+            "total_return_percent": 0,
+            "max_drawdown_percent": 0,
+            "summary": "Not enough candles to run a backtest yet."
+        }
+
+    closes = [c["close"] for c in candles]
+    ema9 = calculate_ema(closes, 9)
+    ema20 = calculate_ema(closes, 20)
+    position = None
+    equity = 10000
+    peak = equity
+    trades = []
+
+    for index in range(20, len(candles)):
+        price = closes[index]
+        prev_price = closes[index - 1]
+        bullish_cross = prev_price <= ema9[index - 1] and price > ema9[index] and ema9[index] > ema20[index]
+        bearish_cross = prev_price >= ema9[index - 1] and price < ema9[index] and ema9[index] < ema20[index]
+
+        if strategy == "mean":
+            bullish_cross = price < ema20[index] * 0.992
+            bearish_cross = price > ema20[index] * 1.008
+
+        if not position and bullish_cross:
+            position = {"side": "BUY", "entry": price}
+        elif not position and bearish_cross:
+            position = {"side": "SELL", "entry": price}
+        elif position:
+            exit_trade = False
+            if position["side"] == "BUY":
+                exit_trade = price < ema20[index] or price >= position["entry"] * 1.02 or price <= position["entry"] * 0.99
+                pnl_pct = ((price - position["entry"]) / position["entry"]) * 100
+            else:
+                exit_trade = price > ema20[index] or price <= position["entry"] * 0.98 or price >= position["entry"] * 1.01
+                pnl_pct = ((position["entry"] - price) / position["entry"]) * 100
+
+            if exit_trade:
+                trades.append(round(pnl_pct, 2))
+                equity *= (1 + (pnl_pct / 100))
+                peak = max(peak, equity)
+                position = None
+
+    wins = [trade for trade in trades if trade > 0]
+    total_return = round(((equity - 10000) / 10000) * 100, 2)
+    max_drawdown = round(((peak - equity) / peak) * 100, 2) if peak else 0
+    win_rate = round((len(wins) / len(trades)) * 100, 1) if trades else 0
+    return {
+        "trades": len(trades),
+        "win_rate": win_rate,
+        "total_return_percent": total_return,
+        "max_drawdown_percent": max_drawdown,
+        "summary": f"Simple {strategy} backtest found {len(trades)} trades with a {win_rate}% win rate."
+    }
+
+
+def review_closed_trade(trade):
+    realized = float(trade.get("realized") or 0)
+    entry = float(trade.get("entry") or 0)
+    exit_price = float(trade.get("exit") or 0)
+    qty = float(trade.get("qty") or 0)
+    opened = parse_event_datetime(trade.get("openedAt"))
+    closed = parse_event_datetime(trade.get("closedAt"))
+    hold_minutes = int(((closed - opened).total_seconds() / 60)) if opened and closed else 0
+    note = str(trade.get("note") or "").strip().lower()
+
+    if realized > 0 and hold_minutes >= 30:
+        coaching = "You let the trade work instead of forcing a fast exit, which usually helps trend setups."
+        grade = "Strong process"
+    elif realized < 0 and hold_minutes < 10:
+        coaching = "This looks reactive. You may be cutting or chasing too fast before the setup has time to prove itself."
+        grade = "Weak process"
+    elif realized < 0 and "revenge" in note:
+        coaching = "Your note hints at emotional trading. Stepping away after a loss would likely improve your next decision."
+        grade = "Emotional risk"
+    elif realized > 0 and hold_minutes < 10:
+        coaching = "You booked a fast winner. That is fine, but review whether you routinely leave trend continuation on the table."
+        grade = "Fast execution"
+    else:
+        coaching = "This trade was acceptable, but the edge would be stronger with clearer entry timing and a more deliberate exit plan."
+        grade = "Average process"
+
+    return {
+        "grade": grade,
+        "summary": coaching,
+        "hold_minutes": hold_minutes,
+        "realized": round(realized, 2),
+        "ticker": trade.get("ticker"),
+        "side": trade.get("side")
+    }
+
+
+def build_trading_coach(history):
+    if not history:
+        return {
+            "summary": "Your coach will start learning once you close a few paper trades.",
+            "tips": []
+        }
+
+    tips = []
+    closed_hours = []
+    fast_losses = 0
+    losers = 0
+    morning_wins = 0
+    morning_total = 0
+
+    for trade in history[-30:]:
+        review = review_closed_trade(trade)
+        closed = parse_event_datetime(trade.get("closedAt"))
+        if closed:
+            closed_hours.append(closed.hour)
+            if closed.hour < 11:
+                morning_total += 1
+                if float(trade.get("realized") or 0) > 0:
+                    morning_wins += 1
+        if float(trade.get("realized") or 0) < 0:
+            losers += 1
+            if review["hold_minutes"] and review["hold_minutes"] < 12:
+                fast_losses += 1
+
+    if morning_total >= 3 and morning_wins / morning_total >= 0.6:
+        tips.append("You tend to perform better earlier in the session, so your best edge may be in the morning.")
+    if losers >= 3 and fast_losses / max(losers, 1) >= 0.5:
+        tips.append("A lot of your losses are happening fast. Waiting for cleaner confirmation could improve your results.")
+    if closed_hours and average(closed_hours) >= 13:
+        tips.append("Your exits skew later in the day. Review whether afternoon trades are helping or just adding noise.")
+
+    if not tips:
+        tips.append("Your recent trades are mixed, so focus on repeating the cleanest A and B setups instead of adding more volume.")
+
+    return {
+        "summary": tips[0],
+        "tips": tips[:3]
+    }
+
+
 # =========================
 # STRATEGY ENGINE
 # =========================
@@ -1815,6 +2093,10 @@ def analyze_strategy(symbol, strategy, risk_profile="balanced"):
     momentum_score = build_momentum_score(change, signal_candles, news.get("impact"), trade_signal)
     market_mode = detect_market_mode(change, signal_candles)
     trade_warning = build_trade_warning(change, signal_candles, momentum_score)
+    squeeze = build_squeeze_detector(symbol, change, signal_candles, news, momentum_score)
+    correlations = build_correlation_tracker(symbol, signal_candles)
+    earnings_volatility = build_earnings_volatility_predictor(signal_candles, events.get("earnings"), momentum_score)
+    backtest = simulate_backtest(signal_candles, strategy)
     ai_setup = build_ai_trade_setup(
         symbol,
         strategy,
@@ -1853,6 +2135,10 @@ def analyze_strategy(symbol, strategy, risk_profile="balanced"):
         "momentum_score": momentum_score,
         "market_mode": market_mode,
         "trade_warning": trade_warning,
+        "squeeze_detector": squeeze,
+        "correlations": correlations,
+        "earnings_volatility": earnings_volatility,
+        "backtest": backtest,
         "ai_setup": ai_setup,
         "position_size": position_size,
         "smart_alerts": smart_alerts,
@@ -2302,6 +2588,17 @@ def app_state():
         "database_enabled": database_enabled,
         "authenticated": bool(current_user),
         "user": serialize_user(current_user)
+    })
+
+
+@app.route("/portfolio-insights")
+def portfolio_insights():
+    history = load_paper_history()
+    reviews = [review_closed_trade(item) for item in history[:12]]
+    coach = build_trading_coach(history)
+    return jsonify({
+        "reviews": reviews,
+        "coach": coach
     })
 
 

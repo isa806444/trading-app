@@ -1705,6 +1705,7 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
       </div>
       <div class="paper-summary" id="paperSummary">No open paper positions yet.</div>
       <div id="equityChart" class="equity-chart"></div>
+      <div id="portfolioCoach" class="journal-list"></div>
       <div class="paper-list" id="paperPositions"></div>
       <div class="paper-history" id="paperHistory"></div>
       <div id="tradeJournal" class="journal-list"></div>
@@ -1798,6 +1799,10 @@ let latestAnalyzedSignal = null;
 let latestAnalyzedLevels = null;
 let latestMarketMode = null;
 let latestMomentumScore = null;
+let latestBacktest = null;
+let latestCorrelations = null;
+let latestSqueeze = null;
+let latestEarningsVolatility = null;
 let watchSort = "change_desc";
 let riskProfile = "balanced";
 let indicatorVisibility = {
@@ -1826,6 +1831,8 @@ let searchDebounce = null;
 let comparisonSymbols = [];
 let comparisonSeries = [];
 let latestHotList = [];
+let portfolioCoachState = null;
+let portfolioReviewState = [];
 const DEFAULT_SCANNER_UNIVERSE = ["AAPL", "MSFT", "NVDA", "AMZN", "META", "TSLA", "AMD", "GOOGL"];
 const intradayEtFormatter = new Intl.DateTimeFormat("en-US", {
   timeZone: "America/New_York",
@@ -1974,6 +1981,7 @@ async function submitAuth(){
     renderAuthState();
     closeAuthModal();
     await loadRemoteState();
+    await loadPortfolioInsights();
     await loadWatchlistData();
     renderWatch();
     renderPaperPositions();
@@ -1993,6 +2001,8 @@ async function logoutUser(){
   }
   currentUser = null;
   serverStateEnabled = false;
+  portfolioCoachState = null;
+  portfolioReviewState = [];
   watchlist = loadLocalWatchlist();
   loadPaperPositions();
   loadPaperHistory();
@@ -2446,10 +2456,110 @@ async function loadRemoteState(){
     savePaperHistory();
     saveAlerts();
     await saveRemoteState();
+    await loadPortfolioInsights();
   }catch(err){
     console.log("Remote state load failed", err);
     serverStateEnabled = false;
   }
+}
+
+async function loadPortfolioInsights(){
+  if(!serverStateEnabled){
+    portfolioReviewState = buildLocalTradeReviews();
+    portfolioCoachState = buildLocalTradingCoach();
+    return;
+  }
+  try{
+    const res = await fetch("/portfolio-insights");
+    const payload = await res.json();
+    portfolioCoachState = payload.coach || null;
+    portfolioReviewState = Array.isArray(payload.reviews) ? payload.reviews : [];
+  }catch(err){
+    console.log("Portfolio insights load failed", err);
+    portfolioReviewState = buildLocalTradeReviews();
+    portfolioCoachState = buildLocalTradingCoach();
+  }
+}
+
+function reviewTradeLocal(trade){
+  const realized = Number(trade.realized || 0);
+  const openedAt = trade.openedAt ? new Date(trade.openedAt) : null;
+  const closedAt = trade.closedAt ? new Date(trade.closedAt) : null;
+  const holdMinutes = openedAt && closedAt ? Math.max(0, Math.round((closedAt - openedAt) / 60000)) : 0;
+  const note = String(trade.note || "").toLowerCase();
+
+  if(realized > 0 && holdMinutes >= 30){
+    return { grade: "Strong process", summary: "You let the trade work instead of forcing an early exit." };
+  }
+  if(realized < 0 && holdMinutes < 10){
+    return { grade: "Weak process", summary: "This loss happened fast. Waiting for cleaner confirmation could help." };
+  }
+  if(realized < 0 && note.includes("revenge")){
+    return { grade: "Emotional risk", summary: "Your note hints at emotional trading. Resetting after a loss may help." };
+  }
+  if(realized > 0 && holdMinutes < 10){
+    return { grade: "Fast execution", summary: "You booked the winner quickly. Review whether you leave too much continuation behind." };
+  }
+  return { grade: "Average process", summary: "This trade was workable, but the edge would improve with tighter execution." };
+}
+
+function buildLocalTradeReviews(){
+  return paperHistory.slice(0, 12).map(item => ({
+    ...reviewTradeLocal(item),
+    ticker: item.ticker,
+    side: item.side,
+    realized: Number(item.realized || 0)
+  }));
+}
+
+function buildLocalTradingCoach(){
+  if(!paperHistory.length){
+    return {
+      summary: "Your coach will start learning once you close a few paper trades.",
+      tips: []
+    };
+  }
+
+  const tips = [];
+  let morningWins = 0;
+  let morningTrades = 0;
+  let fastLosses = 0;
+  let losses = 0;
+
+  paperHistory.slice(0, 30).forEach(item => {
+    const closedAt = item.closedAt ? new Date(item.closedAt) : null;
+    const openedAt = item.openedAt ? new Date(item.openedAt) : null;
+    const holdMinutes = openedAt && closedAt ? Math.max(0, Math.round((closedAt - openedAt) / 60000)) : 0;
+    const realized = Number(item.realized || 0);
+
+    if(closedAt && closedAt.getHours() < 11){
+      morningTrades += 1;
+      if(realized > 0){
+        morningWins += 1;
+      }
+    }
+    if(realized < 0){
+      losses += 1;
+      if(holdMinutes < 12){
+        fastLosses += 1;
+      }
+    }
+  });
+
+  if(morningTrades >= 3 && (morningWins / morningTrades) >= 0.6){
+    tips.push("You tend to do better earlier in the session, so your edge may be strongest in the morning.");
+  }
+  if(losses >= 3 && (fastLosses / losses) >= 0.5){
+    tips.push("A lot of your losses happen fast. Waiting for cleaner entries could improve your process.");
+  }
+  if(!tips.length){
+    tips.push("Your recent results are mixed, so focus on repeating your cleanest setups instead of adding more trade volume.");
+  }
+
+  return {
+    summary: tips[0],
+    tips: tips.slice(0, 3)
+  };
 }
 
 function formatEtLabel(unixSeconds){
@@ -2659,6 +2769,156 @@ function renderSmartAlerts(payload){
       </div>
     </div>
   `;
+}
+
+function renderCorrelationCard(payload){
+  if(!payload){
+    return "";
+  }
+  const pairs = Array.isArray(payload.pairs) ? payload.pairs : [];
+  return `
+    <details class="details-panel insight-card">
+      <summary>Correlation Tracker</summary>
+      <div class="details-body">
+        <div class="indicator-meta">${payload.summary || "Correlation read unavailable."}</div>
+        <div class="alert-list">
+          ${pairs.length ? pairs.map(item => `
+            <div class="alert-item">
+              <div>
+                <div class="paper-symbol">${item.symbol}</div>
+                <div class="paper-details">${item.relation}</div>
+              </div>
+              <div class="paper-details">${item.correlation}</div>
+            </div>
+          `).join("") : '<div class="paper-empty">No correlation pairs available.</div>'}
+        </div>
+      </div>
+    </details>
+  `;
+}
+
+function renderSqueezeCard(payload){
+  if(!payload){
+    return "";
+  }
+  return `
+    <details class="details-panel insight-card">
+      <summary>Squeeze Detector</summary>
+      <div class="details-body">
+        <div class="analytics-grid">
+          ${renderAnalyticsCard("Squeeze Score", String(payload.score || "--"), "", payload.label || "Pressure read")}
+        </div>
+        <div class="indicator-meta">${payload.summary || "Squeeze read unavailable."}</div>
+      </div>
+    </details>
+  `;
+}
+
+function renderBacktestCard(payload){
+  if(!payload){
+    return "";
+  }
+  return `
+    <details class="details-panel insight-card">
+      <summary>Simple Backtest</summary>
+      <div class="details-body">
+        <div class="analytics-grid">
+          ${renderAnalyticsCard("Trades", String(payload.trades || 0))}
+          ${renderAnalyticsCard("Win Rate", `${Number(payload.win_rate || 0).toFixed(1)}%`)}
+          ${renderAnalyticsCard("Return", `${Number(payload.total_return_percent || 0).toFixed(2)}%`, Number(payload.total_return_percent || 0) >= 0 ? "up" : "down")}
+          ${renderAnalyticsCard("Drawdown", `${Number(payload.max_drawdown_percent || 0).toFixed(2)}%`, "down")}
+        </div>
+        <div class="indicator-meta">${payload.summary || "Backtest unavailable."}</div>
+      </div>
+    </details>
+  `;
+}
+
+function renderEarningsVolatilityCard(payload){
+  if(!payload){
+    return "";
+  }
+  return `
+    <details class="details-panel insight-card">
+      <summary>Earnings Volatility</summary>
+      <div class="details-body">
+        <div class="analytics-grid">
+          ${renderAnalyticsCard("Expected Move", `${Number(payload.expected_move_percent || 0).toFixed(2)}%`)}
+        </div>
+        <div class="indicator-meta">${payload.summary || "Earnings volatility read unavailable."}</div>
+      </div>
+    </details>
+  `;
+}
+
+function renderCoachCard(){
+  const container = document.getElementById("portfolioCoach");
+  if(!container){
+    return;
+  }
+
+  if(!portfolioCoachState){
+    container.innerHTML = `
+      <div class="trade-notes-card">
+        <div class="paper-title">Trading Coach</div>
+        <div class="paper-subtitle">Close a few paper trades and the coach will start spotting patterns.</div>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = `
+    <div class="trade-notes-card">
+      <div class="paper-title">Trading Coach</div>
+      <div class="paper-subtitle">${portfolioCoachState.summary || "Recent behavior insights appear here."}</div>
+      <div class="confirmation-list">
+        ${(portfolioCoachState.tips || []).map(item => `<div class="confirmation-pill">${item}</div>`).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function renderTradeReviewCards(){
+  const container = document.getElementById("tradeJournal");
+  if(!container){
+    return;
+  }
+
+  if(!paperHistory.length){
+    container.innerHTML = `
+      <div class="trade-notes-card">
+        <div class="paper-title">Trade Journal</div>
+        <div class="paper-subtitle">Closed trades with notes, timing, realized P&L, and AI review will appear here.</div>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = `
+      <div class="trade-notes-card">
+        <div class="paper-title">Trade Journal</div>
+        <div class="paper-subtitle">Latest exits, notes, realized outcomes, and AI process reviews.</div>
+        <div class="journal-list">
+          ${paperHistory.slice(0, 12).map((item, index) => {
+            const review = (portfolioReviewState || [])[index] || null;
+            return `
+              <div class="journal-item">
+                <div class="journal-top">
+                  <div>
+                    <div class="paper-symbol">${item.ticker} | ${item.side}</div>
+                    <div class="paper-details">Opened ${formatLongDate(item.openedAt)} | Closed ${formatLongDate(item.closedAt)}</div>
+                  </div>
+                  <div class="paper-details ${item.realized >= 0 ? "up" : "down"}">${formatMoney(item.realized)}</div>
+                </div>
+                <div class="paper-details">Qty ${item.qty} | Entry $${item.entry.toFixed(2)} | Exit $${item.exit.toFixed(2)}</div>
+                ${item.note ? `<div class="journal-note">${item.note}</div>` : ""}
+                ${review ? `<div class="journal-note"><strong>${review.grade}:</strong> ${review.summary}</div>` : ""}
+              </div>
+            `;
+          }).join("")}
+        </div>
+      </div>
+    `;
 }
 
 function formatPercent(value){
@@ -3320,9 +3580,10 @@ function renderChart(ticker, candles, indicators, sourceLabel, sessionLabel){
     increasing: { line: { color: "#22c55e", width: 1 } },
     decreasing: { line: { color: "#ef4444", width: 1 } },
     whiskerwidth: 0.5,
-    name: "Price",
-    yaxis: "y"
+      name: "Price",
+      yaxis: "y"
   }];
+  const hasRsi = indicatorVisibility.rsi && chartIndicators?.rsi14?.some(v => v !== null && v !== undefined);
 
   if(chartIndicators?.ema9?.length && indicatorVisibility.ema9){
     traces.push(buildLineTrace(xValues, chartIndicators.ema9, "EMA 9", "#f59e0b", 2));
@@ -3350,7 +3611,6 @@ function renderChart(ticker, candles, indicators, sourceLabel, sessionLabel){
     });
   });
 
-  const hasRsi = indicatorVisibility.rsi && chartIndicators?.rsi14?.some(v => v !== null && v !== undefined);
   if(hasRsi){
     traces.push(buildLineTrace(xValues, chartIndicators.rsi14, "RSI 14", "#c084fc", 2, "y2"));
   }
@@ -3426,6 +3686,31 @@ function renderChart(ticker, candles, indicators, sourceLabel, sessionLabel){
       });
     }
   }
+  const liquidityMap = chartIndicators?.liquidity_map || {};
+  (liquidityMap.support || []).forEach(level => {
+    zoneShapes.push({
+      type: "line",
+      xref: "paper",
+      x0: 0,
+      x1: 1,
+      yref: "y",
+      y0: Number(level.price),
+      y1: Number(level.price),
+      line: { color: "rgba(34,197,94,0.35)", width: Math.min(4, 1 + Number(level.hits || 1)), dash: "solid" }
+    });
+  });
+  (liquidityMap.resistance || []).forEach(level => {
+    zoneShapes.push({
+      type: "line",
+      xref: "paper",
+      x0: 0,
+      x1: 1,
+      yref: "y",
+      y0: Number(level.price),
+      y1: Number(level.price),
+      line: { color: "rgba(239,68,68,0.35)", width: Math.min(4, 1 + Number(level.hits || 1)), dash: "solid" }
+    });
+  });
 
   if(hasRsi){
     layout.yaxis2 = {
@@ -3647,42 +3932,7 @@ function renderEquityCurve(){
 }
 
 function renderTradeJournal(){
-  const container = document.getElementById("tradeJournal");
-  if(!container){
-    return;
-  }
-
-  if(!paperHistory.length){
-    container.innerHTML = `
-      <div class="trade-notes-card">
-        <div class="paper-title">Trade Journal</div>
-        <div class="paper-subtitle">Closed trades with notes, timing, and realized P&L will appear here.</div>
-      </div>
-    `;
-    return;
-  }
-
-  container.innerHTML = `
-      <div class="trade-notes-card">
-        <div class="paper-title">Trade Journal</div>
-        <div class="paper-subtitle">Your latest exits, notes, and realized outcomes.</div>
-        <div class="journal-list">
-          ${paperHistory.slice(0, 12).map(item => `
-            <div class="journal-item">
-              <div class="journal-top">
-                <div>
-                  <div class="paper-symbol">${item.ticker} | ${item.side}</div>
-                  <div class="paper-details">Opened ${formatLongDate(item.openedAt)} | Closed ${formatLongDate(item.closedAt)}</div>
-                </div>
-                <div class="paper-details ${item.realized >= 0 ? "up" : "down"}">${formatMoney(item.realized)}</div>
-              </div>
-              <div class="paper-details">Qty ${item.qty} | Entry $${item.entry.toFixed(2)} | Exit $${item.exit.toFixed(2)}</div>
-              ${item.note ? `<div class="journal-note">${item.note}</div>` : ""}
-            </div>
-          `).join("")}
-        </div>
-      </div>
-    `;
+  renderTradeReviewCards();
 }
 
 function renderPaperPositions(){
@@ -3828,6 +4078,7 @@ function renderPaperPositions(){
   }
 
   renderEquityCurve();
+  renderCoachCard();
   renderTradeJournal();
 }
 
@@ -3885,6 +4136,7 @@ function closePaperPosition(id){
   paperPositions = paperPositions.filter(item => item.id !== id);
   savePaperPositions();
   saveRemoteState();
+  loadPortfolioInsights().then(() => renderPaperPositions());
   renderPaperPositions();
 }
 
@@ -4309,6 +4561,10 @@ async function analyze(sym){
     latestAnalyzedLevels = d.levels || null;
     latestMarketMode = d.market_mode || null;
     latestMomentumScore = d.momentum_score || null;
+    latestBacktest = d.backtest || null;
+    latestCorrelations = d.correlations || null;
+    latestSqueeze = d.squeeze_detector || null;
+    latestEarningsVolatility = d.earnings_volatility || null;
     checkAlerts();
     renderAlerts();
     renderPortfolioContext();
@@ -4373,6 +4629,10 @@ async function analyze(sym){
       <div class="insights-grid">
         ${renderEventsSection(d.events)}
         ${renderNewsSection(d.news)}
+        ${renderCorrelationCard(d.correlations)}
+        ${renderSqueezeCard(d.squeeze_detector)}
+        ${renderBacktestCard(d.backtest)}
+        ${renderEarningsVolatilityCard(d.earnings_volatility)}
       </div>
     `;
 
@@ -4508,6 +4768,7 @@ async function initializeApp(){
   loadAlerts();
   await refreshAuthStatus();
   await handleCheckoutReturn();
+  await loadPortfolioInsights();
   renderPaperPositions();
   renderAlerts();
   renderMarketEmptyState();

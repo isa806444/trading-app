@@ -1608,7 +1608,14 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
   </div>
   <div class="helper-row">
     <div class="helper-text">Strategy presets shape the trade plan logic. Day is the best starting point if you just want a balanced view.</div>
-    <div class="helper-pill">You can switch strategies after analyzing</div>
+    <div class="alert-controls" style="gap:10px;">
+      <div class="helper-pill">You can switch strategies after analyzing</div>
+      <select id="riskProfile" class="alert-direction">
+        <option value="conservative">Conservative Risk</option>
+        <option value="balanced" selected>Balanced Risk</option>
+        <option value="aggressive">Aggressive Risk</option>
+      </select>
+    </div>
   </div>
   <div id="result" class="result-shell"></div>
   <div id="status"></div>
@@ -1789,7 +1796,10 @@ let lastChartState = null;
 let liveUpdateTimer = null;
 let latestAnalyzedSignal = null;
 let latestAnalyzedLevels = null;
+let latestMarketMode = null;
+let latestMomentumScore = null;
 let watchSort = "change_desc";
+let riskProfile = "balanced";
 let indicatorVisibility = {
   ema9: true,
   ema20: true,
@@ -1815,6 +1825,7 @@ let searchSuggestions = [];
 let searchDebounce = null;
 let comparisonSymbols = [];
 let comparisonSeries = [];
+let latestHotList = [];
 const DEFAULT_SCANNER_UNIVERSE = ["AAPL", "MSFT", "NVDA", "AMZN", "META", "TSLA", "AMD", "GOOGL"];
 const intradayEtFormatter = new Intl.DateTimeFormat("en-US", {
   timeZone: "America/New_York",
@@ -2334,6 +2345,7 @@ function saveLayoutPrefs(){
   try{
     localStorage.setItem(LAYOUT_PREFS_STORAGE_KEY, JSON.stringify({
       strategy,
+      riskProfile,
       timeframe,
       indicatorPreset,
       indicatorVisibility,
@@ -2352,6 +2364,7 @@ function loadLayoutPrefs(){
     const raw = localStorage.getItem(LAYOUT_PREFS_STORAGE_KEY);
     const parsed = raw ? JSON.parse(raw) : {};
     if(parsed.strategy) strategy = parsed.strategy;
+    if(parsed.riskProfile) riskProfile = parsed.riskProfile;
     if(parsed.timeframe) timeframe = parsed.timeframe;
     if(parsed.indicatorPreset) indicatorPreset = parsed.indicatorPreset;
     if(parsed.indicatorVisibility) indicatorVisibility = { ...indicatorVisibility, ...parsed.indicatorVisibility };
@@ -2530,6 +2543,124 @@ function renderTradeSignal(signal){
   `;
 }
 
+function renderWhyMovingSection(payload){
+  if(!payload){
+    return "";
+  }
+  const drivers = Array.isArray(payload.drivers) ? payload.drivers : [];
+  const social = payload.social_signal || {};
+  return `
+    <div class="section">
+      <div class="section-title-row">
+        <div>Why It Is Moving</div>
+        <div class="helper-pill">Relative volume ${Number(payload.relative_volume || 1).toFixed(2)}x</div>
+      </div>
+      <div class="indicator-meta">${payload.summary || "Catalyst read is unavailable right now."}</div>
+      ${drivers.length ? `<div class="confirmation-list">${drivers.map(item => `<div class="confirmation-pill">${item}</div>`).join("")}</div>` : ""}
+      <div class="indicator-meta">${social.label || ""}${social.detail ? ` | ${social.detail}` : ""}</div>
+    </div>
+  `;
+}
+
+function renderTradeWarningCard(payload){
+  if(!payload){
+    return "";
+  }
+  const tone = payload.tone === "warning" ? "down" : "up";
+  return `
+    <div class="section">
+      <div class="section-title-row">
+        <div>Trade Guardrail</div>
+        <div class="helper-pill">${payload.label || "Guardrail"}</div>
+      </div>
+      <div class="indicator-meta ${tone}">${payload.summary || "No trade warning available."}</div>
+    </div>
+  `;
+}
+
+function renderAiSetupCard(payload){
+  if(!payload){
+    return "";
+  }
+  return `
+    <div class="section">
+      <div class="section-title-row">
+        <div>AI Trade Setup</div>
+        <div class="helper-pill">${payload.risk_profile || "balanced"} risk</div>
+      </div>
+      <div class="analytics-grid">
+        ${renderAnalyticsCard("Entry", `$${Number(payload.entry || 0).toFixed(2)}`)}
+        ${renderAnalyticsCard("Stop", `$${Number(payload.stop || 0).toFixed(2)}`)}
+        ${renderAnalyticsCard("Target", `$${Number(payload.target || 0).toFixed(2)}`)}
+        ${renderAnalyticsCard("R/R", `${Number(payload.reward_to_risk || 0).toFixed(2)}:1`)}
+      </div>
+      <div class="indicator-meta" style="margin-top:12px;">${payload.stance || "Setup stance unavailable."}</div>
+      <div class="confirmation-list">
+        ${(payload.reasoning || []).map(item => `<div class="confirmation-pill">${item}</div>`).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function calculatePositionSize(){
+  const accountSize = Number(document.getElementById("positionCalcAccount")?.value || 0);
+  const riskPercent = Number(document.getElementById("positionCalcRisk")?.value || 0);
+  const riskPerShare = Number(document.getElementById("positionCalcRiskPerShare")?.dataset.value || 0);
+  const output = document.getElementById("positionCalcOutput");
+  if(!output){
+    return;
+  }
+
+  if(!accountSize || !riskPercent || !riskPerShare){
+    output.innerText = "Enter account size and risk percent to calculate exact share size.";
+    return;
+  }
+
+  const dollarRisk = accountSize * (riskPercent / 100);
+  const shares = Math.max(0, Math.floor(dollarRisk / riskPerShare));
+  const capital = shares * Number(document.getElementById("positionCalcEntry")?.dataset.value || 0);
+  output.innerText = `${shares} shares | About $${capital.toFixed(2)} position value | $${dollarRisk.toFixed(2)} max planned risk`;
+}
+
+function renderPositionSizeCard(payload){
+  if(!payload){
+    return "";
+  }
+  return `
+    <div class="section">
+      <div class="section-title-row">
+        <div>Position Size Calculator</div>
+        <div class="helper-pill">Risk per share $${Number(payload.risk_per_share || 0).toFixed(2)}</div>
+      </div>
+      <div class="alert-controls">
+        <input id="positionCalcAccount" class="paper-qty" type="number" min="100" step="100" value="10000" oninput="calculatePositionSize()" />
+        <input id="positionCalcRisk" class="paper-qty" type="number" min="0.1" step="0.1" value="1" oninput="calculatePositionSize()" />
+      </div>
+      <div class="paper-details">Account size | Risk % per trade</div>
+      <div id="positionCalcEntry" data-value="${Number(payload.entry || 0).toFixed(2)}" class="hidden"></div>
+      <div id="positionCalcRiskPerShare" data-value="${Number(payload.risk_per_share || 0).toFixed(2)}" class="hidden"></div>
+      <div id="positionCalcOutput" class="indicator-meta">Enter account size and risk percent to calculate exact share size.</div>
+    </div>
+  `;
+}
+
+function renderSmartAlerts(payload){
+  if(!Array.isArray(payload) || !payload.length){
+    return "";
+  }
+  return `
+    <div class="section">
+      <div class="section-title-row">
+        <div>Smart Alerts</div>
+        <div class="helper-pill">Signal-aware ideas</div>
+      </div>
+      <div class="confirmation-list">
+        ${payload.map(item => `<div class="confirmation-pill">${item.label}${item.detail ? ` | ${item.detail}` : ""}</div>`).join("")}
+      </div>
+    </div>
+  `;
+}
+
 function formatPercent(value){
   const amount = Number(value || 0);
   return `${amount >= 0 ? "+" : ""}${amount.toFixed(2)}%`;
@@ -2587,6 +2718,8 @@ function renderMarketPulse(){
   const weakest = [...sorted].reverse().find(item => item.change < 0);
   const focus = latestAnalyzedSnapshot;
   const signal = latestAnalyzedSignal;
+  const mode = latestMarketMode;
+  const momentum = latestMomentumScore;
 
   container.innerHTML = `
     <div class="section-kicker">Market Pulse</div>
@@ -2602,6 +2735,16 @@ function renderMarketPulse(){
         <div class="pulse-title">Setup Quality</div>
         <div class="pulse-value">${signal ? `${signal.grade} ${signal.action}` : "--"}</div>
         <div class="pulse-meta">${signal ? (signal.reason || "No setup reason yet.") : "Setup grading appears here after analysis."}</div>
+      </div>
+      <div class="pulse-item">
+        <div class="pulse-title">Market Mode</div>
+        <div class="pulse-value">${mode ? mode.label : "--"}</div>
+        <div class="pulse-meta">${mode ? mode.summary : "Market mode appears after analysis."}</div>
+      </div>
+      <div class="pulse-item">
+        <div class="pulse-title">Momentum Score</div>
+        <div class="pulse-value">${momentum ? momentum.value : "--"}</div>
+        <div class="pulse-meta">${momentum ? momentum.label : "Momentum pressure appears here after analysis."}</div>
       </div>
       <div class="pulse-item">
         <div class="pulse-title">Strongest Watchlist Move</div>
@@ -2692,14 +2835,21 @@ async function runScanner(){
 
   try{
     const params = new URLSearchParams({ tickers: universe.join(",") });
-    const res = await fetch(`/watchlist/data?${params.toString()}`);
-    const rows = await res.json();
-    rows.sort((a, b) => Math.abs(Number(b.change || 0)) - Math.abs(Number(a.change || 0)));
+    const res = await fetch(`/scanner?${params.toString()}`);
+    const payload = await res.json();
+    const rows = Array.isArray(payload.rows) ? payload.rows : [];
+    latestHotList = Array.isArray(payload.hot_list) ? payload.hot_list : [];
 
     container.innerHTML = `
       <div class="insights-grid">
+        <div class="insight-card market-pulse-card" style="grid-column:1 / -1;">
+          <div class="section-kicker">Daily Hot List</div>
+          <div class="section-title">Highest-priority names right now</div>
+          <div class="confirmation-list">
+            ${latestHotList.length ? latestHotList.map(item => `<div class="confirmation-pill">${item.ticker} | ${item.momentum_score?.value || "--"} score | ${item.why_moving?.drivers?.[0] || "No catalyst read yet"}</div>`).join("") : '<div class="paper-empty">Hot list will populate after the scanner finds stronger movers.</div>'}
+          </div>
+        </div>
         ${rows.map(item => {
-          const setup = buildScannerGrade(item);
           return `
             <div class="insight-card market-pulse-card">
               <div class="section-kicker">Scanner Hit</div>
@@ -2712,10 +2862,21 @@ async function runScanner(){
                 </div>
                 <div class="pulse-item">
                   <div class="pulse-title">Setup Grade</div>
-                  <div class="pulse-value">${setup.grade}</div>
-                  <div class="pulse-meta">${setup.note}</div>
+                  <div class="pulse-value">${item.setup_grade || "--"} ${item.setup_action || ""}</div>
+                  <div class="pulse-meta">${item.trade_signal?.reason || "No setup note yet."}</div>
+                </div>
+                <div class="pulse-item">
+                  <div class="pulse-title">Momentum</div>
+                  <div class="pulse-value">${item.momentum_score?.value || "--"}</div>
+                  <div class="pulse-meta">${item.momentum_score?.label || "Momentum unavailable"}</div>
+                </div>
+                <div class="pulse-item">
+                  <div class="pulse-title">Continuation Odds</div>
+                  <div class="pulse-value">${item.continuation_probability || "--"}%</div>
+                  <div class="pulse-meta">${item.unusual_activity?.detail || "Activity read unavailable."}</div>
                 </div>
               </div>
+              <div class="indicator-meta">${item.why_moving?.summary || "Why-this-is-moving engine is unavailable for this symbol."}</div>
               <div class="chart-tool-actions" style="margin-top:12px;">
                 <button class="paper-btn close" onclick="switchView('market'); analyze('${item.ticker}')">Open ${item.ticker}</button>
               </div>
@@ -3746,6 +3907,7 @@ function addAlertForCurrentTicker(){
       ticker: lastTicker,
       type,
       target: type.startsWith("price_") ? target : null,
+      contextMessage: latestAnalyzedSignal?.reason || latestMarketMode?.summary || "Alert triggered from your saved market setup.",
       status: "active",
       createdAt: new Date().toISOString()
     },
@@ -3836,7 +3998,8 @@ function checkAlerts(){
       ...alert,
       status: "triggered",
       triggeredAt: new Date().toISOString(),
-      triggeredPrice: markPrice
+      triggeredPrice: markPrice,
+      triggerMessage: alert.contextMessage || "Your saved setup condition has been met."
     };
   });
 
@@ -4098,11 +4261,12 @@ async function analyze(sym){
 
   t=t.toUpperCase();
   lastTicker=t;
+  riskProfile = document.getElementById("riskProfile")?.value || riskProfile || "balanced";
   hideSuggestions();
   setLoadingState(true);
 
   try{
-    const res = await fetch(`/analyze?ticker=${t}&strategy=${strategy}`);
+    const res = await fetch(`/analyze?ticker=${t}&strategy=${strategy}&risk=${riskProfile}`);
     const d = await res.json();
 
     if(!d || d.error){
@@ -4143,6 +4307,8 @@ async function analyze(sym){
     };
     latestAnalyzedSignal = d.indicators?.trade_signal || null;
     latestAnalyzedLevels = d.levels || null;
+    latestMarketMode = d.market_mode || null;
+    latestMomentumScore = d.momentum_score || null;
     checkAlerts();
     renderAlerts();
     renderPortfolioContext();
@@ -4169,10 +4335,17 @@ async function analyze(sym){
           </div>
         </div>
 
+        <div class="analytics-grid">
+          ${renderAnalyticsCard("Momentum Score", String(d.momentum_score?.value || "--"), "", d.momentum_score?.label || "Momentum read")}
+          ${renderAnalyticsCard("Market Mode", d.market_mode?.label || "--", "", d.market_mode?.summary || "Tape context")}
+          ${renderAnalyticsCard("Support", `$${Number(d.levels?.support || 0).toFixed(2)}`)}
+          ${renderAnalyticsCard("Resistance", `$${Number(d.levels?.resistance || 0).toFixed(2)}`)}
+        </div>
+
         <div class="section">
           <div class="section-title-row">
             <div>Trade Plan</div>
-            <div class="helper-pill">${strategy.toUpperCase()} setup</div>
+            <div class="helper-pill">${strategy.toUpperCase()} | ${riskProfile} risk</div>
           </div>
             <div class="indicator-meta">Entry: ${d.plan.entry}</div>
             <div class="indicator-meta">Stop: ${d.plan.stop}</div>
@@ -4185,9 +4358,16 @@ async function analyze(sym){
             </div>
             <div class="indicator-meta">${d.summary}</div>
           </div>
+
+          ${renderWhyMovingSection(d.why_moving)}
+          ${renderTradeWarningCard(d.trade_warning)}
+          ${renderAiSetupCard(d.ai_setup)}
+          ${renderPositionSizeCard(d.position_size)}
+          ${renderSmartAlerts(d.smart_alerts)}
         </div>
       `;
     syncAlertInputs();
+    calculatePositionSize();
 
     document.getElementById("marketInsights").innerHTML = `
       <div class="insights-grid">
@@ -4232,6 +4412,14 @@ document.getElementById("ticker").addEventListener("input", (e)=>{
     clearTimeout(searchDebounce);
   }
   searchDebounce = setTimeout(() => fetchSuggestions(value), 180);
+});
+
+document.getElementById("riskProfile").addEventListener("change", (e) => {
+  riskProfile = e.target.value || "balanced";
+  saveLayoutPrefs();
+  if(lastTicker){
+    analyze(lastTicker);
+  }
 });
 
 document.addEventListener("click", (e)=>{
@@ -4293,6 +4481,7 @@ function renderAlerts(){
       <div>
         <div class="paper-symbol">${alert.ticker} | ${getAlertLabel(alert)}</div>
         <div class="paper-details">Triggered at $${Number(alert.triggeredPrice).toFixed(2)}</div>
+        <div class="paper-details">${alert.triggerMessage || alert.contextMessage || "Saved alert condition hit."}</div>
       </div>
       <div>
         <button class="paper-btn close" onclick="removeAlert('${alert.id}')">Dismiss</button>
@@ -4306,6 +4495,7 @@ async function initializeApp(){
   loadLayoutPrefs();
   setAuthMode("login");
   renderIndicatorToggles();
+  document.getElementById("riskProfile").value = riskProfile;
   document.querySelectorAll("#strategyBar button").forEach(button => button.classList.toggle("active", button.dataset.s === strategy));
   document.querySelectorAll("#tfBar button").forEach(button => button.classList.toggle("active", button.dataset.tf === timeframe));
   document.querySelectorAll("#presetBar button").forEach(button => button.classList.toggle("active", button.dataset.preset === indicatorPreset));

@@ -1446,11 +1446,312 @@ def build_trade_signal(change, bias, strategy, candles):
     }
 
 
+def average(values):
+    cleaned = [float(value) for value in values if value is not None]
+    return sum(cleaned) / len(cleaned) if cleaned else 0
+
+
+def clamp(value, low, high):
+    return max(low, min(high, value))
+
+
+def describe_social_signal(headlines):
+    joined = " ".join(headlines).lower()
+    social_terms = ["reddit", "wallstreetbets", "social", "retail", "meme", "x.com", "twitter"]
+    social_hits = sum(1 for term in social_terms if term in joined)
+    if social_hits >= 2:
+        return {
+            "label": "Social chatter is elevated",
+            "strength": "high",
+            "detail": "Headline flow includes message-board or retail-trader language."
+        }
+    if social_hits == 1:
+        return {
+            "label": "Some social chatter is showing up",
+            "strength": "moderate",
+            "detail": "There is at least one headline hinting at social or retail attention."
+        }
+    return {
+        "label": "No clear social driver",
+        "strength": "low",
+        "detail": "This is not coming from direct social scraping, and current headlines do not suggest a strong social catalyst."
+    }
+
+
+def build_why_moving_engine(symbol, price, change, candles, news, events):
+    headlines = [article.get("title", "") for article in (news or {}).get("articles", [])]
+    volumes = [float(candle.get("volume") or 0) for candle in candles[-30:]]
+    recent_volumes = volumes[-6:] or volumes
+    baseline_volumes = volumes[:-6] or volumes
+    average_recent_volume = average(recent_volumes)
+    average_baseline_volume = average(baseline_volumes)
+    relative_volume = round(average_recent_volume / average_baseline_volume, 2) if average_baseline_volume else 1.0
+    price_action = "up" if change > 0 else "down" if change < 0 else "flat"
+    news_impact = (news or {}).get("impact") or {}
+    social_signal = describe_social_signal(headlines)
+    earnings = (events or {}).get("earnings") or {}
+    next_earnings = earnings.get("next_earnings_date")
+    news_catalyst = news.get("driver") if isinstance(news, dict) else "Headline catalyst is unavailable."
+
+    drivers = []
+    if relative_volume >= 1.8:
+        drivers.append(f"volume is running at about {relative_volume}x its recent pace")
+    elif relative_volume >= 1.25:
+        drivers.append(f"volume is a bit elevated at about {relative_volume}x normal")
+
+    if headlines:
+        drivers.append(news_catalyst.replace("Possible reason it's up: ", "").replace("Possible reason it's down: ", "").replace("Possible driver today: ", "").rstrip("."))
+
+    if news_impact.get("score", 0) >= 2:
+        drivers.append("headline tone is leaning bullish")
+    elif news_impact.get("score", 0) <= -2:
+        drivers.append("headline tone is leaning bearish")
+
+    if social_signal["strength"] in {"high", "moderate"}:
+        drivers.append(social_signal["label"].lower())
+
+    if next_earnings:
+        next_dt = parse_event_datetime(next_earnings)
+        if next_dt:
+            days_until = (next_dt.date() - datetime.now(DEMO_TIMEZONE).date()).days
+            if 0 <= days_until <= 7:
+                drivers.append(f"earnings are coming up in {days_until} day{'s' if days_until != 1 else ''}")
+
+    if not drivers:
+        drivers.append("price is moving, but no single catalyst is standing out yet")
+
+    explanation = f"{symbol} is {price_action} {abs(change):.2f}% today because " + ", ".join(drivers[:3]) + "."
+    return {
+        "summary": explanation,
+        "price_action": price_action,
+        "relative_volume": relative_volume,
+        "news_catalyst": news_catalyst,
+        "social_signal": social_signal,
+        "drivers": drivers[:4]
+    }
+
+
+def build_momentum_score(change, candles, news_impact, trade_signal):
+    closes = [candle["close"] for candle in candles]
+    volumes = [float(candle.get("volume") or 0) for candle in candles]
+    ema9 = calculate_ema(closes, 9)
+    ema20 = calculate_ema(closes, 20)
+    rsi14 = calculate_rsi(closes, 14)
+    last_close = closes[-1] if closes else 0
+    last_ema9 = ema9[-1] if ema9 else last_close
+    last_ema20 = ema20[-1] if ema20 else last_close
+    last_rsi = rsi14[-1] if rsi14 and rsi14[-1] is not None else 50
+    avg_recent_volume = average(volumes[-6:])
+    avg_volume = average(volumes[:-6] or volumes)
+    relative_volume = (avg_recent_volume / avg_volume) if avg_volume else 1
+
+    score = 50
+    score += clamp(change * 4, -20, 20)
+    score += 10 if last_close > last_ema9 else -10
+    score += 10 if last_close > last_ema20 else -10
+    score += clamp((last_rsi - 50) * 0.6, -12, 12)
+    score += clamp((relative_volume - 1) * 18, -8, 18)
+    score += clamp((news_impact or {}).get("score", 0) * 4, -10, 10)
+    score += {"A": 10, "B": 4, "C": -4}.get((trade_signal or {}).get("grade"), 0)
+    final_score = int(round(clamp(score, 1, 100)))
+
+    if final_score >= 80:
+        label = "Explosive"
+    elif final_score >= 65:
+        label = "Strong"
+    elif final_score >= 45:
+        label = "Balanced"
+    else:
+        label = "Weak"
+
+    return {
+        "value": final_score,
+        "label": label,
+        "summary": f"Momentum score is {final_score}/100, driven by price trend, volume pressure, news tone, and current setup quality."
+    }
+
+
+def detect_market_mode(change, candles):
+    closes = [candle["close"] for candle in candles]
+    volumes = [float(candle.get("volume") or 0) for candle in candles]
+    ema9 = calculate_ema(closes, 9)
+    ema20 = calculate_ema(closes, 20)
+    last_close = closes[-1] if closes else 0
+    last_ema9 = ema9[-1] if ema9 else last_close
+    last_ema20 = ema20[-1] if ema20 else last_close
+    range_values = [(candle["high"] - candle["low"]) for candle in candles[-8:]]
+    avg_range = average(range_values)
+    avg_price = average(closes[-8:]) or last_close or 1
+    relative_range = avg_range / avg_price if avg_price else 0
+    recent_volume = average(volumes[-6:])
+    baseline_volume = average(volumes[:-6] or volumes)
+    relative_volume = recent_volume / baseline_volume if baseline_volume else 1
+
+    if last_close > last_ema9 > last_ema20 and change >= 0.75:
+        mode = "Bullish Trend"
+        note = "Trend is aligned higher and buyers are keeping price above the fast averages."
+    elif last_close < last_ema9 < last_ema20 and change <= -0.75:
+        mode = "Bearish Trend"
+        note = "Trend is aligned lower and sellers are keeping price below the fast averages."
+    elif relative_range < 0.0035 and relative_volume < 0.9:
+        mode = "Choppy"
+        note = "Range and participation both look soft, so follow-through risk is lower."
+    elif relative_volume >= 1.5 and abs(change) >= 1:
+        mode = "Expansion"
+        note = "Participation is elevated and the stock is stretching away from its baseline."
+    else:
+        mode = "Balanced"
+        note = "The tape is active enough to trade, but the trend is not dominant yet."
+
+    return {
+        "label": mode,
+        "summary": note
+    }
+
+
+def build_trade_warning(change, candles, momentum_score):
+    closes = [candle["close"] for candle in candles]
+    volumes = [float(candle.get("volume") or 0) for candle in candles]
+    ranges = [float(candle["high"] - candle["low"]) for candle in candles[-10:]]
+    avg_range = average(ranges)
+    avg_price = average(closes[-10:]) or 1
+    relative_range = avg_range / avg_price if avg_price else 0
+    relative_volume = average(volumes[-6:]) / (average(volumes[:-6] or volumes) or 1)
+    overextended = abs(change) >= 6 or momentum_score["value"] >= 88
+
+    warnings = []
+    if relative_volume < 0.8:
+        warnings.append("volume is light")
+    if relative_range < 0.0025:
+        warnings.append("the chart is choppy")
+    if overextended:
+        warnings.append("the move is already stretched")
+
+    if not warnings:
+        return {
+            "label": "Trade is not blocked",
+            "tone": "ok",
+            "summary": "Nothing major is flashing red right now, so trade quality depends on execution and risk control."
+        }
+
+    return {
+        "label": "Don’t chase this blindly",
+        "tone": "warning",
+        "summary": "Be careful here because " + ", ".join(warnings[:3]) + "."
+    }
+
+
+def build_position_size_guide(entry, stop):
+    risk_per_share = abs(entry - stop)
+    return {
+        "entry": round(entry, 2),
+        "stop": round(stop, 2),
+        "risk_per_share": round(risk_per_share, 2)
+    }
+
+
+def build_ai_trade_setup(symbol, strategy, risk_profile, trade_signal, plan, why_moving, market_mode, momentum_score, trade_warning):
+    reward = abs((plan["targets"][0] if plan["targets"] else plan["entry"]) - plan["entry"])
+    risk = abs(plan["entry"] - plan["stop"]) or 0.01
+    rr = round(reward / risk, 2) if risk else 0
+    caution = trade_warning.get("tone") == "warning"
+
+    if trade_signal["action"] == "WAIT":
+        stance = "Wait for better confirmation"
+    elif caution and risk_profile == "conservative":
+        stance = "Reduce size or wait for a cleaner retest"
+    else:
+        stance = f"{trade_signal['action']} bias is acceptable for a {risk_profile} {strategy} trader"
+
+    reasoning = [
+        why_moving.get("summary"),
+        market_mode.get("summary"),
+        f"The current setup grade is {trade_signal.get('grade')} with {trade_signal.get('strength', '').lower()} conviction.",
+        f"First target offers about {rr}:1 reward-to-risk."
+    ]
+    if caution:
+        reasoning.append(trade_warning.get("summary"))
+
+    return {
+        "risk_profile": risk_profile,
+        "stance": stance,
+        "entry": round(plan["entry"], 2),
+        "stop": round(plan["stop"], 2),
+        "target": round(plan["targets"][0], 2) if plan["targets"] else round(plan["entry"], 2),
+        "reward_to_risk": rr,
+        "reasoning": reasoning[:4]
+    }
+
+
+def build_smart_alert_ideas(symbol, trade_signal, momentum_score, levels, market_mode):
+    direction = "above" if trade_signal.get("action") == "BUY" else "below"
+    level = levels["resistance"] if direction == "above" else levels["support"]
+    return [
+        {
+            "label": f"{symbol} breaks {direction} {round(level, 2)}",
+            "detail": f"That would align with the current {trade_signal.get('grade')} setup and {market_mode.get('label', 'current')} tape."
+        },
+        {
+            "label": f"Momentum score pushes past {min(95, max(60, momentum_score['value'] + 8))}",
+            "detail": "That would signal stronger continuation pressure instead of just a random price tick."
+        }
+    ]
+
+
+def build_scanner_row(symbol):
+    snapshot = get_watchlist_snapshot(symbol)
+    if not snapshot:
+        return None
+
+    candle_result = fetch_and_cache_candles(symbol, "5m")
+    candles = candle_result["candles"] if candle_result and candle_result["candles"] else build_demo_candles(symbol, "5m")
+    change = snapshot["change"]
+    bias = "Bullish" if change > 0 else "Bearish" if change < 0 else "Neutral"
+    trade_signal = build_trade_signal(change, bias, "momentum", candles)
+    news = fetch_stock_news(symbol, change)
+    events = fetch_market_events(symbol)
+    news["impact"] = build_news_impact(
+        [article.get("title", "") for article in news.get("articles", [])],
+        events.get("earnings") if isinstance(events, dict) else {}
+    )
+    why_moving = build_why_moving_engine(symbol, snapshot["price"], change, candles, news, events)
+    momentum = build_momentum_score(change, candles, news.get("impact"), trade_signal)
+    market_mode = detect_market_mode(change, candles)
+
+    continuation_probability = int(clamp(
+        momentum["value"] + (8 if trade_signal["action"] != "WAIT" else -8) + (6 if abs(change) >= 2 else 0),
+        15,
+        95
+    ))
+
+    volumes = [float(candle.get("volume") or 0) for candle in candles[-30:]]
+    relative_volume = round((average(volumes[-6:]) / (average(volumes[:-6] or volumes) or 1)), 2)
+
+    return {
+        "ticker": symbol,
+        "price": snapshot["price"],
+        "change": change,
+        "sparkline": snapshot.get("sparkline") or [],
+        "setup_grade": trade_signal["grade"],
+        "setup_action": trade_signal["action"],
+        "momentum_score": momentum,
+        "why_moving": why_moving,
+        "market_mode": market_mode,
+        "relative_volume": relative_volume,
+        "continuation_probability": continuation_probability,
+        "unusual_activity": {
+            "label": "High" if relative_volume >= 2 else "Elevated" if relative_volume >= 1.3 else "Normal",
+            "detail": f"Relative volume is {relative_volume}x versus its recent intraday baseline."
+        },
+        "trade_signal": trade_signal
+    }
+
+
 # =========================
 # STRATEGY ENGINE
 # =========================
 
-def analyze_strategy(symbol, strategy):
+def analyze_strategy(symbol, strategy, risk_profile="balanced"):
     market = get_data(symbol)
     if not market:
         return None
@@ -1505,6 +1806,29 @@ def analyze_strategy(symbol, strategy):
         targets = [resistance]
         summary = "Default strategy."
 
+    plan = {
+        "entry": entry,
+        "stop": stop,
+        "targets": targets
+    }
+    why_moving = build_why_moving_engine(symbol, price, change, signal_candles, news, events)
+    momentum_score = build_momentum_score(change, signal_candles, news.get("impact"), trade_signal)
+    market_mode = detect_market_mode(change, signal_candles)
+    trade_warning = build_trade_warning(change, signal_candles, momentum_score)
+    ai_setup = build_ai_trade_setup(
+        symbol,
+        strategy,
+        risk_profile,
+        trade_signal,
+        plan,
+        why_moving,
+        market_mode,
+        momentum_score,
+        trade_warning
+    )
+    position_size = build_position_size_guide(entry, stop)
+    smart_alerts = build_smart_alert_ideas(symbol, trade_signal, momentum_score, {"support": support, "resistance": resistance}, market_mode)
+
     return {
         "ticker": symbol,
         "price": price,
@@ -1521,14 +1845,17 @@ def analyze_strategy(symbol, strategy):
             "support": support,
             "resistance": resistance
         },
-        "plan": {
-            "entry": entry,
-            "stop": stop,
-            "targets": targets
-        },
+        "plan": plan,
         "summary": summary,
         "news": news,
         "events": events,
+        "why_moving": why_moving,
+        "momentum_score": momentum_score,
+        "market_mode": market_mode,
+        "trade_warning": trade_warning,
+        "ai_setup": ai_setup,
+        "position_size": position_size,
+        "smart_alerts": smart_alerts,
         "indicators": {
             "trade_signal": trade_signal
         }
@@ -1776,11 +2103,12 @@ def create_portal_session():
 def analyze():
     symbol = request.args.get("ticker")
     strategy = request.args.get("strategy", "day")
+    risk_profile = request.args.get("risk", "balanced").strip().lower() or "balanced"
 
     if not symbol:
         return jsonify({"error": "Missing ticker"}), 400
 
-    result = analyze_strategy(symbol.upper(), strategy)
+    result = analyze_strategy(symbol.upper(), strategy, risk_profile)
     if not result:
         return jsonify({"error": "No data"}), 500
 
@@ -1897,6 +2225,33 @@ def watchlist_data():
             snapshots.append(snapshot)
 
     return jsonify(snapshots)
+
+
+@app.route("/scanner")
+def scanner():
+    raw_tickers = request.args.get("tickers", "").strip()
+    tickers = []
+    for ticker in raw_tickers.split(","):
+        clean = ticker.upper().strip()
+        if clean and clean not in tickers:
+            tickers.append(clean)
+
+    if not tickers:
+        tickers = load_watchlist()
+
+    rows = []
+    for ticker in tickers[:10]:
+        row = build_scanner_row(ticker)
+        if row:
+            rows.append(row)
+
+    rows.sort(key=lambda item: (item["continuation_probability"], item["momentum_score"]["value"], abs(item["change"])), reverse=True)
+    hot_list = rows[:5]
+
+    return jsonify({
+        "rows": rows,
+        "hot_list": hot_list
+    })
 
 
 @app.route("/search-symbols")

@@ -2177,6 +2177,7 @@ let currentUser = null;
 let billingEnabled = false;
 let premiumPriceCents = 999;
 let lastChartState = null;
+let candleRefreshTimer = null;
 let latestAnalyzedSignal = null;
 let latestAnalyzedLevels = null;
 let latestMarketMode = null;
@@ -2220,6 +2221,7 @@ let communityState = { leaderboard: [], journals: [], heatmap: [], following: []
 let scannerCache = {};
 let scannerCacheTime = 0;
 const DEFAULT_SCANNER_UNIVERSE = ["AAPL", "MSFT", "NVDA", "AMZN", "META", "TSLA", "AMD", "GOOGL"];
+const CANDLE_REFRESH_INTERVAL_MS = 15000;
 const SEARCH_DEBOUNCE_MS = 400;
 const SCANNER_CACHE_MS = 30000;
 const DEFAULT_DISCORD_LINK = "https://discord.gg/P2EhQgt7";
@@ -2615,6 +2617,30 @@ function renderCurrentChart(){
 
 function setLastUpdated(message){
   document.getElementById("lastUpdated").innerText = message;
+}
+
+function stopCandleRefresh(){
+  if(candleRefreshTimer){
+    clearInterval(candleRefreshTimer);
+    candleRefreshTimer = null;
+  }
+}
+
+async function refreshCandlesOnly(){
+  if(!lastTicker || currentView !== "market" || document.hidden){
+    return;
+  }
+  await loadCandles(lastTicker, { silent: true });
+}
+
+function startCandleRefresh(){
+  stopCandleRefresh();
+  if(!lastTicker || currentView !== "market"){
+    return;
+  }
+  candleRefreshTimer = setInterval(() => {
+    refreshCandlesOnly();
+  }, CANDLE_REFRESH_INTERVAL_MS);
 }
 
 function setChartMeta(ticker, sourceLabel){
@@ -3908,6 +3934,11 @@ function switchView(view){
   document.getElementById("portfolioNav").classList.toggle("active", view === "portfolio");
   document.getElementById("scannerNav").classList.toggle("active", view === "scanner");
   document.getElementById("communityNav").classList.toggle("active", view === "community");
+  if(view === "market"){
+    startCandleRefresh();
+  }else{
+    stopCandleRefresh();
+  }
   if(view === "community"){
     loadCommunity();
   }
@@ -5027,7 +5058,8 @@ function renderWatch(){
   });
 }
 
-async function loadCandles(ticker){
+async function loadCandles(ticker, options={}){
+  const silent = !!options.silent;
   const cRes = await fetch(`/candles?ticker=${ticker}&tf=${timeframe}`);
   const payload = await cRes.json();
   const visibleCandles = Array.isArray(payload.candles) ? payload.candles : [];
@@ -5046,23 +5078,37 @@ async function loadCandles(ticker){
 
     renderChart(ticker, visibleCandles, payload.indicators || {}, sourceLabel, sessionLabel);
 
+    const lastCandle = visibleCandles[visibleCandles.length - 1];
+    if(lastCandle && latestAnalyzedSnapshot && latestAnalyzedSnapshot.ticker === ticker){
+      updateQuoteDisplay(Number(lastCandle.close));
+    }
+
     if(payload.is_demo){
       updateProviderChip("Demo data", "warning");
       setLastUpdated("Demo candles loaded just now");
-      setStatus("Live market data is unavailable, so this chart is using demo candles.", "warning");
+      if(!silent){
+        setStatus("Live market data is unavailable, so this chart is using demo candles.", "warning");
+      }
     }else if(payload.warning){
       updateProviderChip(payload.is_cached ? "Cached data" : "Provider warning", "warning");
       if(payload.is_stale || payload.is_cached){
         setLastUpdated(`Cached candles ${formatAge(payload.cache_age_seconds)}`);
       }
-      setStatus(payload.warning, "warning");
+      if(!silent){
+        setStatus(payload.warning, "warning");
+      }
     }else if(payload.is_stale){
       updateProviderChip("Cached real data", "warning");
       setLastUpdated(`Cached candles ${formatAge(payload.cache_age_seconds)}`);
-      setStatus(`Showing cached candles from ${Math.round(payload.cache_age_seconds)}s ago.`, "warning");
+      if(!silent){
+        setStatus(`Showing cached candles from ${Math.round(payload.cache_age_seconds)}s ago.`, "warning");
+      }
     }else if(payload.data_source === "live"){
       updateProviderChip("Live market data");
       setLastUpdated(`Live candles updated at ${liveEtTimeFormatter.format(new Date())} ET`);
+      if(!silent){
+        setStatus("Polygon candles refreshed.", "ok");
+      }
     }
   }else{
     showChartMessage("No candle data returned for this ticker and timeframe yet.");
@@ -5072,7 +5118,9 @@ async function loadCandles(ticker){
       }else{
         setLastUpdated("No recent candle data available");
       }
-      setStatus(payload.warning, "warning");
+      if(!silent){
+        setStatus(payload.warning, "warning");
+      }
     }
   }
 }
@@ -5218,8 +5266,10 @@ async function analyze(sym){
     renderPaperPositions();
 
     await loadCandles(t);
+    startCandleRefresh();
   }catch(err){
     console.log(err);
+    stopCandleRefresh();
     setOnboardingVisible(true);
     renderMarketEmptyState("Something went wrong while loading market data.", "The search controls still work, but this request did not complete. Try again in a moment.");
     setLastUpdated("Update failed");
@@ -5259,6 +5309,14 @@ document.getElementById("riskProfile").addEventListener("change", (e) => {
 document.addEventListener("click", (e)=>{
   if(!e.target.closest(".search-wrap")){
     hideSuggestions();
+  }
+});
+
+document.addEventListener("visibilitychange", () => {
+  if(document.hidden){
+    stopCandleRefresh();
+  }else if(currentView === "market" && lastTicker){
+    startCandleRefresh();
   }
 });
 

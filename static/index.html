@@ -5060,57 +5060,61 @@ function renderWatch(){
 
 async function loadCandles(ticker, options={}){
   const silent = !!options.silent;
-  const cRes = await fetch(`/candles?ticker=${ticker}&tf=${timeframe}`);
-  const payload = await cRes.json();
-  const visibleCandles = Array.isArray(payload.candles) ? payload.candles : [];
 
-  if(Array.isArray(visibleCandles) && visibleCandles.length){
-    const sourceLabel =
-      payload.is_demo ? "Demo data" :
-      payload.is_stale ? "Cached real data" :
-      payload.data_source === "live" ? "Live provider data" :
-      "Chart data";
+  try{
+    const cRes = await fetch(`/candles?ticker=${ticker}&tf=${timeframe}`);
+    const payload = await cRes.json();
+    const visibleCandles = Array.isArray(payload.candles) ? payload.candles : [];
 
-    const sessionLabel =
-      payload.latest_candle_session && payload.market_session !== "Regular Hours"
-        ? `${payload.market_session} · Last candles ${payload.latest_candle_session}`
-        : (payload.market_session || payload.latest_candle_session || "Regular Hours");
+    if(Array.isArray(visibleCandles) && visibleCandles.length){
+      const sourceLabel =
+        payload.is_demo ? "Demo data" :
+        payload.is_stale ? "Cached real data" :
+        payload.data_source === "live" ? "Live provider data" :
+        "Chart data";
 
-    renderChart(ticker, visibleCandles, payload.indicators || {}, sourceLabel, sessionLabel);
+      const sessionLabel =
+        payload.latest_candle_session && payload.market_session !== "Regular Hours"
+          ? `${payload.market_session} · Last candles ${payload.latest_candle_session}`
+          : (payload.market_session || payload.latest_candle_session || "Regular Hours");
 
-    const lastCandle = visibleCandles[visibleCandles.length - 1];
-    if(lastCandle && latestAnalyzedSnapshot && latestAnalyzedSnapshot.ticker === ticker){
-      updateQuoteDisplay(Number(lastCandle.close));
-    }
+      renderChart(ticker, visibleCandles, payload.indicators || {}, sourceLabel, sessionLabel);
 
-    if(payload.is_demo){
-      updateProviderChip("Demo data", "warning");
-      setLastUpdated("Demo candles loaded just now");
-      if(!silent){
-        setStatus("Live market data is unavailable, so this chart is using demo candles.", "warning");
+      const lastCandle = visibleCandles[visibleCandles.length - 1];
+      if(lastCandle && latestAnalyzedSnapshot && latestAnalyzedSnapshot.ticker === ticker){
+        updateQuoteDisplay(Number(lastCandle.close));
       }
-    }else if(payload.warning){
-      updateProviderChip(payload.is_cached ? "Cached data" : "Provider warning", "warning");
-      if(payload.is_stale || payload.is_cached){
+
+      if(payload.is_demo){
+        updateProviderChip("Demo data", "warning");
+        setLastUpdated("Demo candles loaded just now");
+        if(!silent){
+          setStatus("Live market data is unavailable, so this chart is using demo candles.", "warning");
+        }
+      }else if(payload.warning){
+        updateProviderChip(payload.is_cached ? "Cached data" : "Provider warning", "warning");
+        if(payload.is_stale || payload.is_cached){
+          setLastUpdated(`Cached candles ${formatAge(payload.cache_age_seconds)}`);
+        }
+        if(!silent){
+          setStatus(payload.warning, "warning");
+        }
+      }else if(payload.is_stale){
+        updateProviderChip("Cached real data", "warning");
         setLastUpdated(`Cached candles ${formatAge(payload.cache_age_seconds)}`);
+        if(!silent){
+          setStatus(`Showing cached candles from ${Math.round(payload.cache_age_seconds)}s ago.`, "warning");
+        }
+      }else if(payload.data_source === "live"){
+        updateProviderChip("Live market data");
+        setLastUpdated(`Live candles updated at ${liveEtTimeFormatter.format(new Date())} ET`);
+        if(!silent){
+          setStatus("Polygon candles refreshed.", "ok");
+        }
       }
-      if(!silent){
-        setStatus(payload.warning, "warning");
-      }
-    }else if(payload.is_stale){
-      updateProviderChip("Cached real data", "warning");
-      setLastUpdated(`Cached candles ${formatAge(payload.cache_age_seconds)}`);
-      if(!silent){
-        setStatus(`Showing cached candles from ${Math.round(payload.cache_age_seconds)}s ago.`, "warning");
-      }
-    }else if(payload.data_source === "live"){
-      updateProviderChip("Live market data");
-      setLastUpdated(`Live candles updated at ${liveEtTimeFormatter.format(new Date())} ET`);
-      if(!silent){
-        setStatus("Polygon candles refreshed.", "ok");
-      }
+      return true;
     }
-  }else{
+
     showChartMessage("No candle data returned for this ticker and timeframe yet.");
     if(payload.warning){
       if(payload.is_stale || payload.is_cached){
@@ -5122,6 +5126,15 @@ async function loadCandles(ticker, options={}){
         setStatus(payload.warning, "warning");
       }
     }
+
+    return false;
+  }catch(err){
+    console.log("Candle load failed", err);
+    showChartMessage("Chart data could not load right now. Try Refresh Now in a moment.");
+    if(!silent){
+      setStatus("The ticker loaded, but the chart request failed.", "warning");
+    }
+    return false;
   }
 }
 

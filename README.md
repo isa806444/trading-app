@@ -20,6 +20,7 @@ This project is a lightweight trading dashboard built with Flask, vanilla HTML, 
 - `market_cache.json`: cached quote and candle data
 - `.env.example`: environment variable template for API keys
 - `requirements.txt`: Python dependencies
+- `discord_bot.py`: Discord bot for price, analysis, movers, and news commands
 
 ## Setup
 
@@ -57,6 +58,9 @@ TWELVE_DATA_API_KEY=your_real_twelve_data_key
 STRIPE_PUBLISHABLE_KEY=your_stripe_publishable_key
 STRIPE_SECRET_KEY=your_stripe_secret_key
 STRIPE_PREMIUM_PRICE_CENTS=999
+APP_BASE_URL=https://trading-app-kb38.onrender.com
+DISCORD_BOT_TOKEN=your_discord_bot_token
+DISCORD_GUILD_ID=your_discord_server_id
 ```
 
 ## Run
@@ -70,6 +74,24 @@ python main.py
 Then open:
 
 - `http://127.0.0.1:5000`
+
+## Discord Bot
+
+The repo also includes a Discord bot that talks to the app's live endpoints.
+
+Run it with:
+
+```powershell
+python discord_bot.py
+```
+
+Current slash commands:
+
+- `/ping`
+- `/price`
+- `/analyze`
+- `/movers`
+- `/news`
 
 ## Deploy To Render
 

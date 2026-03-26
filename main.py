@@ -2609,27 +2609,6 @@ def candles():
     })
 
 
-@app.route("/live-price")
-def live_price():
-    symbol = request.args.get("ticker")
-    if not symbol:
-        return jsonify({"error": "Missing ticker"}), 400
-
-    result = get_live_price(symbol.upper())
-    if not result:
-        return jsonify({"error": "No live price"}), 500
-
-    return jsonify({
-        "ticker": symbol.upper(),
-        "price": result["price"],
-        "data_source": result["source"],
-        "is_cached": result["is_cached"],
-        "is_stale": result["is_stale"],
-        "cache_age_seconds": result["cache_age_seconds"],
-        "timestamp": int(time.time())
-    })
-
-
 @app.route("/watchlist", methods=["GET", "POST", "DELETE"])
 def watchlist():
     data = load_watchlist()

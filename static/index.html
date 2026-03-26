@@ -2029,36 +2029,6 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
     </div>
   </div>
 
-  <div id="liveView" class="view-panel hidden">
-    <div class="portfolio-context">
-      <div class="paper-title">Real Trading</div>
-      <div class="paper-subtitle">Broker-ready order ticket. Live execution stays locked until a brokerage account is connected.</div>
-      <div class="paper-summary" id="liveTradingSummary">Connect a broker to place real-money stock, call, and put orders.</div>
-      <div class="paper-controls">
-        <select id="liveInstrument" class="paper-qty">
-          <option value="stock">Stock</option>
-          <option value="call">Call Option</option>
-          <option value="put">Put Option</option>
-        </select>
-        <input id="liveQty" class="paper-qty" type="number" min="1" step="1" value="1" />
-        <input id="liveStrike" class="paper-qty" type="number" min="0" step="0.01" placeholder="Strike" />
-        <input id="livePremium" class="paper-qty" type="number" min="0" step="0.01" placeholder="Premium" />
-        <input id="liveExpiry" class="paper-qty" type="date" />
-        <button class="paper-btn buy" onclick="showBrokerBlocked('BUY')">Buy</button>
-        <button class="paper-btn sell" onclick="showBrokerBlocked('SELL')">Sell</button>
-      </div>
-    </div>
-    <div class="paper-panel">
-      <div class="paper-head">
-        <div>
-          <div class="paper-title">Live Brokerage Status</div>
-          <div class="paper-subtitle">Orders, balances, and live positions will appear here after broker setup.</div>
-        </div>
-      </div>
-      <div class="paper-empty">Live trading is intentionally disabled until broker credentials, funding, compliance, and order routing are connected.</div>
-    </div>
-  </div>
-
   <div id="scannerView" class="view-panel hidden">
     <div class="control-card">
       <div class="movers-hero">
@@ -2109,7 +2079,6 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
   <div class="bottom-nav">
       <button id="marketNav" class="active" onclick="switchView('market')">Market</button>
       <button id="portfolioNav" onclick="switchView('portfolio')">Portfolio</button>
-      <button id="liveNav" onclick="switchView('live')">Live</button>
       <button id="scannerNav" onclick="switchView('scanner')">Movers</button>
       <button id="communityNav" onclick="switchView('community')">Community+</button>
     </div>
@@ -2150,10 +2119,6 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
       <input id="discordLinkInput" type="text" placeholder="https://discord.gg/your-server" />
       <button class="paper-btn close" onclick="saveDiscordSettings()">Save Discord Link</button>
     </div>
-  </div>
-  <div class="profile-block">
-    <div class="mini-label">Trading</div>
-    <div class="compact-copy">Paper trading is live. Real brokerage trading needs a connected broker, funding, KYC, and order-routing approval.</div>
   </div>
 </div>
 
@@ -2212,7 +2177,6 @@ let currentUser = null;
 let billingEnabled = false;
 let premiumPriceCents = 999;
 let lastChartState = null;
-let liveUpdateTimer = null;
 let latestAnalyzedSignal = null;
 let latestAnalyzedLevels = null;
 let latestMarketMode = null;
@@ -2221,7 +2185,6 @@ let latestBacktest = null;
 let latestCorrelations = null;
 let latestSqueeze = null;
 let latestEarningsVolatility = null;
-let latestBrokerReadiness = null;
 let watchSort = "change_desc";
 let riskProfile = "balanced";
 let indicatorVisibility = {
@@ -2257,7 +2220,6 @@ let communityState = { leaderboard: [], journals: [], heatmap: [], following: []
 let scannerCache = {};
 let scannerCacheTime = 0;
 const DEFAULT_SCANNER_UNIVERSE = ["AAPL", "MSFT", "NVDA", "AMZN", "META", "TSLA", "AMD", "GOOGL"];
-const LIVE_POLL_INTERVAL_MS = 5000;
 const SEARCH_DEBOUNCE_MS = 400;
 const SCANNER_CACHE_MS = 30000;
 const DEFAULT_DISCORD_LINK = "https://discord.gg/P2EhQgt7";
@@ -2457,10 +2419,6 @@ function getOptionMarkPrice(position, underlyingPrice){
     return Number((Math.max(strike - underlyingPrice, 0) + timeValue).toFixed(2));
   }
   return underlyingPrice;
-}
-
-function showBrokerBlocked(side){
-  setStatus(`Real ${side} orders need a connected broker, funding, KYC, and order routing before they can be enabled.`, "warning");
 }
 
 async function refreshAuthStatus(){
@@ -2706,84 +2664,6 @@ function updateQuoteDisplay(price){
   renderMarketPulse();
 }
 
-function updateLiveChartPrice(price, timestamp){
-  if(!lastChartState || !Array.isArray(lastChartState.candles) || !lastChartState.candles.length){
-    return;
-  }
-
-  const candles = lastChartState.candles.map(candle => ({ ...candle }));
-  const bucketStart = getBucketStart(timestamp);
-  const lastCandle = candles[candles.length - 1];
-
-  if(lastCandle.time === bucketStart){
-    lastCandle.close = Number(price.toFixed(2));
-    lastCandle.high = Math.max(lastCandle.high, lastCandle.close);
-    lastCandle.low = Math.min(lastCandle.low, lastCandle.close);
-  }else if(bucketStart > lastCandle.time){
-    candles.push({
-      time: bucketStart,
-      open: lastCandle.close,
-      high: Number(price.toFixed(2)),
-      low: Number(price.toFixed(2)),
-      close: Number(price.toFixed(2)),
-      volume: 0
-    });
-  }else{
-    return;
-  }
-
-  const visibleCandles = timeframe === "1m" ? candles.slice(-390) : timeframe === "15m" ? candles.slice(-26) : candles.slice(-78);
-  lastChartState = {
-    ...lastChartState,
-    candles: visibleCandles
-  };
-  renderChart(
-    lastChartState.ticker,
-    lastChartState.candles,
-    buildChartIndicators(lastChartState.candles),
-    "Live tick update",
-    lastChartState.sessionLabel
-  );
-}
-
-async function pollLivePrice(){
-  if(!lastTicker || currentView !== "market" || document.hidden){
-    return;
-  }
-
-  try{
-    const res = await fetch(`/live-price?ticker=${encodeURIComponent(lastTicker)}`);
-    const payload = await res.json();
-    if(!res.ok || payload.error){
-      return;
-    }
-    const price = Number(payload.price);
-    if(!Number.isFinite(price)){
-      return;
-    }
-    updateQuoteDisplay(price);
-    updateLiveChartPrice(price, Number(payload.timestamp || Math.floor(Date.now() / 1000)));
-    setLastUpdated(`Live tick ${liveEtTimeFormatter.format(new Date())} ET`);
-  }catch(err){
-    console.log("Live price poll failed", err);
-  }
-}
-
-function stopLiveUpdates(){
-  if(liveUpdateTimer){
-    clearInterval(liveUpdateTimer);
-    liveUpdateTimer = null;
-  }
-}
-
-function startLiveUpdates(){
-  stopLiveUpdates();
-  if(!lastTicker){
-    return;
-  }
-  liveUpdateTimer = setInterval(pollLivePrice, LIVE_POLL_INTERVAL_MS);
-}
-
 function setSessionBadge(sessionLabel){
   const badge = document.getElementById("sessionBadge");
   const normalized = (sessionLabel || "Closed").replace(/\s+/g, "").toLowerCase();
@@ -2901,7 +2781,7 @@ function loadLayoutPrefs(){
     if(parsed.indicatorVisibility) indicatorVisibility = { ...indicatorVisibility, ...parsed.indicatorVisibility };
     if(parsed.watchSort) watchSort = parsed.watchSort;
     if(typeof parsed.chartZones === "boolean") chartToolState.zones = parsed.chartZones;
-    if(parsed.currentView) currentView = parsed.currentView;
+    if(parsed.currentView) currentView = parsed.currentView === "live" ? "market" : parsed.currentView;
   }catch(err){
     console.log("Layout prefs load failed", err);
   }
@@ -4016,65 +3896,22 @@ function closeWatchlist(){
 }
 
 function switchView(view){
+  if(view === "live"){
+    view = "market";
+  }
   currentView = view;
   document.getElementById("marketView").classList.toggle("hidden", view !== "market");
   document.getElementById("portfolioView").classList.toggle("hidden", view !== "portfolio");
-  document.getElementById("liveView").classList.toggle("hidden", view !== "live");
   document.getElementById("scannerView").classList.toggle("hidden", view !== "scanner");
   document.getElementById("communityView").classList.toggle("hidden", view !== "community");
   document.getElementById("marketNav").classList.toggle("active", view === "market");
   document.getElementById("portfolioNav").classList.toggle("active", view === "portfolio");
-  document.getElementById("liveNav").classList.toggle("active", view === "live");
   document.getElementById("scannerNav").classList.toggle("active", view === "scanner");
   document.getElementById("communityNav").classList.toggle("active", view === "community");
-  if(view === "market"){
-    startLiveUpdates();
-  }else{
-    stopLiveUpdates();
-  }
   if(view === "community"){
     loadCommunity();
   }
-  const liveSummary = document.getElementById("liveTradingSummary");
-  if(liveSummary){
-    const brokerSummary = latestBrokerReadiness?.summary;
-    liveSummary.innerText = brokerSummary || (
-      currentUser?.is_premium
-        ? "Broker-ready order ticket. Connect a supported broker to unlock live execution later."
-        : "Live trading stays broker-locked. Premium keeps the full account experience cleaner when broker access is added later."
-    );
-  }
   saveLayoutPrefs();
-}
-
-function renderLiveBrokerPanel(){
-  const panel = document.querySelector("#liveView .paper-panel");
-  if(!panel){
-    return;
-  }
-  const readiness = latestBrokerReadiness || {
-    status: "Broker not connected",
-    summary: "Live execution is still locked until broker setup is complete.",
-    steps: [
-      "Connect a supported broker account",
-      "Finish funding and identity verification",
-      "Enable live order routing and trade confirmations"
-    ]
-  };
-
-  panel.innerHTML = `
-    <div class="paper-head">
-      <div>
-        <div class="paper-title">Live Brokerage Status</div>
-        <div class="paper-subtitle">${readiness.status || "Broker not connected"}</div>
-      </div>
-    </div>
-    <div class="paper-summary">${readiness.summary || "Live execution is not connected yet."}</div>
-    <div class="analytics-grid">
-      ${(readiness.steps || []).map((step, index) => renderAnalyticsCard(`Step ${index + 1}`, step)).join("")}
-    </div>
-    <div class="paper-empty">This page is broker-ready scaffolding only. No real-money orders are being sent yet.</div>
-  `;
 }
 
 function renderPortfolioContext(){
@@ -4286,26 +4123,9 @@ function renderChart(ticker, candles, indicators, sourceLabel, sessionLabel){
   setChartMeta(ticker, sourceLabel);
   setSessionBadge(sessionLabel || "Closed");
   const etLabels = candles.map(c => formatEtLabel(c.time));
-  const tickStep = Math.max(1, Math.ceil(candles.length / 6));
-  const tickVals = [];
-  const tickText = [];
   const xValues = candles.map(c => new Date(c.time * 1000));
-  const firstX = xValues[0]?.getTime?.() || Date.now();
-  const lastX = xValues[xValues.length - 1]?.getTime?.() || firstX;
-  const spanMs = Math.max(60000, lastX - firstX);
-  const leftPadMs = Math.max(30000, spanMs * 0.01);
-  const rightPadMs = Math.max(120000, spanMs * 0.14);
   const revisionKey = `${ticker}:${timeframe}:momentum`;
-  const hasExistingPlot = Boolean(container?.data && container?.layout);
-  const previousRevision = hasExistingPlot ? container.layout?.uirevision : null;
-  const shouldResetRange = !hasExistingPlot || previousRevision !== revisionKey;
-
-  candles.forEach((candle, index) => {
-    if(index % tickStep === 0 || index === candles.length - 1){
-      tickVals.push(xValues[index]);
-      tickText.push(formatAxisTickLabel(candle.time));
-    }
-  });
+  const isIntraday = timeframe !== "1d";
 
   const traces = [{
     x: xValues,
@@ -4366,14 +4186,18 @@ function renderChart(ticker, candles, indicators, sourceLabel, sessionLabel){
       linecolor: "#1e293b",
       tickcolor: "#1e293b",
       type: "date",
-      tickmode: "array",
-      tickvals: tickVals,
-      ticktext: tickText,
-      tickangle: 0,
       automargin: true,
       tickfont: { size: 11 },
       fixedrange: false,
-      domain: [0, 1]
+      domain: [0, 1],
+      tickformat: isIntraday ? "%I:%M %p" : "%b %d",
+      hoverformat: isIntraday ? "%I:%M %p" : "%b %d",
+      showspikes: true,
+      spikemode: "across",
+      spikesnap: "cursor",
+      rangebreaks: isIntraday
+        ? [{ pattern: "hour", bounds: [16, 9.5] }, { pattern: "day of week", bounds: ["sat", "mon"] }]
+        : [{ pattern: "day of week", bounds: ["sat", "mon"] }]
     },
     yaxis: {
       side: "right",
@@ -4386,10 +4210,6 @@ function renderChart(ticker, candles, indicators, sourceLabel, sessionLabel){
       domain: hasRsi ? [0.30, 1] : [0, 1]
     }
   };
-
-  if(shouldResetRange){
-    layout.xaxis.range = [new Date(firstX - leftPadMs), new Date(lastX + rightPadMs)];
-  }
 
   const zoneShapes = [];
   if(chartToolState.zones && latestAnalyzedLevels && ticker === lastTicker){
@@ -4497,18 +4317,15 @@ function renderChart(ticker, candles, indicators, sourceLabel, sessionLabel){
     displayModeBar: true,
     scrollZoom: true,
     doubleClick: "reset",
-    editable: true,
+    editable: false,
     modeBarButtonsToRemove: [
       "select2d",
       "lasso2d",
-      "autoScale2d"
-    ],
-    modeBarButtonsToAdd: [
+      "autoScale2d",
       "drawline",
       "drawopenpath",
       "drawrect",
-      "eraseshape",
-      "toggleSpikelines"
+      "eraseshape"
     ]
   };
 
@@ -5277,7 +5094,6 @@ async function analyze(sym){
     const d = await res.json();
 
     if(!d || d.error){
-      stopLiveUpdates();
       setOnboardingVisible(true);
       renderMarketEmptyState("Market data is temporarily unavailable.", "The app could not build the ticker card yet, but you can try Refresh Now in a moment or search a different symbol.");
       showChartMessage("No chart data is available yet. Try Refresh Now after a moment.");
@@ -5324,12 +5140,10 @@ async function analyze(sym){
     latestCorrelations = d.correlations || null;
     latestSqueeze = d.squeeze_detector || null;
     latestEarningsVolatility = d.earnings_volatility || null;
-    latestBrokerReadiness = d.broker_readiness || null;
     checkAlerts();
     renderAlerts();
     renderPortfolioContext();
     renderMarketPulse();
-    renderLiveBrokerPanel();
     setOnboardingVisible(false);
 
     document.getElementById("result").innerHTML = `
@@ -5404,10 +5218,8 @@ async function analyze(sym){
     renderPaperPositions();
 
     await loadCandles(t);
-    startLiveUpdates();
   }catch(err){
     console.log(err);
-    stopLiveUpdates();
     setOnboardingVisible(true);
     renderMarketEmptyState("Something went wrong while loading market data.", "The search controls still work, but this request did not complete. Try again in a moment.");
     setLastUpdated("Update failed");
@@ -5447,14 +5259,6 @@ document.getElementById("riskProfile").addEventListener("change", (e) => {
 document.addEventListener("click", (e)=>{
   if(!e.target.closest(".search-wrap")){
     hideSuggestions();
-  }
-});
-
-document.addEventListener("visibilitychange", () => {
-  if(document.hidden){
-    stopLiveUpdates();
-  }else if(currentView === "market" && lastTicker){
-    startLiveUpdates();
   }
 });
 
@@ -5557,7 +5361,6 @@ async function initializeApp(){
   showChartMessage("Search for a ticker, then click Analyze to load the chart.");
   renderPortfolioContext();
   renderMarketPulse();
-  renderLiveBrokerPanel();
   switchView(currentView || "market");
   await loadWatchlist();
   if(currentView === "scanner"){

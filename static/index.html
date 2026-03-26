@@ -25,24 +25,25 @@
 
 body {
   margin:0;
-  font-family:"Segoe UI", "Trebuchet MS", sans-serif;
+  font-family:"Aptos", "Segoe UI", "Trebuchet MS", sans-serif;
   background:
-    radial-gradient(circle at top, rgba(34, 197, 94, 0.08), transparent 28%),
+    radial-gradient(circle at top, rgba(56, 189, 248, 0.08), transparent 24%),
+    radial-gradient(circle at 85% 0%, rgba(34, 197, 94, 0.06), transparent 26%),
     linear-gradient(180deg, #071221 0%, var(--bg) 100%);
   color:var(--text);
 }
 
-.container { max-width:920px; margin:auto; padding:24px 20px 36px; }
-.top { display:flex; justify-content:space-between; gap:12px; margin-bottom:20px; }
+.container { max-width:1080px; margin:auto; padding:24px 18px 86px; }
+.top { display:flex; justify-content:space-between; gap:12px; margin-bottom:16px; align-items:stretch; }
 
 .hero-card,
 .control-card,
 .chart-controls,
 .result-shell {
   border:1px solid var(--line);
-  border-radius:22px;
+  border-radius:24px;
   background:linear-gradient(180deg, rgba(16, 29, 52, 0.98), rgba(10, 22, 40, 0.98));
-  box-shadow:0 22px 50px rgba(2, 6, 23, 0.28);
+  box-shadow:0 20px 44px rgba(2, 6, 23, 0.24);
 }
 
 .hero-card {
@@ -137,6 +138,18 @@ body {
 
 .control-card {
   margin-top:16px;
+}
+
+.page-tools {
+  position:sticky;
+  top:12px;
+  z-index:14;
+  margin-bottom:14px;
+  padding:10px 12px;
+  border:1px solid rgba(33, 49, 76, 0.75);
+  border-radius:18px;
+  background:rgba(7, 18, 33, 0.78);
+  backdrop-filter:blur(14px);
 }
 
 .section-head {
@@ -409,12 +422,13 @@ body {
 
 input {
   flex:1;
-  padding:14px 16px;
+  padding:15px 16px;
   border-radius:14px;
   border:1px solid var(--line);
   background:rgba(12, 23, 41, 0.92);
   color:var(--text);
   box-shadow:inset 0 1px 0 rgba(255,255,255,0.03);
+  font-size:15px;
 }
 
 .search-suggestions {
@@ -532,7 +546,7 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
 
 .market-stack {
   display:grid;
-  gap:18px;
+  gap:16px;
 }
 
 .market-stack > * {
@@ -541,8 +555,8 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
 
 .price-card-grid {
   display:grid;
-  grid-template-columns:minmax(0, 1.2fr) minmax(280px, 0.8fr);
-  gap:18px;
+  grid-template-columns:minmax(0, 1.35fr) minmax(280px, 0.65fr);
+  gap:16px;
   align-items:start;
 }
 
@@ -554,10 +568,10 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
 
 .chart-shell {
   border:1px solid var(--line);
-  border-radius:24px;
+  border-radius:28px;
   overflow:hidden;
   background:linear-gradient(180deg, rgba(16, 29, 52, 0.96), rgba(8, 18, 34, 0.98));
-  box-shadow:0 22px 50px rgba(2, 6, 23, 0.28);
+  box-shadow:0 22px 54px rgba(2, 6, 23, 0.24);
 }
 
 .chart-tool-row {
@@ -1215,10 +1229,17 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
   gap:10px;
   justify-content:center;
   z-index:5;
+  overflow-x:auto;
+  padding:10px 12px;
+  border-radius:20px;
+  border:1px solid rgba(33, 49, 76, 0.75);
+  background:rgba(7, 18, 33, 0.84);
+  backdrop-filter:blur(14px);
+  box-shadow:0 18px 40px rgba(2, 6, 23, 0.22);
 }
 
 .bottom-nav button {
-  min-width:140px;
+  min-width:120px;
   background:rgba(12, 23, 41, 0.96);
   border-color:var(--line);
   color:var(--muted);
@@ -1678,16 +1699,22 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
 
 #chart {
   width:100%;
-  height:430px;
+  height:520px;
   border:1px solid var(--line);
   border-top:none;
   border-radius:0 0 12px 12px;
   overflow:hidden;
 }
 
+@media (max-width: 980px) {
+  .price-card-grid {
+    grid-template-columns:1fr;
+  }
+}
+
 @media (max-width: 720px) {
   .container {
-    padding:18px 14px 28px;
+    padding:16px 12px 94px;
   }
 
   .top,
@@ -1717,8 +1744,8 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
   .messages-panel,
   .paper-panel,
   .portfolio-context {
-    border-radius:18px;
-    padding:16px;
+    border-radius:20px;
+    padding:15px;
   }
 
   .price-card-grid,
@@ -1757,11 +1784,21 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
 
   #chart,
   .chart-empty {
-    height:380px;
+    height:430px;
   }
 
   .watch {
     width:min(88vw, 320px);
+  }
+
+  .bottom-nav {
+    bottom:10px;
+    padding:8px 10px;
+  }
+
+  .bottom-nav button {
+    min-width:104px;
+    font-size:13px;
   }
 }
 </style>
@@ -4203,6 +4240,11 @@ function renderChart(ticker, candles, indicators, sourceLabel, sessionLabel){
   const tickVals = [];
   const tickText = [];
   const xValues = candles.map(c => new Date(c.time * 1000));
+  const firstX = xValues[0]?.getTime?.() || Date.now();
+  const lastX = xValues[xValues.length - 1]?.getTime?.() || firstX;
+  const spanMs = Math.max(60000, lastX - firstX);
+  const leftPadMs = Math.max(60000, spanMs * 0.03);
+  const rightPadMs = Math.max(120000, spanMs * 0.14);
 
   candles.forEach((candle, index) => {
     if(index % tickStep === 0 || index === candles.length - 1){
@@ -4277,7 +4319,8 @@ function renderChart(ticker, candles, indicators, sourceLabel, sessionLabel){
       automargin: true,
       tickfont: { size: 11 },
       fixedrange: false,
-      domain: [0, 1]
+      domain: [0, 1],
+      range: [new Date(firstX - leftPadMs), new Date(lastX + rightPadMs)]
     },
     yaxis: {
       side: "right",

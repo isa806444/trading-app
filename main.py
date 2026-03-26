@@ -19,8 +19,6 @@ CORS(app)
 
 WATCHLIST_FILE = "watchlist.json"
 MARKET_CACHE_FILE = "market_cache.json"
-TWELVE_DATA_BASE_URL = "https://api.twelvedata.com"
-TWELVE_DATA_API_KEY_ENV = "TWELVE_DATA_API_KEY"
 POLYGON_BASE_URL = "https://api.polygon.io"
 POLYGON_API_KEY_ENV = "POLYGON_API_KEY"
 DATABASE_URL_ENV = "DATABASE_URL"
@@ -87,10 +85,6 @@ app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 if os.environ.get(STRIPE_SECRET_KEY_ENV, "").strip():
     stripe.api_key = os.environ.get(STRIPE_SECRET_KEY_ENV, "").strip()
-
-
-def get_twelve_data_api_key():
-    return os.environ.get(TWELVE_DATA_API_KEY_ENV, "").strip()
 
 
 def get_polygon_api_key():
@@ -612,14 +606,6 @@ def get_timeframe_config(tf):
     }.get(tf, {"interval": "5min", "points": 90, "step": 300})
 
 
-def parse_twelve_timestamp(raw_value):
-    if len(raw_value) == 10:
-        dt = datetime.fromisoformat(raw_value)
-    else:
-        dt = datetime.fromisoformat(raw_value.replace(" ", "T"))
-    return int(dt.replace(tzinfo=DEMO_TIMEZONE).timestamp())
-
-
 def parse_polygon_timestamp(raw_value):
     try:
         return int(float(raw_value) / 1000)
@@ -901,50 +887,16 @@ def fetch_earnings_dates(symbol):
     if cached and not cached["stale"]:
         return cached["data"]
 
-    try:
-        api_key = get_twelve_data_api_key()
-        if not api_key:
-            raise ValueError("Missing Twelve Data API key for earnings")
+    if cached:
+        return cached["data"]
 
-        response = requests.get(
-            f"{TWELVE_DATA_BASE_URL}/earnings",
-            params={"symbol": symbol, "apikey": api_key},
-            timeout=15
-        )
-        response.raise_for_status()
-        payload = response.json()
-        earnings = payload.get("earnings") or []
-        normalized_dates = [parse_event_datetime(item.get("date")) for item in earnings if isinstance(item, dict)]
-        normalized_dates = [dt for dt in normalized_dates if dt]
-        normalized_dates.sort()
-        now = datetime.now(tz=DEMO_TIMEZONE)
-        next_date = next((dt for dt in normalized_dates if dt >= now), None)
-        most_recent = None
-        for dt in normalized_dates:
-            if dt <= now:
-                most_recent = dt
-
-        next_row = next((item for item in earnings if parse_event_datetime(item.get("date")) == next_date), None) if next_date else None
-        payload = {
-            "next_earnings_date": format_event_dt(next_date),
-            "recent_earnings_date": format_event_dt(most_recent),
-            "eps_estimate": next_row.get("eps_estimate") if isinstance(next_row, dict) else None,
-            "revenue_estimate": None,
-            "source": "Twelve Data"
-        }
-        set_cache_entry(events_cache, cache_key, payload)
-        return payload
-    except Exception as exc:
-        print("Earnings date fetch error:", exc)
-        if cached:
-            return cached["data"]
-        return {
-            "next_earnings_date": None,
-            "recent_earnings_date": None,
-            "eps_estimate": None,
-            "revenue_estimate": None,
-            "source": "Unavailable"
-        }
+    return {
+        "next_earnings_date": None,
+        "recent_earnings_date": None,
+        "eps_estimate": None,
+        "revenue_estimate": None,
+        "source": "Unavailable"
+    }
 
 
 def fetch_economic_calendar():
@@ -1003,79 +955,6 @@ def get_quote_from_candles(symbol, preferred_source="cache"):
         "stale": cached["stale"],
         "age_seconds": cached["age_seconds"]
     }
-
-
-def fetch_twelve_data_candles(symbol, tf):
-    api_key = get_twelve_data_api_key()
-    if not api_key:
-        return None
-
-    config = get_timeframe_config(tf)
-    response = requests.get(
-        f"{TWELVE_DATA_BASE_URL}/time_series",
-        params={
-            "apikey": api_key,
-            "symbol": symbol,
-            "interval": config["interval"],
-            "outputsize": config["points"],
-            "order": "asc",
-            "timezone": "America/New_York",
-            "format": "JSON",
-        },
-        timeout=15,
-    )
-    response.raise_for_status()
-    payload = response.json()
-
-    if payload.get("status") == "error":
-        raise ValueError(payload.get("message", "Unknown Twelve Data error"))
-
-    values = payload.get("values") or []
-    if not values:
-        return None
-
-    candles = []
-    for row in values:
-        open_price = float(row["open"])
-        close_price = float(row["close"])
-        high_price = max(float(row["high"]), open_price, close_price)
-        low_price = min(float(row["low"]), open_price, close_price)
-        candles.append({
-            "time": parse_twelve_timestamp(row["datetime"]),
-            "open": round(open_price, 2),
-            "high": round(high_price, 2),
-            "low": round(low_price, 2),
-            "close": round(close_price, 2),
-            "volume": float(row.get("volume") or 0),
-        })
-
-    return candles
-
-
-def fetch_twelve_data_price(symbol):
-    api_key = get_twelve_data_api_key()
-    if not api_key:
-        return None
-
-    response = requests.get(
-        f"{TWELVE_DATA_BASE_URL}/price",
-        params={
-            "apikey": api_key,
-            "symbol": symbol,
-            "format": "JSON",
-        },
-        timeout=10,
-    )
-    response.raise_for_status()
-    payload = response.json()
-
-    if payload.get("status") == "error":
-        raise ValueError(payload.get("message", "Unknown Twelve Data price error"))
-
-    price = payload.get("price")
-    if price is None:
-        return None
-    return round(float(price), 2)
 
 
 def get_polygon_range_config(tf):
@@ -1217,112 +1096,13 @@ def search_polygon_symbols(query):
 
 
 def search_symbols(query):
-    if get_polygon_api_key():
-        try:
-            polygon_results = search_polygon_symbols(query)
-            if polygon_results:
-                return polygon_results
-        except Exception as exc:
-            print("Polygon symbol search error:", exc)
-
-    api_key = get_twelve_data_api_key()
-    if not api_key or len(query.strip()) < 1:
+    if not get_polygon_api_key() or len(query.strip()) < 1:
         return []
 
-    normalized_query = query.strip().upper()
-
     try:
-        response = requests.get(
-            f"{TWELVE_DATA_BASE_URL}/symbol_search",
-            params={
-                "apikey": api_key,
-                "symbol": query.strip(),
-                "outputsize": 8,
-                "show_plan": "false"
-            },
-            timeout=15
-        )
-        response.raise_for_status()
-        payload = response.json()
-        matches = payload.get("data") or []
-        results = []
-
-        allowed_exchanges = {"NASDAQ", "NYSE", "AMEX", "ARCA"}
-
-        for item in matches:
-            symbol = (item.get("symbol") or "").strip()
-            name = (item.get("instrument_name") or item.get("name") or "").strip()
-            exchange = (item.get("exchange") or "").strip()
-            country = (item.get("country") or "").strip()
-            instrument_type = str(item.get("instrument_type") or "").strip().lower()
-            normalized_symbol = symbol.upper()
-            normalized_name = name.upper()
-
-            if not symbol or not name:
-                continue
-            if country and country.upper() not in {"USA", "UNITED STATES"}:
-                continue
-            if exchange and exchange.upper() not in allowed_exchanges:
-                continue
-            if instrument_type and instrument_type not in {"common_stock", "stock", "dr"}:
-                continue
-            if not normalized_symbol.replace(".", "").replace("-", "").isalnum():
-                continue
-
-            score = 0
-            if normalized_symbol == normalized_query:
-                score += 120
-            elif normalized_symbol.startswith(normalized_query):
-                score += 90
-            elif normalized_query in normalized_symbol:
-                score += 60
-
-            if normalized_name == normalized_query:
-                score += 110
-            elif normalized_name.startswith(normalized_query):
-                score += 85
-            elif normalized_query in normalized_name:
-                score += 50
-
-            if exchange.upper() == "NASDAQ":
-                score += 8
-            elif exchange.upper() == "NYSE":
-                score += 6
-
-            if len(normalized_symbol) <= 5:
-                score += 4
-
-            if score <= 0:
-                continue
-
-            results.append({
-                "symbol": symbol,
-                "name": name,
-                "exchange": exchange,
-                "country": country,
-                "score": score
-            })
-
-        results.sort(key=lambda item: (-item["score"], len(item["symbol"]), item["symbol"]))
-        deduped = []
-        seen_symbols = set()
-
-        for item in results:
-            if item["symbol"] in seen_symbols:
-                continue
-            seen_symbols.add(item["symbol"])
-            deduped.append({
-                "symbol": item["symbol"],
-                "name": item["name"],
-                "exchange": item["exchange"],
-                "country": item["country"]
-            })
-            if len(deduped) >= 6:
-                break
-
-        return deduped
+        return search_polygon_symbols(query)
     except Exception as exc:
-        print("Symbol search error:", exc)
+        print("Polygon symbol search error:", exc)
         return []
 
 
@@ -1339,14 +1119,8 @@ def fetch_and_cache_candles(symbol, tf):
         }
 
     try:
-        candle_rows = None
+        candle_rows = fetch_polygon_candles(symbol, tf) if get_polygon_api_key() else None
         source = "live"
-
-        if get_polygon_api_key():
-            candle_rows = fetch_polygon_candles(symbol, tf)
-
-        if not candle_rows:
-            candle_rows = fetch_twelve_data_candles(symbol, tf)
 
         if not candle_rows:
             if cached_candles:
@@ -1505,11 +1279,7 @@ def get_live_price(symbol):
         }
 
     try:
-        live_price = None
-        if get_polygon_api_key():
-            live_price = fetch_polygon_price(symbol)
-        if live_price is None:
-            live_price = fetch_twelve_data_price(symbol)
+        live_price = fetch_polygon_price(symbol) if get_polygon_api_key() else None
         if live_price is not None:
             set_cache_entry(quote_cache, cache_key, {"price": live_price})
             return {

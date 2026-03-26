@@ -4293,8 +4293,12 @@ function renderChart(ticker, candles, indicators, sourceLabel, sessionLabel){
   const firstX = xValues[0]?.getTime?.() || Date.now();
   const lastX = xValues[xValues.length - 1]?.getTime?.() || firstX;
   const spanMs = Math.max(60000, lastX - firstX);
-  const leftPadMs = Math.max(60000, spanMs * 0.03);
+  const leftPadMs = Math.max(30000, spanMs * 0.01);
   const rightPadMs = Math.max(120000, spanMs * 0.14);
+  const revisionKey = `${ticker}:${timeframe}:momentum`;
+  const hasExistingPlot = Boolean(container?.data && container?.layout);
+  const previousRevision = hasExistingPlot ? container.layout?.uirevision : null;
+  const shouldResetRange = !hasExistingPlot || previousRevision !== revisionKey;
 
   candles.forEach((candle, index) => {
     if(index % tickStep === 0 || index === candles.length - 1){
@@ -4342,8 +4346,8 @@ function renderChart(ticker, candles, indicators, sourceLabel, sessionLabel){
   const layout = {
     paper_bgcolor: "#020617",
     plot_bgcolor: "#020617",
-    uirevision: `${ticker}:${timeframe}:momentum`,
-    editrevision: `${ticker}:${timeframe}:momentum`,
+    uirevision: revisionKey,
+    editrevision: revisionKey,
     margin: { l: 18, r: 72, t: 18, b: 62 },
     font: { color: "#94a3b8" },
     dragmode: "zoom",
@@ -4369,8 +4373,7 @@ function renderChart(ticker, candles, indicators, sourceLabel, sessionLabel){
       automargin: true,
       tickfont: { size: 11 },
       fixedrange: false,
-      domain: [0, 1],
-      range: [new Date(firstX - leftPadMs), new Date(lastX + rightPadMs)]
+      domain: [0, 1]
     },
     yaxis: {
       side: "right",
@@ -4383,6 +4386,10 @@ function renderChart(ticker, candles, indicators, sourceLabel, sessionLabel){
       domain: hasRsi ? [0.30, 1] : [0, 1]
     }
   };
+
+  if(shouldResetRange){
+    layout.xaxis.range = [new Date(firstX - leftPadMs), new Date(lastX + rightPadMs)];
+  }
 
   const zoneShapes = [];
   if(chartToolState.zones && latestAnalyzedLevels && ticker === lastTicker){

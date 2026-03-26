@@ -8,8 +8,6 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.7
-      - key: TWELVE_DATA_API_KEY
-        sync: false
       - key: POLYGON_API_KEY
         sync: false
       - key: STRIPE_PUBLISHABLE_KEY

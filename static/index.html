@@ -1262,6 +1262,19 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
   font-size:22px;
 }
 
+.filter-row {
+  display:flex;
+  gap:10px;
+  align-items:center;
+  flex-wrap:wrap;
+  margin-top:12px;
+}
+
+.filter-row select {
+  width:auto;
+  min-width:180px;
+}
+
 .action-card-grid {
   display:grid;
   grid-template-columns:repeat(auto-fit, minmax(180px, 1fr));
@@ -1969,6 +1982,15 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
         <button class="analyze-btn" onclick="runScanner()">Refresh Movers</button>
       </div>
       <div class="compact-copy">This page refreshes the top daily movers and surfaces new leaders from the tracked list without hammering your data provider.</div>
+      <div class="filter-row">
+        <select id="moverFilter" class="watch-sort" onchange="runScanner()">
+          <option value="all">All Movers</option>
+          <option value="leaders">Leaders Only</option>
+          <option value="actionable">Actionable+</option>
+          <option value="high_grade">A Setups</option>
+        </select>
+        <div class="helper-pill">Top 10 only</div>
+      </div>
     </div>
     <div id="scannerResults" class="insights-shell"></div>
   </div>
@@ -2112,6 +2134,7 @@ let latestBacktest = null;
 let latestCorrelations = null;
 let latestSqueeze = null;
 let latestEarningsVolatility = null;
+let latestBrokerReadiness = null;
 let watchSort = "change_desc";
 let riskProfile = "balanced";
 let indicatorVisibility = {
@@ -3093,6 +3116,10 @@ function renderTradeSignal(signal){
           <div class="signal-chip ${chipClass}">${signal.action}</div>
         </div>
       <div class="signal-supporting">
+        <div class="confirmation-list">
+          <div class="confirmation-pill">${signal.setup_quality || "Needs patience"}</div>
+          <div class="confirmation-pill">Score ${signal.score || 0}</div>
+        </div>
         <div class="indicator-meta">${signal.reason}</div>
         ${confirmations.length ? `
           <div class="confirmation-list">
@@ -3156,6 +3183,8 @@ function renderAiSetupCard(payload){
         ${renderAnalyticsCard("R/R", `${Number(payload.reward_to_risk || 0).toFixed(2)}:1`)}
       </div>
       <div class="indicator-meta" style="margin-top:12px;">${payload.stance || "Setup stance unavailable."}</div>
+      <div class="indicator-meta">${payload.trigger || ""}</div>
+      <div class="indicator-meta">${payload.invalidation || ""}</div>
       <div class="confirmation-list">
         ${(payload.reasoning || []).map(item => `<div class="confirmation-pill">${item}</div>`).join("")}
       </div>
@@ -3173,8 +3202,19 @@ function renderSmartAlerts(payload){
         <div>Smart Alerts</div>
         <div class="helper-pill">Signal-aware ideas</div>
       </div>
-      <div class="confirmation-list">
-        ${payload.map(item => `<div class="confirmation-pill">${item.label}${item.detail ? ` | ${item.detail}` : ""}</div>`).join("")}
+      <div class="alert-list">
+        ${payload.map(item => `
+          <div class="alert-item">
+            <div>
+              <div class="alert-topline">
+                <div class="paper-symbol">${item.label}</div>
+                <div class="helper-pill">${item.priority || "Idea"}</div>
+              </div>
+              <div class="alert-meta">${item.detail || ""}</div>
+              <div class="alert-meta">${item.why_now || ""}</div>
+            </div>
+          </div>
+        `).join("")}
       </div>
     </div>
   `;
@@ -3591,6 +3631,7 @@ async function runScanner(){
   const container = document.getElementById("scannerResults");
   const scannerTitle = document.querySelector("#scannerView .section-title");
   const scannerCopy = document.querySelector("#scannerView .compact-copy");
+  const moverFilter = document.getElementById("moverFilter")?.value || "all";
   const universe = [...new Set([...watchlist, ...TOP_MOVERS_UNIVERSE])].slice(0, 10);
   const cacheKey = universe.join(",");
 
@@ -3620,8 +3661,14 @@ async function runScanner(){
       scannerCache[cacheKey] = payload;
       scannerCacheTime = Date.now();
     }
-    const rows = Array.isArray(payload.rows) ? payload.rows : [];
-    latestHotList = Array.isArray(payload.hot_list) ? payload.hot_list : [];
+    const rawRows = Array.isArray(payload.rows) ? payload.rows : [];
+    const rows = rawRows.filter(item => {
+      if(moverFilter === "leaders") return item.mover_tag === "Leader";
+      if(moverFilter === "actionable") return ["Leader", "Actionable"].includes(item.mover_tag);
+      if(moverFilter === "high_grade") return item.setup_grade === "A";
+      return true;
+    });
+    latestHotList = (Array.isArray(payload.hot_list) ? payload.hot_list : []).filter(item => rows.find(row => row.ticker === item.ticker));
     const best = rows[0] || null;
     const hottest = latestHotList[0] || null;
     const avgMove = rows.length ? (rows.reduce((sum, item) => sum + Math.abs(Number(item.change || 0)), 0) / rows.length) : 0;
@@ -3660,6 +3707,7 @@ async function runScanner(){
                 <div>
                   <div class="section-kicker">Top Mover</div>
                   <div class="section-title">${item.ticker}</div>
+                  <div class="compact-copy">${item.mover_tag || "Watching"} | ${item.market_mode?.label || "Balanced"}</div>
                 </div>
                 <div class="mover-rank">#${rank}</div>
               </div>
@@ -3902,11 +3950,44 @@ function switchView(view){
   }
   const liveSummary = document.getElementById("liveTradingSummary");
   if(liveSummary){
-    liveSummary.innerText = currentUser?.is_premium
-      ? "Broker-ready order ticket. Connect a supported broker to unlock live execution later."
-      : "Live trading stays broker-locked. Premium keeps the full account experience cleaner when broker access is added later.";
+    const brokerSummary = latestBrokerReadiness?.summary;
+    liveSummary.innerText = brokerSummary || (
+      currentUser?.is_premium
+        ? "Broker-ready order ticket. Connect a supported broker to unlock live execution later."
+        : "Live trading stays broker-locked. Premium keeps the full account experience cleaner when broker access is added later."
+    );
   }
   saveLayoutPrefs();
+}
+
+function renderLiveBrokerPanel(){
+  const panel = document.querySelector("#liveView .paper-panel");
+  if(!panel){
+    return;
+  }
+  const readiness = latestBrokerReadiness || {
+    status: "Broker not connected",
+    summary: "Live execution is still locked until broker setup is complete.",
+    steps: [
+      "Connect a supported broker account",
+      "Finish funding and identity verification",
+      "Enable live order routing and trade confirmations"
+    ]
+  };
+
+  panel.innerHTML = `
+    <div class="paper-head">
+      <div>
+        <div class="paper-title">Live Brokerage Status</div>
+        <div class="paper-subtitle">${readiness.status || "Broker not connected"}</div>
+      </div>
+    </div>
+    <div class="paper-summary">${readiness.summary || "Live execution is not connected yet."}</div>
+    <div class="analytics-grid">
+      ${(readiness.steps || []).map((step, index) => renderAnalyticsCard(`Step ${index + 1}`, step)).join("")}
+    </div>
+    <div class="paper-empty">This page is broker-ready scaffolding only. No real-money orders are being sent yet.</div>
+  `;
 }
 
 function renderPortfolioContext(){
@@ -5143,10 +5224,12 @@ async function analyze(sym){
     latestCorrelations = d.correlations || null;
     latestSqueeze = d.squeeze_detector || null;
     latestEarningsVolatility = d.earnings_volatility || null;
+    latestBrokerReadiness = d.broker_readiness || null;
     checkAlerts();
     renderAlerts();
     renderPortfolioContext();
     renderMarketPulse();
+    renderLiveBrokerPanel();
     setOnboardingVisible(false);
 
     document.getElementById("result").innerHTML = `
@@ -5371,6 +5454,7 @@ async function initializeApp(){
   showChartMessage("Search for a ticker, then click Analyze to load the chart.");
   renderPortfolioContext();
   renderMarketPulse();
+  renderLiveBrokerPanel();
   switchView(currentView || "market");
   await loadWatchlist();
   if(currentView === "scanner"){

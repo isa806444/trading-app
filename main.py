@@ -1645,7 +1645,12 @@ def build_trade_signal(change, bias, strategy, candles):
         "confirmations": confirmations[:4],
         "reason": reason,
         "score": dominant_score,
-        "confidence": min(95, 45 + (dominant_score * 10) - (opposing_score * 5))
+        "confidence": min(95, 45 + (dominant_score * 10) - (opposing_score * 5)),
+        "setup_quality": (
+            "High quality" if grade == "A" and action != "WAIT"
+            else "Usable" if grade == "B" and action != "WAIT"
+            else "Needs patience"
+        )
     }
 
 
@@ -1853,6 +1858,18 @@ def build_position_size_guide(entry, stop):
     }
 
 
+def build_broker_readiness():
+    return {
+        "status": "Broker not connected",
+        "summary": "Live execution is still locked until a supported broker, funding flow, and compliance checks are connected.",
+        "steps": [
+            "Connect a supported broker account",
+            "Finish funding and identity verification",
+            "Enable live order routing and trade confirmations"
+        ]
+    }
+
+
 def build_ai_trade_setup(symbol, strategy, risk_profile, trade_signal, plan, why_moving, market_mode, momentum_score, trade_warning):
     reward = abs((plan["targets"][0] if plan["targets"] else plan["entry"]) - plan["entry"])
     risk = abs(plan["entry"] - plan["stop"]) or 0.01
@@ -1882,7 +1899,13 @@ def build_ai_trade_setup(symbol, strategy, risk_profile, trade_signal, plan, why
         "stop": round(plan["stop"], 2),
         "target": round(plan["targets"][0], 2) if plan["targets"] else round(plan["entry"], 2),
         "reward_to_risk": rr,
-        "reasoning": reasoning[:4]
+        "reasoning": reasoning[:4],
+        "trigger": (
+            f"Act only if price confirms through {round(plan['entry'], 2)} with follow-through."
+            if trade_signal.get("action") != "WAIT"
+            else "Wait for a cleaner confirmation before acting."
+        ),
+        "invalidation": f"Step aside if price loses {round(plan['stop'], 2)} or momentum fades."
     }
 
 
@@ -1892,11 +1915,21 @@ def build_smart_alert_ideas(symbol, trade_signal, momentum_score, levels, market
     return [
         {
             "label": f"{symbol} breaks {direction} {round(level, 2)}",
-            "detail": f"That would align with the current {trade_signal.get('grade')} setup and {market_mode.get('label', 'current')} tape."
+            "detail": f"That would align with the current {trade_signal.get('grade')} setup and {market_mode.get('label', 'current')} tape.",
+            "priority": "High",
+            "why_now": trade_signal.get("reason")
         },
         {
             "label": f"Momentum score pushes past {min(95, max(60, momentum_score['value'] + 8))}",
-            "detail": "That would signal stronger continuation pressure instead of just a random price tick."
+            "detail": "That would signal stronger continuation pressure instead of just a random price tick.",
+            "priority": "Medium",
+            "why_now": momentum_score.get("summary")
+        },
+        {
+            "label": f"Setup weakens from {trade_signal.get('grade', 'C')}",
+            "detail": "Useful as a protection alert if the current setup loses alignment.",
+            "priority": "Risk",
+            "why_now": market_mode.get("summary")
         }
     ]
 
@@ -1942,6 +1975,11 @@ def build_scanner_row(symbol):
         "market_mode": market_mode,
         "relative_volume": relative_volume,
         "continuation_probability": continuation_probability,
+        "mover_tag": (
+            "Leader" if continuation_probability >= 80
+            else "Actionable" if continuation_probability >= 65
+            else "Watching"
+        ),
         "unusual_activity": {
             "label": "High" if relative_volume >= 2 else "Elevated" if relative_volume >= 1.3 else "Normal",
             "detail": f"Relative volume is {relative_volume}x versus its recent intraday baseline."
@@ -2458,6 +2496,7 @@ def analyze_strategy(symbol, strategy, risk_profile="balanced"):
     )
     position_size = build_position_size_guide(entry, stop)
     smart_alerts = build_smart_alert_ideas(symbol, trade_signal, momentum_score, {"support": support, "resistance": resistance}, market_mode)
+    broker_readiness = build_broker_readiness()
 
     return {
         "ticker": symbol,
@@ -2490,6 +2529,7 @@ def analyze_strategy(symbol, strategy, risk_profile="balanced"):
         "ai_setup": ai_setup,
         "position_size": position_size,
         "smart_alerts": smart_alerts,
+        "broker_readiness": broker_readiness,
         "indicators": {
             "trade_signal": trade_signal
         }

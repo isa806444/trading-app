@@ -2186,15 +2186,17 @@ def build_public_leaderboard():
 # =========================
 
 def analyze_strategy(symbol, strategy, risk_profile="balanced"):
-    market = get_data(symbol)
-    if not market:
-        return None
     candle_result = fetch_and_cache_candles(symbol, "5m")
-
-    d = market["data"]
-    price = d["price"]
-    open_price = d["open"]
+    using_demo = not (candle_result and candle_result["candles"])
     signal_candles = candle_result["candles"] if candle_result and candle_result["candles"] else build_demo_candles(symbol, "5m")
+    session_candles = prepare_chart_candles(signal_candles, "5m") or signal_candles
+    quote_data = build_quote_from_candles(session_candles)
+    price = quote_data["price"]
+    open_price = quote_data["open"]
+    market_source = candle_result["source"] if candle_result else "demo"
+    market_cached = candle_result["cached"] if candle_result else True
+    market_stale = candle_result["stale"] if candle_result else False
+    market_age = candle_result["age_seconds"] if candle_result else 0
 
     dollar_change = round(price - open_price, 2)
     change = round(((price - open_price) / open_price) * 100, 2)
@@ -2203,10 +2205,9 @@ def analyze_strategy(symbol, strategy, risk_profile="balanced"):
     resistance = round(price * 1.01, 2)
     trade_signal = build_trade_signal(change, bias, strategy, signal_candles)
     news = fetch_stock_news(symbol, change)
-    events = fetch_market_events(symbol)
     news["impact"] = build_news_impact(
         [article.get("title", "") for article in news.get("articles", [])],
-        events.get("earnings") if isinstance(events, dict) else {}
+        {}
     )
 
     if strategy == "scalp":
@@ -2245,13 +2246,11 @@ def analyze_strategy(symbol, strategy, risk_profile="balanced"):
         "stop": stop,
         "targets": targets
     }
-    why_moving = build_why_moving_engine(symbol, price, change, signal_candles, news, events)
+    why_moving = build_why_moving_engine(symbol, price, change, signal_candles, news, {})
     momentum_score = build_momentum_score(change, signal_candles, news.get("impact"), trade_signal)
     market_mode = detect_market_mode(change, signal_candles)
     trade_warning = build_trade_warning(change, signal_candles, momentum_score)
-    squeeze = build_squeeze_detector(symbol, change, signal_candles, news, momentum_score)
-    correlations = build_correlation_tracker(symbol, signal_candles)
-    earnings_volatility = build_earnings_volatility_predictor(signal_candles, events.get("earnings"), momentum_score)
+    earnings_volatility = build_earnings_volatility_predictor(signal_candles, {}, momentum_score)
     backtest = simulate_backtest(signal_candles, strategy)
     ai_setup = build_ai_trade_setup(
         symbol,
@@ -2266,7 +2265,6 @@ def analyze_strategy(symbol, strategy, risk_profile="balanced"):
     )
     position_size = build_position_size_guide(entry, stop)
     smart_alerts = build_smart_alert_ideas(symbol, trade_signal, momentum_score, {"support": support, "resistance": resistance}, market_mode)
-    broker_readiness = build_broker_readiness()
 
     return {
         "ticker": symbol,
@@ -2275,11 +2273,11 @@ def analyze_strategy(symbol, strategy, risk_profile="balanced"):
         "dollar_change": dollar_change,
         "change": change,
         "bias": bias,
-        "data_source": market["source"],
-        "is_demo": market["source"] == "demo",
-        "is_cached": market["cached"],
-        "is_stale": market["stale"],
-        "cache_age_seconds": market["age_seconds"],
+        "data_source": market_source,
+        "is_demo": using_demo,
+        "is_cached": market_cached,
+        "is_stale": market_stale,
+        "cache_age_seconds": market_age,
         "levels": {
             "support": support,
             "resistance": resistance
@@ -2287,19 +2285,15 @@ def analyze_strategy(symbol, strategy, risk_profile="balanced"):
         "plan": plan,
         "summary": summary,
         "news": news,
-        "events": events,
         "why_moving": why_moving,
         "momentum_score": momentum_score,
         "market_mode": market_mode,
         "trade_warning": trade_warning,
-        "squeeze_detector": squeeze,
-        "correlations": correlations,
         "earnings_volatility": earnings_volatility,
         "backtest": backtest,
         "ai_setup": ai_setup,
         "position_size": position_size,
         "smart_alerts": smart_alerts,
-        "broker_readiness": broker_readiness,
         "indicators": {
             "trade_signal": trade_signal
         }

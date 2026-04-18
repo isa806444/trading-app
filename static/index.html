@@ -2022,35 +2022,12 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
     <div id="scannerResults" class="insights-shell"></div>
   </div>
 
-  <div id="communityView" class="view-panel hidden">
-    <div class="control-card">
-      <div class="section-head">
-        <div>
-          <div class="section-kicker">Community</div>
-          <div class="section-title">Learn from disciplined traders, not hype</div>
-        </div>
-        <div class="helper-pill">Public sharing is opt-in</div>
-      </div>
-      <div class="alert-controls">
-        <input id="publicAlias" class="paper-qty paper-note" type="text" maxlength="40" placeholder="Public alias" />
-        <button class="paper-btn close" onclick="saveCommunityProfile()">Save Public Profile</button>
-      </div>
-      <div class="alert-controls" style="justify-content:flex-start;">
-        <label class="paper-details" style="display:flex; align-items:center; gap:8px;">
-          <input id="publicProfileToggle" type="checkbox" style="width:auto; flex:none;" />
-          Share my paper-trading profile publicly
-        </label>
-      </div>
-    </div>
-    <div id="communityResults" class="insights-shell"></div>
-  </div>
   </div>
 
   <div class="bottom-nav">
       <button id="marketNav" class="active" onclick="switchView('market')">Market</button>
       <button id="portfolioNav" onclick="switchView('portfolio')">Portfolio</button>
       <button id="scannerNav" onclick="switchView('scanner')">Movers</button>
-      <button id="communityNav" onclick="switchView('community')">Community+</button>
     </div>
 
 </div>
@@ -3904,18 +3881,16 @@ function switchView(view){
   if(view === "live"){
     view = "market";
   }
+  if(view === "community"){
+    view = "market";
+  }
   currentView = view;
   document.getElementById("marketView").classList.toggle("hidden", view !== "market");
   document.getElementById("portfolioView").classList.toggle("hidden", view !== "portfolio");
   document.getElementById("scannerView").classList.toggle("hidden", view !== "scanner");
-  document.getElementById("communityView").classList.toggle("hidden", view !== "community");
   document.getElementById("marketNav").classList.toggle("active", view === "market");
   document.getElementById("portfolioNav").classList.toggle("active", view === "portfolio");
   document.getElementById("scannerNav").classList.toggle("active", view === "scanner");
-  document.getElementById("communityNav").classList.toggle("active", view === "community");
-  if(view === "community"){
-    loadCommunity();
-  }
   saveLayoutPrefs();
 }
 
@@ -5230,10 +5205,7 @@ async function analyze(sym){
 
     document.getElementById("marketInsights").innerHTML = `
       <div class="insights-grid">
-        ${renderEventsSection(d.events)}
         ${renderNewsSection(d.news)}
-        ${renderCorrelationCard(d.correlations)}
-        ${renderSqueezeCard(d.squeeze_detector)}
         ${renderBacktestCard(d.backtest)}
         ${renderEarningsVolatilityCard(d.earnings_volatility)}
       </div>

@@ -1939,40 +1939,10 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
   <div id="result" class="result-shell"></div>
   <div id="status"></div>
 
-  <div class="chart-shell">
-    <div class="chart-bar">
-      <div>
-        <div class="chart-title" id="chartTitle">Price Chart</div>
-        <div class="chart-meta-row">
-          <div class="chart-meta" id="chartMeta">Waiting for ticker selection</div>
-          <div class="session-badge closed" id="sessionBadge">Closed</div>
-        </div>
-      </div>
-    </div>
-    <div id="chart"></div>
-
-    <div class="chart-controls">
-      <div class="section-head">
-        <div>
-          <div class="section-kicker">Chart Controls</div>
-          <div class="section-title">Stay on the move, not the menus</div>
-        </div>
-        <div class="helper-pill">Zoom stays locked in</div>
-      </div>
-      <div class="chart-tool-row">
-        <div class="helper-text">Change timeframe or overlays here.</div>
-        <div class="chart-tool-actions">
-          <button id="zoneToggleBtn" class="chart-tool-btn active" onclick="toggleChartZones()">Hide Zones</button>
-        </div>
-      </div>
-      <div class="tf-bar" id="tfBar">
-        <button data-tf="1m">1M</button>
-        <button data-tf="5m" class="active">5M</button>
-        <button data-tf="15m">15M</button>
-      </div>
-
-      <div id="indicatorToggleBar" class="indicator-toggle-bar"></div>
-    </div>
+  <div class="control-card" style="margin-top:18px;">
+    <div class="section-kicker">AI Trade Helper</div>
+    <div class="section-title">Built for cleaner trade planning, not chart watching</div>
+    <div class="compact-copy">Search a ticker to get the setup grade, trade plan, why it is moving, market events, recent news, alerts, and portfolio context in one place.</div>
   </div>
 
   <div id="marketPulse" class="insight-card market-pulse-card"></div>
@@ -2271,7 +2241,7 @@ function setOnboardingVisible(visible){
   }
 }
 
-function renderMarketEmptyState(title="Search a stock or company name to begin.", copy="You will see the latest price move, chart, signal, key levels, and recent news once a ticker is analyzed."){
+function renderMarketEmptyState(title="Search a stock or company name to begin.", copy="You will see the latest price move, trade plan, setup grade, key levels, and recent news once a ticker is analyzed."){
     const result = document.getElementById("result");
     const insights = document.getElementById("marketInsights");
     const pulse = document.getElementById("marketPulse");
@@ -2281,7 +2251,7 @@ function renderMarketEmptyState(title="Search a stock or company name to begin."
       <div class="empty-copy">${copy}</div>
       <div class="empty-grid">
         <div class="empty-tip">Use a ticker like <strong>AAPL</strong> or a company name like <strong>Apple</strong>.</div>
-        <div class="empty-tip">Switch timeframe after loading the chart to tighten up the view.</div>
+        <div class="empty-tip">Use the analysis card to spot the best entry, stop, and target ideas fast.</div>
         <div class="empty-tip">Save strong names to the watchlist or create an alert from the ticker card when a setup looks interesting.</div>
         </div>
       </div>
@@ -2644,8 +2614,14 @@ function startCandleRefresh(){
 }
 
 function setChartMeta(ticker, sourceLabel){
-  document.getElementById("chartTitle").innerText = ticker ? `${ticker} Candlestick Chart` : "Price Chart";
-  document.getElementById("chartMeta").innerText = `${timeframe.toUpperCase()} timeframe ET${sourceLabel ? ` - ${sourceLabel}` : ""}`;
+  const chartTitle = document.getElementById("chartTitle");
+  const chartMeta = document.getElementById("chartMeta");
+  if(chartTitle){
+    chartTitle.innerText = ticker ? `${ticker} Candlestick Chart` : "Price Chart";
+  }
+  if(chartMeta){
+    chartMeta.innerText = `${timeframe.toUpperCase()} timeframe ET${sourceLabel ? ` - ${sourceLabel}` : ""}`;
+  }
 }
 
 function getTimeframeStepSeconds(){
@@ -2692,6 +2668,9 @@ function updateQuoteDisplay(price){
 
 function setSessionBadge(sessionLabel){
   const badge = document.getElementById("sessionBadge");
+  if(!badge){
+    return;
+  }
   const normalized = (sessionLabel || "Closed").replace(/\s+/g, "").toLowerCase();
   badge.className = `session-badge ${normalized}`;
   badge.innerText = sessionLabel || "Closed";
@@ -3934,11 +3913,6 @@ function switchView(view){
   document.getElementById("portfolioNav").classList.toggle("active", view === "portfolio");
   document.getElementById("scannerNav").classList.toggle("active", view === "scanner");
   document.getElementById("communityNav").classList.toggle("active", view === "community");
-  if(view === "market"){
-    startCandleRefresh();
-  }else{
-    stopCandleRefresh();
-  }
   if(view === "community"){
     loadCommunity();
   }
@@ -4042,15 +4016,7 @@ function setLoadingState(loading){
 }
 
 function showChartMessage(message){
-  lastChartState = null;
-  setChartMeta(lastTicker, "No chart loaded");
-  setSessionBadge("Closed");
-  document.getElementById("chart").innerHTML = `
-    <div class="chart-empty">
-      <strong>Chart waiting for data</strong>
-      <span>${message}</span>
-    </div>
-  `;
+  return;
 }
 
 function buildLineTrace(xValues, yValues, name, color, width=2, axis="y"){
@@ -5278,11 +5244,8 @@ async function analyze(sym){
     renderWatch();
     renderPaperPositions();
 
-    await loadCandles(t);
-    startCandleRefresh();
   }catch(err){
     console.log(err);
-    stopCandleRefresh();
     setOnboardingVisible(true);
     renderMarketEmptyState("Something went wrong while loading market data.", "The search controls still work, but this request did not complete. Try again in a moment.");
     setLastUpdated("Update failed");
@@ -5322,14 +5285,6 @@ document.getElementById("riskProfile").addEventListener("change", (e) => {
 document.addEventListener("click", (e)=>{
   if(!e.target.closest(".search-wrap")){
     hideSuggestions();
-  }
-});
-
-document.addEventListener("visibilitychange", () => {
-  if(document.hidden){
-    stopCandleRefresh();
-  }else if(currentView === "market" && lastTicker){
-    startCandleRefresh();
   }
 });
 
@@ -5415,10 +5370,7 @@ async function initializeApp(){
   syncTradeInputs();
   applyIndicatorPreset("momentum");
   document.querySelectorAll("#strategyBar button").forEach(button => button.classList.toggle("active", button.dataset.s === strategy));
-  document.querySelectorAll("#tfBar button").forEach(button => button.classList.toggle("active", button.dataset.tf === timeframe));
   document.getElementById("watchSort").value = watchSort;
-  document.getElementById("zoneToggleBtn").classList.toggle("active", chartToolState.zones);
-  document.getElementById("zoneToggleBtn").innerText = chartToolState.zones ? "Hide Zones" : "Show Zones";
   loadPaperPositions();
   loadPaperHistory();
   loadAlerts();
@@ -5429,7 +5381,6 @@ async function initializeApp(){
   renderAlerts();
   renderMarketEmptyState();
   setOnboardingVisible(true);
-  showChartMessage("Search for a ticker, then click Analyze to load the chart.");
   renderPortfolioContext();
   renderMarketPulse();
   switchView(currentView || "market");

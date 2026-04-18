@@ -1942,10 +1942,8 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
   <div class="control-card" style="margin-top:18px;">
     <div class="section-kicker">AI Trade Helper</div>
     <div class="section-title">Built for cleaner trade planning, not chart watching</div>
-    <div class="compact-copy">Search a ticker to get the setup grade, trade plan, why it is moving, market events, recent news, alerts, and portfolio context in one place.</div>
+    <div class="compact-copy">Search a ticker to get the setup grade, trade plan, why it is moving, recent news, alerts, and portfolio context in one place.</div>
   </div>
-
-  <div id="marketPulse" class="insight-card market-pulse-card"></div>
 
   <div id="marketInsights" class="insights-shell"></div>
 
@@ -2221,7 +2219,6 @@ function setOnboardingVisible(visible){
 function renderMarketEmptyState(title="Search a stock or company name to begin.", copy="You will see the latest price move, trade plan, setup grade, key levels, and recent news once a ticker is analyzed."){
     const result = document.getElementById("result");
     const insights = document.getElementById("marketInsights");
-    const pulse = document.getElementById("marketPulse");
     result.innerHTML = `
       <div class="empty-state">
         <div class="empty-title">${title}</div>
@@ -2235,13 +2232,6 @@ function renderMarketEmptyState(title="Search a stock or company name to begin."
     `;
     if(insights){
       insights.innerHTML = "";
-    }
-    if(pulse){
-      pulse.innerHTML = `
-        <div class="section-kicker">Market Pulse</div>
-        <div class="section-title">Waiting for your first live workspace view</div>
-        <div class="section-copy">Search a stock to unlock the pulse summary, chart zones, and lower insight cards.</div>
-      `;
     }
   }
 
@@ -2640,7 +2630,6 @@ function updateQuoteDisplay(price){
 
   renderPortfolioContext();
   renderPaperPositions();
-  renderMarketPulse();
 }
 
 function setSessionBadge(sessionLabel){
@@ -3213,23 +3202,7 @@ function renderSqueezeCard(payload){
 }
 
 function renderBacktestCard(payload){
-  if(!payload){
-    return "";
-  }
-  return `
-    <details class="details-panel insight-card">
-      <summary>Simple Backtest</summary>
-      <div class="details-body">
-        <div class="analytics-grid">
-          ${renderAnalyticsCard("Trades", String(payload.trades || 0))}
-          ${renderAnalyticsCard("Win Rate", `${Number(payload.win_rate || 0).toFixed(1)}%`)}
-          ${renderAnalyticsCard("Return", `${Number(payload.total_return_percent || 0).toFixed(2)}%`, Number(payload.total_return_percent || 0) >= 0 ? "up" : "down")}
-          ${renderAnalyticsCard("Drawdown", `${Number(payload.max_drawdown_percent || 0).toFixed(2)}%`, "down")}
-        </div>
-        <div class="indicator-meta">${payload.summary || "Backtest unavailable."}</div>
-      </div>
-    </details>
-  `;
+  return "";
 }
 
 function renderEarningsVolatilityCard(payload){
@@ -3514,59 +3487,6 @@ function getSortedWatchlistData(){
   });
 
   return rows;
-}
-
-function renderMarketPulse(){
-  const container = document.getElementById("marketPulse");
-  if(!container){
-    return;
-  }
-
-  const sorted = getSortedWatchlistData();
-  const strongest = sorted.find(item => item.change > 0);
-  const weakest = [...sorted].reverse().find(item => item.change < 0);
-  const focus = latestAnalyzedSnapshot;
-  const signal = latestAnalyzedSignal;
-  const mode = latestMarketMode;
-  const momentum = latestMomentumScore;
-
-  container.innerHTML = `
-    <div class="section-kicker">Market Pulse</div>
-    <div class="section-title">A quick read on what matters right now</div>
-    <div class="section-copy">Built from your current search, watchlist movers, and setup grading so the app feels more like a workspace than a feed.</div>
-    <div class="pulse-grid">
-      <div class="pulse-item">
-        <div class="pulse-title">Current Focus</div>
-        <div class="pulse-value">${focus ? focus.ticker : "--"}</div>
-        <div class="pulse-meta">${focus ? `${formatPercent(focus.change)} on the day` : "Analyze a ticker to anchor the page."}</div>
-      </div>
-      <div class="pulse-item">
-        <div class="pulse-title">Setup Quality</div>
-        <div class="pulse-value">${signal ? `${signal.grade} ${signal.action}` : "--"}</div>
-        <div class="pulse-meta">${signal ? (signal.reason || "No setup reason yet.") : "Setup grading appears here after analysis."}</div>
-      </div>
-      <div class="pulse-item">
-        <div class="pulse-title">Market Mode</div>
-        <div class="pulse-value">${mode ? mode.label : "--"}</div>
-        <div class="pulse-meta">${mode ? mode.summary : "Market mode appears after analysis."}</div>
-      </div>
-      <div class="pulse-item">
-        <div class="pulse-title">Momentum Score</div>
-        <div class="pulse-value">${momentum ? momentum.value : "--"}</div>
-        <div class="pulse-meta">${momentum ? momentum.label : "Momentum pressure appears here after analysis."}</div>
-      </div>
-      <div class="pulse-item">
-        <div class="pulse-title">Strongest Watchlist Move</div>
-        <div class="pulse-value">${strongest ? strongest.ticker : "--"}</div>
-        <div class="pulse-meta">${strongest ? `${formatPercent(strongest.change)} | $${strongest.price.toFixed(2)}` : "Add names to your watchlist to surface movers."}</div>
-      </div>
-      <div class="pulse-item">
-        <div class="pulse-title">Weakest Watchlist Move</div>
-        <div class="pulse-value">${weakest ? weakest.ticker : "--"}</div>
-        <div class="pulse-meta">${weakest ? `${formatPercent(weakest.change)} | $${weakest.price.toFixed(2)}` : "Lagging names will show here automatically."}</div>
-      </div>
-    </div>
-  `;
 }
 
 function buildScannerGrade(snapshot){
@@ -4873,7 +4793,6 @@ async function loadWatchlistData(){
     });
     renderPaperPositions();
     checkAlerts();
-    renderMarketPulse();
   }catch(err){
     console.log("Watchlist data load failed", err);
     watchlistData = [];
@@ -5138,14 +5057,13 @@ async function analyze(sym){
     latestAnalyzedLevels = d.levels || null;
     latestMarketMode = d.market_mode || null;
     latestMomentumScore = d.momentum_score || null;
-    latestBacktest = d.backtest || null;
+    latestBacktest = null;
     latestCorrelations = d.correlations || null;
     latestSqueeze = d.squeeze_detector || null;
     latestEarningsVolatility = d.earnings_volatility || null;
     checkAlerts();
     renderAlerts();
     renderPortfolioContext();
-    renderMarketPulse();
     setOnboardingVisible(false);
 
     document.getElementById("result").innerHTML = `
@@ -5206,7 +5124,6 @@ async function analyze(sym){
     document.getElementById("marketInsights").innerHTML = `
       <div class="insights-grid">
         ${renderNewsSection(d.news)}
-        ${renderBacktestCard(d.backtest)}
         ${renderEarningsVolatilityCard(d.earnings_volatility)}
       </div>
     `;
@@ -5354,7 +5271,6 @@ async function initializeApp(){
   renderMarketEmptyState();
   setOnboardingVisible(true);
   renderPortfolioContext();
-  renderMarketPulse();
   switchView(currentView || "market");
   await loadWatchlist();
   if(currentView === "scanner"){

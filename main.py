@@ -644,12 +644,31 @@ def get_current_market_status():
 
 
 def build_quote_from_candles(candles):
+    if not candles:
+        return {"price": 0, "open": 0, "high": 0, "low": 0}
     return {
         "price": round(candles[-1]["close"], 2),
         "open": round(candles[0]["open"], 2),
         "high": round(max(c["high"] for c in candles), 2),
         "low": round(min(c["low"] for c in candles), 2)
     }
+
+
+def build_latest_session_quote(candles):
+    if not candles:
+        return build_quote_from_candles(candles)
+
+    latest_day = get_et_session_key(candles[-1]["time"])
+    latest_day_candles = [c for c in candles if get_et_session_key(c["time"]) == latest_day]
+    if not latest_day_candles:
+        latest_day_candles = candles
+
+    if get_current_market_status() == "Closed":
+        regular_hours_candles = [c for c in latest_day_candles if get_market_session_name(c["time"]) == "Regular Hours"]
+        if regular_hours_candles:
+            return build_quote_from_candles(regular_hours_candles)
+
+    return build_quote_from_candles(latest_day_candles)
 
 
 def calculate_ema(values, period):
@@ -1135,7 +1154,7 @@ def fetch_and_cache_candles(symbol, tf):
 
         set_cache_entry(candle_cache, cache_key, candle_rows)
         if tf == "5m":
-            set_cache_entry(quote_cache, symbol, build_quote_from_candles(candle_rows))
+            set_cache_entry(quote_cache, symbol, build_latest_session_quote(candle_rows))
 
         return {
             "candles": candle_rows,
@@ -2190,7 +2209,7 @@ def analyze_strategy(symbol, strategy, risk_profile="balanced"):
     using_demo = not (candle_result and candle_result["candles"])
     signal_candles = candle_result["candles"] if candle_result and candle_result["candles"] else build_demo_candles(symbol, "5m")
     session_candles = prepare_chart_candles(signal_candles, "5m") or signal_candles
-    quote_data = build_quote_from_candles(session_candles)
+    quote_data = build_latest_session_quote(signal_candles)
     price = quote_data["price"]
     open_price = quote_data["open"]
     market_source = candle_result["source"] if candle_result else "demo"

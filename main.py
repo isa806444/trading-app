@@ -2205,11 +2205,11 @@ def build_public_leaderboard():
 # =========================
 
 def analyze_strategy(symbol, strategy, risk_profile="balanced"):
-    candle_result = fetch_and_cache_candles(symbol, "5m")
+    quote_tf = "1d" if get_current_market_status() == "Closed" else "5m"
+    candle_result = fetch_and_cache_candles(symbol, quote_tf)
     using_demo = not (candle_result and candle_result["candles"])
-    signal_candles = candle_result["candles"] if candle_result and candle_result["candles"] else build_demo_candles(symbol, "5m")
-    session_candles = prepare_chart_candles(signal_candles, "5m") or signal_candles
-    quote_data = build_latest_session_quote(signal_candles)
+    signal_candles = candle_result["candles"] if candle_result and candle_result["candles"] else build_demo_candles(symbol, quote_tf)
+    quote_data = build_quote_from_candles(signal_candles) if quote_tf == "1d" else build_latest_session_quote(signal_candles)
     price = quote_data["price"]
     open_price = quote_data["open"]
     market_source = candle_result["source"] if candle_result else "demo"

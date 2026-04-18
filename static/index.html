@@ -1892,6 +1892,12 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
     </div>
   </div>
 
+  <div class="control-card" style="margin-bottom:18px;">
+    <div class="section-kicker">AI Trade Helper</div>
+    <div class="section-title">Built for cleaner trade planning, not chart watching</div>
+    <div class="compact-copy">Search a ticker to get the setup grade, trade plan, recent news, alerts, and portfolio context in one place.</div>
+  </div>
+
   <div class="control-card">
     <div class="section-head">
       <div>
@@ -1925,25 +1931,8 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
     <button data-s="momentum">Momentum</button>
     <button data-s="mean">Mean</button>
   </div>
-  <div class="helper-row">
-    <div class="helper-text">Pick the style and risk you want.</div>
-    <div class="alert-controls" style="gap:10px;">
-      <div class="helper-pill">Balanced by default</div>
-      <select id="riskProfile" class="alert-direction">
-        <option value="conservative">Conservative Risk</option>
-        <option value="balanced" selected>Balanced Risk</option>
-        <option value="aggressive">Aggressive Risk</option>
-      </select>
-    </div>
-  </div>
   <div id="result" class="result-shell"></div>
   <div id="status"></div>
-
-  <div class="control-card" style="margin-top:18px;">
-    <div class="section-kicker">AI Trade Helper</div>
-    <div class="section-title">Built for cleaner trade planning, not chart watching</div>
-    <div class="compact-copy">Search a ticker to get the setup grade, trade plan, why it is moving, recent news, alerts, and portfolio context in one place.</div>
-  </div>
 
   <div id="marketInsights" class="insights-shell"></div>
 
@@ -5006,7 +4995,7 @@ async function analyze(sym){
 
   t=t.toUpperCase();
   lastTicker=t;
-  riskProfile = document.getElementById("riskProfile")?.value || riskProfile || "balanced";
+  riskProfile = "balanced";
   hideSuggestions();
   setLoadingState(true);
 
@@ -5098,7 +5087,7 @@ async function analyze(sym){
           <div class="soft-section">
             <div class="section-title-row">
               <div>Trade Plan</div>
-              <div class="helper-pill">${strategy.toUpperCase()} | ${riskProfile} risk</div>
+              <div class="helper-pill">${strategy.toUpperCase()}</div>
             </div>
             <div class="indicator-meta">Entry: ${d.plan.entry}</div>
             <div class="indicator-meta">Stop: ${d.plan.stop}</div>
@@ -5112,8 +5101,6 @@ async function analyze(sym){
             <div class="indicator-meta">${d.summary}</div>
           </div>
 
-          ${renderWhyMovingSection(d.why_moving)}
-          ${renderTradeWarningCard(d.trade_warning)}
           ${renderAiSetupCard(d.ai_setup)}
           ${renderSmartAlerts(d.smart_alerts)}
         </div>
@@ -5161,14 +5148,6 @@ document.getElementById("ticker").addEventListener("input", (e)=>{
     clearTimeout(searchDebounce);
   }
   searchDebounce = setTimeout(() => fetchSuggestions(value), SEARCH_DEBOUNCE_MS);
-});
-
-document.getElementById("riskProfile").addEventListener("change", (e) => {
-  riskProfile = e.target.value || "balanced";
-  saveLayoutPrefs();
-  if(lastTicker){
-    analyze(lastTicker);
-  }
 });
 
 document.addEventListener("click", (e)=>{
@@ -5255,7 +5234,6 @@ async function initializeApp(){
   setAuthMode("login");
   renderIndicatorToggles();
   document.getElementById("discordLinkInput").value = getDiscordLink();
-  document.getElementById("riskProfile").value = riskProfile;
   syncTradeInputs();
   applyIndicatorPreset("momentum");
   document.querySelectorAll("#strategyBar button").forEach(button => button.classList.toggle("active", button.dataset.s === strategy));

@@ -3031,11 +3031,15 @@ function renderTradeSignal(signal){
     signal.action === "SELL" ? "sell" :
     "wait";
   const confirmations = Array.isArray(signal.confirmations) ? signal.confirmations : [];
+  const algorithm = signal.algorithm || {};
+  const longScore = Number(algorithm.long_score || 0);
+  const shortScore = Number(algorithm.short_score || 0);
+  const edge = Number(algorithm.edge || 0);
 
     return `
       <div class="section">
         <div class="section-title-row">
-          <div>Setup Grade</div>
+          <div>Algorithm Setup</div>
           <div class="helper-pill">${signal.strength || "Mixed"} conviction${signal.confidence ? ` | ${signal.confidence}%` : ""}</div>
         </div>
         <div class="signal-row">
@@ -3046,6 +3050,10 @@ function renderTradeSignal(signal){
         <div class="confirmation-list">
           <div class="confirmation-pill">${signal.setup_quality || "Needs patience"}</div>
           <div class="confirmation-pill">Score ${signal.score || 0}</div>
+          ${algorithm.long_score !== undefined ? `<div class="confirmation-pill">Buy ${longScore.toFixed(1)}</div>` : ""}
+          ${algorithm.short_score !== undefined ? `<div class="confirmation-pill">Sell ${shortScore.toFixed(1)}</div>` : ""}
+          ${algorithm.edge !== undefined ? `<div class="confirmation-pill">Edge ${edge > 0 ? "+" : ""}${edge.toFixed(1)}</div>` : ""}
+          ${algorithm.relative_volume ? `<div class="confirmation-pill">Vol ${Number(algorithm.relative_volume).toFixed(2)}x</div>` : ""}
         </div>
         <div class="indicator-meta">${signal.reason}</div>
         ${confirmations.length ? `
@@ -3119,6 +3127,10 @@ function renderAiSetupCard(payload){
   `;
 }
 
+function encodeAlertSuggestion(item){
+  return encodeURIComponent(JSON.stringify(item || {}));
+}
+
 function renderSmartAlerts(payload){
   if(!Array.isArray(payload) || !payload.length){
     return "";
@@ -3126,8 +3138,8 @@ function renderSmartAlerts(payload){
   return `
     <div class="section">
       <div class="section-title-row">
-        <div>Smart Alerts</div>
-        <div class="helper-pill">Signal-aware ideas</div>
+        <div>Buy / Sell Alerts</div>
+        <div class="helper-pill">Algorithm levels</div>
       </div>
       <div class="alert-list">
         ${payload.map(item => `
@@ -3140,6 +3152,11 @@ function renderSmartAlerts(payload){
               <div class="alert-meta">${item.detail || ""}</div>
               <div class="alert-meta">${item.why_now || ""}</div>
             </div>
+            ${item.type && item.type.startsWith("price_") ? `
+              <div>
+                <button class="paper-btn close" onclick="armSuggestedAlert('${encodeAlertSuggestion(item)}')">Arm</button>
+              </div>
+            ` : ""}
           </div>
         `).join("")}
       </div>
@@ -3725,19 +3742,13 @@ function renderPaperActions(ticker){
   return `
     <div class="alert-controls">
       <select id="alertType" class="alert-direction" onchange="syncAlertInputs()">
-        <option value="price_above">Price Above</option>
-        <option value="price_below">Price Below</option>
-        <option value="ema9_above">Cross Above EMA 9</option>
-        <option value="ema9_below">Cross Below EMA 9</option>
-        <option value="vwap_above">Reclaim VWAP</option>
-        <option value="vwap_below">Lose VWAP</option>
-        <option value="rsi_above_70">RSI Above 70</option>
-        <option value="rsi_below_30">RSI Below 30</option>
+        <option value="price_above">BUY Breakout Above</option>
+        <option value="price_below">SELL Breakdown Below</option>
       </select>
       <input id="alertPrice" class="paper-qty" type="number" min="0" step="0.01" value="${latestQuotes[ticker] || ""}" />
       <button class="paper-btn close" onclick="addAlertForCurrentTicker()">Add Alert</button>
     </div>
-    <div id="alertHelper" class="alert-helper">Price alerts trigger off the latest mark. Indicator alerts follow the live chart state for this ticker.</div>
+    <div id="alertHelper" class="alert-helper">Alerts trigger from the latest analyzed mark for this ticker.</div>
   `;
 }
 
@@ -3759,8 +3770,8 @@ function syncAlertInputs(){
 
   if(helper){
     helper.innerText = isPriceAlert
-      ? "Price alerts trigger off the latest mark for this ticker."
-      : "Indicator alerts trigger from the live chart state for the currently analyzed ticker.";
+      ? "Buy and sell alerts trigger off the latest analyzed mark for this ticker."
+      : "This alert type is informational right now.";
   }
 }
 
@@ -4611,6 +4622,8 @@ function addAlertForCurrentTicker(){
       ticker: lastTicker,
       type,
       target: type.startsWith("price_") ? target : null,
+      label: type === "price_above" ? `BUY alert above $${target.toFixed(2)}` : `SELL alert below $${target.toFixed(2)}`,
+      side: type === "price_above" ? "BUY" : "SELL",
       contextMessage: latestAnalyzedSignal?.reason || latestMarketMode?.summary || "Alert triggered from your saved market setup.",
       status: "active",
       createdAt: new Date().toISOString()
@@ -4620,6 +4633,47 @@ function addAlertForCurrentTicker(){
   saveAlerts();
   saveRemoteState();
   renderAlerts();
+}
+
+function armSuggestedAlert(encodedSuggestion){
+  if(!lastTicker){
+    setStatus("Analyze a ticker first so the algorithm alert knows which ticker to watch.", "warning");
+    return;
+  }
+
+  let suggestion = {};
+  try{
+    suggestion = JSON.parse(decodeURIComponent(encodedSuggestion || "%7B%7D"));
+  }catch(error){
+    setStatus("That alert idea could not be loaded. Try analyzing the ticker again.", "warning");
+    return;
+  }
+
+  const type = suggestion.type || "price_above";
+  const target = Number(suggestion.target || 0);
+  if(!type.startsWith("price_") || !target){
+    setStatus("This alert idea is informational right now. Use a buy or sell price alert.", "warning");
+    return;
+  }
+
+  alerts = [
+    {
+      id: `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+      ticker: lastTicker,
+      type,
+      target,
+      label: suggestion.label || "",
+      side: suggestion.side || "",
+      contextMessage: suggestion.why_now || suggestion.detail || latestAnalyzedSignal?.reason || "Algorithm alert triggered from your saved setup.",
+      status: "active",
+      createdAt: new Date().toISOString()
+    },
+    ...alerts
+  ];
+  saveAlerts();
+  saveRemoteState();
+  renderAlerts();
+  setStatus(`${suggestion.side || "Signal"} alert armed for ${lastTicker} at $${target.toFixed(2)}.`, "ok");
 }
 
 function removeAlert(id){
@@ -4647,9 +4701,12 @@ function maybeNotifyAlert(alert, markPrice){
 }
 
 function getAlertLabel(alert){
+  if(alert.label){
+    return alert.label;
+  }
   const type = alert.type || (alert.direction ? `price_${alert.direction}` : "price_above");
-  if(type === "price_above") return `Price above $${Number(alert.target).toFixed(2)}`;
-  if(type === "price_below") return `Price below $${Number(alert.target).toFixed(2)}`;
+  if(type === "price_above") return `BUY alert above $${Number(alert.target).toFixed(2)}`;
+  if(type === "price_below") return `SELL alert below $${Number(alert.target).toFixed(2)}`;
   if(type === "ema9_above") return "Price crossed above EMA 9";
   if(type === "ema9_below") return "Price crossed below EMA 9";
   if(type === "vwap_above") return "Price reclaimed VWAP";

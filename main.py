@@ -28,6 +28,7 @@ STRIPE_PREMIUM_PRICE_CENTS_ENV = "STRIPE_PREMIUM_PRICE_CENTS"
 QUOTE_CACHE_TTL = 90
 LIVE_PRICE_CACHE_TTL = 5
 CANDLE_CACHE_TTL = 180
+PREVIOUS_CLOSE_CACHE_TTL = 60 * 60
 INDICATOR_CACHE_TTL = 900
 NEWS_CACHE_TTL = 900
 EVENTS_CACHE_TTL = 1800
@@ -1051,6 +1052,77 @@ def fetch_polygon_price(symbol):
     return round(float(price), 2)
 
 
+def fetch_polygon_previous_close_quote(symbol):
+    api_key = get_polygon_api_key()
+    if not api_key:
+        return None
+
+    response = requests.get(
+        f"{POLYGON_BASE_URL}/v2/aggs/ticker/{symbol}/prev",
+        params={
+            "adjusted": "true",
+            "apiKey": api_key
+        },
+        timeout=10,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    results = payload.get("results") or []
+    if not results:
+        return None
+
+    row = results[0]
+    open_price = float(row.get("o", 0))
+    close_price = float(row.get("c", 0))
+    high_price = float(row.get("h", max(open_price, close_price)))
+    low_price = float(row.get("l", min(open_price, close_price)))
+    return {
+        "price": round(close_price, 2),
+        "open": round(open_price, 2),
+        "high": round(max(high_price, open_price, close_price), 2),
+        "low": round(min(low_price, open_price, close_price), 2)
+    }
+
+
+def get_previous_close_quote(symbol):
+    cache_key = f"prev_close:{symbol}"
+    cached = get_cache_entry(quote_cache, cache_key, PREVIOUS_CLOSE_CACHE_TTL)
+    if cached and not cached["stale"]:
+        return {
+            "data": cached["data"],
+            "source": "cache",
+            "cached": True,
+            "stale": False,
+            "age_seconds": cached["age_seconds"]
+        }
+
+    try:
+        quote_data = fetch_polygon_previous_close_quote(symbol)
+        if quote_data:
+            set_cache_entry(quote_cache, cache_key, quote_data)
+            set_cache_entry(quote_cache, symbol, quote_data)
+            return {
+                "data": quote_data,
+                "source": "live",
+                "cached": False,
+                "stale": False,
+                "age_seconds": 0
+            }
+    except requests.RequestException:
+        pass
+
+    if cached:
+        return {
+            "data": cached["data"],
+            "source": "cache",
+            "cached": True,
+            "stale": True,
+            "age_seconds": cached["age_seconds"]
+        }
+
+    return None
+
+
 def search_polygon_symbols(query):
     api_key = get_polygon_api_key()
     if not api_key or len(query.strip()) < 1:
@@ -1334,112 +1406,229 @@ def get_live_price(symbol):
 
 
 def build_trade_signal(change, bias, strategy, candles):
-    closes = [c["close"] for c in candles]
+    if not candles:
+        return {
+            "action": "WAIT",
+            "tone": "neutral",
+            "grade": "C",
+            "strength": "Weak",
+            "confirmations": [],
+            "reason": "There is not enough market data yet to build a reliable setup.",
+            "score": 0,
+            "confidence": 35,
+            "setup_quality": "Needs patience",
+            "algorithm": {
+                "long_score": 0,
+                "short_score": 0,
+                "edge": 0,
+                "relative_volume": 1,
+                "risk_flags": ["not enough market data"]
+            }
+        }
+
+    closes = [float(c["close"]) for c in candles]
+    volumes = [float(c.get("volume") or 0) for c in candles]
     ema9 = calculate_ema(closes, 9)
     ema20 = calculate_ema(closes, 20)
     vwap = calculate_vwap(candles)
     rsi = calculate_rsi(closes, 14)
 
     last_close = closes[-1] if closes else 0
-    prev_close = closes[-2] if len(closes) > 1 else last_close
     last_ema9 = ema9[-1] if ema9 else last_close
     last_ema20 = ema20[-1] if ema20 else last_close
     last_vwap = vwap[-1] if vwap else last_close
     last_rsi = rsi[-1] if rsi and rsi[-1] is not None else 50
-    higher_low = candles[-1]["low"] >= candles[-2]["low"] if len(candles) > 1 else False
-    lower_high = candles[-1]["high"] <= candles[-2]["high"] if len(candles) > 1 else False
-    bullish_stack = last_close > last_ema9 > last_ema20 and last_close > last_vwap
-    bearish_stack = last_close < last_ema9 < last_ema20 and last_close < last_vwap
+    recent_candles = candles[-8:] if len(candles) >= 8 else candles
+    prior_recent_candles = candles[-9:-1] if len(candles) >= 9 else candles[:-1]
+    recent_high = max(float(c["high"]) for c in prior_recent_candles) if prior_recent_candles else last_close
+    recent_low = min(float(c["low"]) for c in prior_recent_candles) if prior_recent_candles else last_close
+    recent_volume = average(volumes[-6:] or volumes)
+    baseline_volume = average(volumes[:-6] or volumes)
+    relative_volume = round(recent_volume / baseline_volume, 2) if baseline_volume else 1
+    average_range = average([(float(c["high"]) - float(c["low"])) / max(float(c["close"]), 1) for c in recent_candles])
+    green_count = sum(1 for c in recent_candles if float(c["close"]) >= float(c["open"]))
+    red_count = len(recent_candles) - green_count
+    first_recent_close = float(recent_candles[0]["close"]) if recent_candles else last_close
+    recent_move = ((last_close - first_recent_close) / first_recent_close) * 100 if first_recent_close else 0
+    higher_lows = len(recent_candles) >= 3 and float(recent_candles[-1]["low"]) >= float(recent_candles[-3]["low"])
+    lower_highs = len(recent_candles) >= 3 and float(recent_candles[-1]["high"]) <= float(recent_candles[-3]["high"])
+
+    long_score = 35.0
+    short_score = 35.0
     bullish_confirmations = []
     bearish_confirmations = []
+    risk_flags = []
 
-    if bullish_stack:
-        bullish_confirmations.append("price is stacked above EMA 9, EMA 20, and VWAP")
-    if bearish_stack:
-        bearish_confirmations.append("price is stacked below EMA 9, EMA 20, and VWAP")
+    if last_close > last_ema9 > last_ema20:
+        long_score += 16
+        bullish_confirmations.append("trend is stacked bullish above EMA 9 and EMA 20")
+    elif last_close < last_ema9 < last_ema20:
+        short_score += 16
+        bearish_confirmations.append("trend is stacked bearish below EMA 9 and EMA 20")
+    elif last_close > last_ema20:
+        long_score += 7
+        bullish_confirmations.append("price is holding above the medium trend")
+    elif last_close < last_ema20:
+        short_score += 7
+        bearish_confirmations.append("price is under the medium trend")
 
-    if last_rsi >= 55:
-        bullish_confirmations.append(f"RSI is showing strength at {round(last_rsi, 1)}")
-    elif last_rsi <= 45:
-        bearish_confirmations.append(f"RSI is showing weakness at {round(last_rsi, 1)}")
+    if last_close > last_vwap:
+        long_score += 8
+        bullish_confirmations.append("buyers are defending VWAP")
+    elif last_close < last_vwap:
+        short_score += 8
+        bearish_confirmations.append("sellers are controlling VWAP")
 
-    if higher_low:
-        bullish_confirmations.append("the latest candle held a higher low")
-    if lower_high:
-        bearish_confirmations.append("the latest candle printed a lower high")
+    if last_rsi >= 58:
+        long_score += clamp((last_rsi - 50) * 0.65, 4, 16)
+        bullish_confirmations.append(f"RSI momentum is firm at {round(last_rsi, 1)}")
+    elif last_rsi <= 42:
+        short_score += clamp((50 - last_rsi) * 0.65, 4, 16)
+        bearish_confirmations.append(f"RSI momentum is weak at {round(last_rsi, 1)}")
+
+    if recent_move >= 0.4 or green_count >= max(3, len(recent_candles) - 2):
+        long_score += 10
+        bullish_confirmations.append("recent candles are pushing higher")
+    elif recent_move <= -0.4 or red_count >= max(3, len(recent_candles) - 2):
+        short_score += 10
+        bearish_confirmations.append("recent candles are pressing lower")
+
+    if higher_lows:
+        long_score += 8
+        bullish_confirmations.append("structure is forming higher lows")
+    if lower_highs:
+        short_score += 8
+        bearish_confirmations.append("structure is forming lower highs")
+
+    if recent_high and last_close > recent_high:
+        long_score += 12
+        bullish_confirmations.append("price is breaking above recent resistance")
+    if recent_low and last_close < recent_low:
+        short_score += 12
+        bearish_confirmations.append("price is breaking below recent support")
 
     if change >= 0.5:
-        bullish_confirmations.append(f"the stock is up {change}% on the day")
+        long_score += clamp(change * 1.8, 3, 14)
+        bullish_confirmations.append(f"the day change is positive at {change}%")
     elif change <= -0.5:
-        bearish_confirmations.append(f"the stock is down {abs(change)}% on the day")
+        short_score += clamp(abs(change) * 1.8, 3, 14)
+        bearish_confirmations.append(f"the day change is negative at {abs(change)}%")
 
-    if bias == "Bullish":
-        bullish_confirmations.append("overall session bias is bullish")
-    elif bias == "Bearish":
-        bearish_confirmations.append("overall session bias is bearish")
+    if relative_volume >= 1.35:
+        if long_score >= short_score:
+            long_score += 11
+            bullish_confirmations.append(f"volume is confirming at {relative_volume}x normal")
+        else:
+            short_score += 11
+            bearish_confirmations.append(f"volume is confirming at {relative_volume}x normal")
+    elif relative_volume < 0.65:
+        risk_flags.append("volume is too light")
+        long_score -= 5
+        short_score -= 5
 
-    long_score = len(bullish_confirmations) + (1 if last_close > prev_close else 0)
-    short_score = len(bearish_confirmations) + (1 if last_close < prev_close else 0)
+    if average_range < 0.0025:
+        risk_flags.append("price action is too tight and choppy")
+        long_score -= 6
+        short_score -= 6
+
+    if last_rsi >= 78:
+        risk_flags.append("bullish side is overextended")
+        long_score -= 10
+        short_score += 4
+    elif last_rsi <= 22:
+        risk_flags.append("bearish side is overextended")
+        short_score -= 10
+        long_score += 4
+
+    if strategy in {"momentum", "day", "scalp"}:
+        if relative_volume >= 1.1 and abs(recent_move) >= 0.3:
+            long_score += 4 if long_score > short_score else 0
+            short_score += 4 if short_score > long_score else 0
+        if relative_volume < 0.8:
+            risk_flags.append("momentum strategy needs more volume")
+    elif strategy == "swing":
+        if last_close > last_ema20:
+            long_score += 4
+        elif last_close < last_ema20:
+            short_score += 4
+    elif strategy == "mean":
+        if last_rsi <= 32 and last_close < last_ema20:
+            long_score += 12
+            bullish_confirmations.append("mean reversion is stretched lower")
+        elif last_rsi >= 68 and last_close > last_ema20:
+            short_score += 12
+            bearish_confirmations.append("mean reversion is stretched higher")
+
+    long_score = round(clamp(long_score, 0, 100), 1)
+    short_score = round(clamp(short_score, 0, 100), 1)
+    edge = round(long_score - short_score, 1)
     dominant_score = max(long_score, short_score)
     opposing_score = min(long_score, short_score)
+    hard_guardrail = len(risk_flags) >= 2 and abs(edge) < 35
 
-    if long_score >= 4 and long_score >= short_score + 2:
+    if edge >= 18 and long_score >= 58 and not hard_guardrail:
         action = "BUY"
         tone = "bullish"
-        grade = "A"
-        strength = "Strong"
         confirmations = bullish_confirmations
-        reason = f"This {strategy} setup looks strong because " + ", ".join(confirmations[:3]) + "."
-    elif short_score >= 4 and short_score >= long_score + 2:
+    elif edge <= -18 and short_score >= 58 and not hard_guardrail:
         action = "SELL"
         tone = "bearish"
-        grade = "A"
-        strength = "Strong"
         confirmations = bearish_confirmations
-        reason = f"This {strategy} setup looks strong because " + ", ".join(confirmations[:3]) + "."
-    elif long_score >= 3 and long_score > short_score:
-        action = "BUY"
-        tone = "bullish"
-        grade = "B"
-        strength = "Moderate"
-        confirmations = bullish_confirmations
-        reason = f"This {strategy} setup has enough bullish confirmation to be usable, mainly because " + ", ".join(confirmations[:3]) + "."
-    elif short_score >= 3 and short_score > long_score:
-        action = "SELL"
-        tone = "bearish"
-        grade = "B"
-        strength = "Moderate"
-        confirmations = bearish_confirmations
-        reason = f"This {strategy} setup has enough bearish confirmation to be usable, mainly because " + ", ".join(confirmations[:3]) + "."
-    elif dominant_score >= 2 and dominant_score > opposing_score:
-        action = "WAIT"
-        tone = "neutral"
-        grade = "C"
-        strength = "Mixed"
-        confirmations = bullish_confirmations if long_score > short_score else bearish_confirmations
-        reason = f"There is some directional evidence here, but it is not strong enough yet. Right now the clearest signs are that " + ", ".join(confirmations[:2]) + "."
     else:
         action = "WAIT"
         tone = "neutral"
+        confirmations = bullish_confirmations if edge >= 0 else bearish_confirmations
+
+    if action != "WAIT" and abs(edge) >= 32 and dominant_score >= 72 and len(confirmations) >= 4 and not risk_flags:
+        grade = "A"
+        strength = "Strong"
+    elif action != "WAIT" and abs(edge) >= 18 and dominant_score >= 58:
+        grade = "B"
+        strength = "Moderate"
+    elif abs(edge) >= 14 and confirmations:
+        grade = "C"
+        strength = "Mixed"
+    else:
         grade = "C"
         strength = "Weak"
-        confirmations = []
-        reason = "This setup is still too mixed. Price, trend structure, and momentum are not lined up well enough to call it strong."
+
+    if action == "BUY":
+        reason = "Algorithm says BUY only because multiple bullish checks line up: " + ", ".join(confirmations[:3]) + "."
+    elif action == "SELL":
+        reason = "Algorithm says SELL only because multiple bearish checks line up: " + ", ".join(confirmations[:3]) + "."
+    elif confirmations:
+        reason = "The setup is close, but not strong enough yet. Best evidence so far: " + ", ".join(confirmations[:2]) + "."
+    else:
+        reason = "This is a WAIT because trend, momentum, volume, and structure are not lined up enough yet."
+
+    if risk_flags:
+        reason += " Caution: " + ", ".join(risk_flags[:2]) + "."
 
     return {
         "action": action,
         "tone": tone,
         "grade": grade,
         "strength": strength,
-        "confirmations": confirmations[:4],
+        "confirmations": confirmations[:5],
         "reason": reason,
         "score": dominant_score,
-        "confidence": min(95, 45 + (dominant_score * 10) - (opposing_score * 5)),
+        "confidence": round(clamp(45 + (abs(edge) * 0.8) + ((relative_volume - 1) * 7) - (len(risk_flags) * 7), 35, 95)),
         "setup_quality": (
             "High quality" if grade == "A" and action != "WAIT"
             else "Usable" if grade == "B" and action != "WAIT"
             else "Needs patience"
-        )
+        ),
+        "algorithm": {
+            "long_score": long_score,
+            "short_score": short_score,
+            "edge": edge,
+            "relative_volume": relative_volume,
+            "rsi": round(last_rsi, 1),
+            "recent_move": round(recent_move, 2),
+            "risk_flags": risk_flags,
+            "dominant_score": dominant_score,
+            "opposing_score": opposing_score
+        }
     }
 
 
@@ -1699,28 +1888,44 @@ def build_ai_trade_setup(symbol, strategy, risk_profile, trade_signal, plan, why
 
 
 def build_smart_alert_ideas(symbol, trade_signal, momentum_score, levels, market_mode):
-    direction = "above" if trade_signal.get("action") == "BUY" else "below"
-    level = levels["resistance"] if direction == "above" else levels["support"]
-    return [
-        {
-            "label": f"{symbol} breaks {direction} {round(level, 2)}",
-            "detail": f"That would align with the current {trade_signal.get('grade')} setup and {market_mode.get('label', 'current')} tape.",
-            "priority": "High",
-            "why_now": trade_signal.get("reason")
-        },
-        {
-            "label": f"Momentum score pushes past {min(95, max(60, momentum_score['value'] + 8))}",
-            "detail": "That would signal stronger continuation pressure instead of just a random price tick.",
-            "priority": "Medium",
-            "why_now": momentum_score.get("summary")
-        },
-        {
-            "label": f"Setup weakens from {trade_signal.get('grade', 'C')}",
-            "detail": "Useful as a protection alert if the current setup loses alignment.",
-            "priority": "Risk",
-            "why_now": market_mode.get("summary")
-        }
-    ]
+    buy_level = round(float(levels.get("resistance") or 0), 2)
+    sell_level = round(float(levels.get("support") or 0), 2)
+    action = trade_signal.get("action")
+    grade = trade_signal.get("grade", "C")
+    market_label = market_mode.get("label", "current")
+    momentum_trigger = min(95, max(60, momentum_score["value"] + 8))
+
+    buy_alert = {
+        "label": f"BUY alert if {symbol} breaks above ${buy_level}",
+        "detail": f"Use this only if the breakout holds with the current {grade} setup and {market_label} tape.",
+        "priority": "High" if action == "BUY" else "Watch",
+        "type": "price_above",
+        "target": buy_level,
+        "side": "BUY",
+        "why_now": trade_signal.get("reason")
+    }
+    sell_alert = {
+        "label": f"SELL alert if {symbol} loses ${sell_level}",
+        "detail": f"Use this as a breakdown or protection alert if buyers fail at support.",
+        "priority": "High" if action == "SELL" else "Risk",
+        "type": "price_below",
+        "target": sell_level,
+        "side": "SELL",
+        "why_now": trade_signal.get("reason")
+    }
+    momentum_alert = {
+        "label": f"Momentum score pushes past {momentum_trigger}",
+        "detail": "That would mean stronger continuation pressure instead of a random price tick.",
+        "priority": "Medium",
+        "type": "momentum_score",
+        "target": momentum_trigger,
+        "side": action if action in {"BUY", "SELL"} else "WATCH",
+        "why_now": momentum_score.get("summary")
+    }
+
+    if action == "SELL":
+        return [sell_alert, buy_alert, momentum_alert]
+    return [buy_alert, sell_alert, momentum_alert]
 
 
 def build_scanner_row(symbol):
@@ -2205,20 +2410,24 @@ def build_public_leaderboard():
 # =========================
 
 def analyze_strategy(symbol, strategy, risk_profile="balanced"):
-    quote_tf = "1d" if get_current_market_status() == "Closed" else "5m"
+    market_status = get_current_market_status()
+    quote_tf = "1d" if market_status == "Closed" else "5m"
+    previous_close_quote = get_previous_close_quote(symbol) if market_status == "Closed" else None
     candle_result = fetch_and_cache_candles(symbol, quote_tf)
     using_demo = not (candle_result and candle_result["candles"])
     signal_candles = candle_result["candles"] if candle_result and candle_result["candles"] else build_demo_candles(symbol, quote_tf)
-    quote_data = build_quote_from_candles(signal_candles) if quote_tf == "1d" else build_latest_session_quote(signal_candles)
+    quote_data = previous_close_quote["data"] if previous_close_quote else (
+        build_quote_from_candles(signal_candles) if quote_tf == "1d" else build_latest_session_quote(signal_candles)
+    )
     price = quote_data["price"]
     open_price = quote_data["open"]
-    market_source = candle_result["source"] if candle_result else "demo"
-    market_cached = candle_result["cached"] if candle_result else True
-    market_stale = candle_result["stale"] if candle_result else False
-    market_age = candle_result["age_seconds"] if candle_result else 0
+    market_source = previous_close_quote["source"] if previous_close_quote else (candle_result["source"] if candle_result else "demo")
+    market_cached = previous_close_quote["cached"] if previous_close_quote else (candle_result["cached"] if candle_result else True)
+    market_stale = previous_close_quote["stale"] if previous_close_quote else (candle_result["stale"] if candle_result else False)
+    market_age = previous_close_quote["age_seconds"] if previous_close_quote else (candle_result["age_seconds"] if candle_result else 0)
 
     dollar_change = round(price - open_price, 2)
-    change = round(((price - open_price) / open_price) * 100, 2)
+    change = round(((price - open_price) / open_price) * 100, 2) if open_price else 0
     bias = "Bullish" if change > 0 else "Bearish" if change < 0 else "Neutral"
     support = round(price * 0.99, 2)
     resistance = round(price * 1.01, 2)

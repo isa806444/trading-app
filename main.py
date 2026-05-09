@@ -48,6 +48,8 @@ STATIC_US_MACRO_EVENTS = [
     ("2026-07-14T08:30:00-04:00", "Consumer Price Index", "June 2026"),
     ("2026-07-15T08:30:00-04:00", "Producer Price Index", "June 2026"),
 ]
+ALGORITHM_DEFAULT_UNIVERSE = ["AAPL", "NVDA", "TSLA", "AMD", "META", "AMZN", "MSFT", "GOOGL", "PLTR", "SPY"]
+ALGORITHM_SIGNAL_CAPITAL = 1000
 
 quote_cache = {}
 candle_cache = {}
@@ -1982,6 +1984,105 @@ def build_scanner_row(symbol):
     }
 
 
+def build_algorithm_dashboard(tickers):
+    rows = []
+    clean_tickers = []
+    for ticker in tickers or []:
+        symbol = str(ticker or "").upper().strip()
+        if symbol and symbol not in clean_tickers:
+            clean_tickers.append(symbol)
+
+    if not clean_tickers:
+        clean_tickers = load_watchlist() or ALGORITHM_DEFAULT_UNIVERSE
+
+    for ticker in clean_tickers[:10]:
+        scanner_row = build_scanner_row(ticker)
+        if not scanner_row:
+            continue
+
+        signal = scanner_row.get("trade_signal") or {}
+        algorithm = signal.get("algorithm") or {}
+        action = signal.get("action") or "WAIT"
+        direction = 1 if action == "BUY" else -1 if action == "SELL" else 0
+        trades = 1 if direction else 0
+        signal_move = float(scanner_row.get("change") or 0)
+        model_pnl = round((signal_move / 100) * ALGORITHM_SIGNAL_CAPITAL * direction, 2) if trades else 0
+        wins = 1 if model_pnl > 0 else 0
+        losses = 1 if model_pnl < 0 else 0
+        confidence = int(signal.get("confidence") or scanner_row.get("continuation_probability") or 0)
+        win_rate = 100 if wins else 0 if trades else 0
+        algo_name = f"{ticker} Momentum AI"
+        risk_flags = algorithm.get("risk_flags") or []
+
+        rows.append({
+            "algo": algo_name,
+            "ticker": ticker,
+            "action": action,
+            "grade": signal.get("grade", "C"),
+            "confidence": confidence,
+            "trades": trades,
+            "wins": wins,
+            "losses": losses,
+            "win_rate": win_rate,
+            "total_pnl": model_pnl,
+            "gross_pnl": model_pnl,
+            "net_pnl": model_pnl,
+            "best_trade": model_pnl if model_pnl > 0 else 0,
+            "worst_trade": model_pnl if model_pnl < 0 else 0,
+            "momentum_score": scanner_row.get("momentum_score", {}).get("value", 0),
+            "continuation_probability": scanner_row.get("continuation_probability", 0),
+            "price": scanner_row.get("price", 0),
+            "change": scanner_row.get("change", 0),
+            "market_mode": scanner_row.get("market_mode", {}).get("label", "Balanced"),
+            "relative_volume": scanner_row.get("relative_volume", 1),
+            "reason": signal.get("reason", "Algorithm reason unavailable."),
+            "risk_flags": risk_flags,
+            "long_score": algorithm.get("long_score", 0),
+            "short_score": algorithm.get("short_score", 0),
+            "edge": algorithm.get("edge", 0)
+        })
+
+    rows.sort(key=lambda item: (item["trades"], item["net_pnl"], item["confidence"], item["momentum_score"]), reverse=True)
+    active_rows = [row for row in rows if row["trades"]]
+    total_pnl = round(sum(row["net_pnl"] for row in rows), 2)
+    total_trades = sum(row["trades"] for row in rows)
+    wins = sum(row["wins"] for row in rows)
+    best_trade = round(max([row["best_trade"] for row in rows] or [0]), 2)
+    worst_trade = round(min([row["worst_trade"] for row in rows] or [0]), 2)
+    win_rate = round((wins / total_trades) * 100, 1) if total_trades else 0
+    broker_connected = bool(
+        os.environ.get("BROKER_API_KEY")
+        or os.environ.get("ALPACA_API_KEY")
+        or os.environ.get("ALPACA_KEY_ID")
+    )
+
+    return {
+        "date": datetime.now(DEMO_TIMEZONE).strftime("%Y-%m-%d"),
+        "generated_at": datetime.now(DEMO_TIMEZONE).isoformat(),
+        "mode": "signal-only",
+        "live_trading": {
+            "enabled": False,
+            "broker_connected": broker_connected,
+            "label": "Broker detected, approval mode" if broker_connected else "Live execution locked",
+            "summary": (
+                "Broker keys are present. The final order adapter and risk-confirmation layer still need to be connected before real orders can route."
+                if broker_connected
+                else "The algorithm can generate live buy/sell decisions now. Real order routing stays locked until a broker adapter, account keys, and risk caps are connected."
+            )
+        },
+        "totals": {
+            "total_pnl": total_pnl,
+            "trades": total_trades,
+            "win_rate": win_rate,
+            "best_trade": best_trade,
+            "worst_trade": worst_trade,
+            "active_algos": len(active_rows),
+            "tracked_algos": len(rows)
+        },
+        "rows": rows[:10]
+    }
+
+
 def find_swing_levels(candles, tolerance=0.0035):
     if len(candles) < 7:
         return []
@@ -2897,6 +2998,18 @@ def scanner():
         "rows": rows,
         "hot_list": hot_list
     })
+
+
+@app.route("/algorithm-dashboard")
+def algorithm_dashboard_route():
+    raw_tickers = request.args.get("tickers", "").strip()
+    tickers = []
+    for ticker in raw_tickers.split(","):
+        clean = ticker.upper().strip()
+        if clean and clean not in tickers:
+            tickers.append(clean)
+
+    return jsonify(build_algorithm_dashboard(tickers))
 
 
 @app.route("/search-symbols")

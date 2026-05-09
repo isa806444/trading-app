@@ -1851,6 +1851,349 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
     font-size:13px;
   }
 }
+
+body {
+  font-family:"Bahnschrift", "Aptos", "Segoe UI", sans-serif;
+  background:
+    radial-gradient(circle at 18% 0%, rgba(20, 184, 166, 0.18), transparent 28%),
+    radial-gradient(circle at 84% 8%, rgba(59, 130, 246, 0.14), transparent 30%),
+    linear-gradient(180deg, #03070d 0%, #07111f 44%, #030712 100%);
+}
+
+.container {
+  max-width:1240px;
+}
+
+.algo-hero {
+  position:relative;
+  overflow:hidden;
+  border:1px solid rgba(45, 212, 191, 0.22);
+  border-radius:30px;
+  padding:28px;
+  background:
+    linear-gradient(135deg, rgba(8, 20, 33, 0.96), rgba(7, 36, 44, 0.9)),
+    radial-gradient(circle at 85% 20%, rgba(34, 197, 94, 0.25), transparent 28%);
+  box-shadow:0 28px 70px rgba(0, 0, 0, 0.36);
+}
+
+.algo-hero::after {
+  content:"";
+  position:absolute;
+  inset:auto -20% -55% 28%;
+  height:260px;
+  background:radial-gradient(circle, rgba(45, 212, 191, 0.18), transparent 62%);
+  pointer-events:none;
+}
+
+.algo-hero-grid {
+  position:relative;
+  z-index:1;
+  display:grid;
+  grid-template-columns:minmax(0, 1.2fr) minmax(280px, 0.8fr);
+  gap:22px;
+  align-items:stretch;
+}
+
+.algo-title {
+  margin:10px 0 0;
+  font-size:clamp(34px, 7vw, 76px);
+  line-height:0.92;
+  letter-spacing:-0.07em;
+  max-width:760px;
+}
+
+.algo-copy {
+  margin-top:14px;
+  color:#b7c7da;
+  max-width:640px;
+  font-size:15px;
+  line-height:1.6;
+}
+
+.algo-chip-row,
+.algo-actions,
+.algo-score-row {
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+}
+
+.algo-actions {
+  margin-top:18px;
+}
+
+.algo-primary,
+.algo-secondary {
+  border:0;
+  border-radius:16px;
+  padding:13px 16px;
+  font-weight:900;
+  cursor:pointer;
+}
+
+.algo-primary {
+  color:#03130f;
+  background:linear-gradient(135deg, #2dd4bf, #22c55e);
+  box-shadow:0 14px 34px rgba(34, 197, 94, 0.22);
+}
+
+.algo-secondary {
+  color:#dbeafe;
+  background:rgba(15, 23, 42, 0.72);
+  border:1px solid rgba(148, 163, 184, 0.24);
+}
+
+.algo-live-card,
+.algo-search-card,
+.algo-board,
+.algo-result-card {
+  border:1px solid rgba(148, 163, 184, 0.18);
+  border-radius:24px;
+  background:rgba(6, 14, 27, 0.78);
+  box-shadow:0 20px 52px rgba(0, 0, 0, 0.24);
+}
+
+.algo-live-card {
+  padding:20px;
+  backdrop-filter:blur(16px);
+}
+
+.algo-live-orb {
+  width:54px;
+  height:54px;
+  border-radius:50%;
+  margin-bottom:16px;
+  background:radial-gradient(circle, #34d399 0 22%, rgba(52, 211, 153, 0.18) 24% 54%, transparent 56%);
+  box-shadow:0 0 34px rgba(52, 211, 153, 0.5);
+}
+
+.algo-live-label {
+  color:#99f6e4;
+  font-size:12px;
+  text-transform:uppercase;
+  letter-spacing:0.12em;
+}
+
+.algo-live-title {
+  margin-top:8px;
+  font-size:24px;
+  font-weight:900;
+}
+
+.algo-live-copy {
+  margin-top:10px;
+  color:#a9bad0;
+  line-height:1.5;
+  font-size:13px;
+}
+
+.algo-control-grid {
+  display:grid;
+  grid-template-columns:1fr auto;
+  gap:14px;
+  margin:18px 0;
+}
+
+.algo-search-card,
+.algo-board,
+.algo-result-card {
+  padding:18px;
+}
+
+.algo-search-row {
+  display:grid;
+  grid-template-columns:minmax(0, 1fr) auto;
+  gap:12px;
+  margin-top:12px;
+}
+
+.algo-board {
+  margin-bottom:18px;
+}
+
+.algo-board-head {
+  display:flex;
+  justify-content:space-between;
+  gap:14px;
+  align-items:flex-start;
+  flex-wrap:wrap;
+  margin-bottom:16px;
+}
+
+.algo-stat-grid {
+  display:grid;
+  grid-template-columns:repeat(5, minmax(120px, 1fr));
+  gap:10px;
+  margin-bottom:16px;
+}
+
+.algo-stat {
+  border:1px solid rgba(148, 163, 184, 0.16);
+  border-radius:18px;
+  padding:14px;
+  background:linear-gradient(180deg, rgba(15, 23, 42, 0.82), rgba(2, 6, 23, 0.66));
+}
+
+.algo-stat-label {
+  color:#8aa0ba;
+  font-size:11px;
+  text-transform:uppercase;
+  letter-spacing:0.08em;
+}
+
+.algo-stat-value {
+  margin-top:7px;
+  font-size:24px;
+  font-weight:900;
+}
+
+.algo-table-wrap {
+  overflow:auto;
+  border:1px solid rgba(148, 163, 184, 0.14);
+  border-radius:18px;
+}
+
+.algo-table {
+  width:100%;
+  border-collapse:collapse;
+  min-width:820px;
+}
+
+.algo-table th,
+.algo-table td {
+  padding:12px 14px;
+  border-bottom:1px solid rgba(148, 163, 184, 0.12);
+  text-align:left;
+  font-size:13px;
+}
+
+.algo-table th {
+  color:#8aa0ba;
+  font-size:11px;
+  text-transform:uppercase;
+  letter-spacing:0.08em;
+  background:rgba(15, 23, 42, 0.72);
+}
+
+.algo-name {
+  font-weight:900;
+  color:#f8fafc;
+}
+
+.algo-sub {
+  color:#8aa0ba;
+  font-size:12px;
+  margin-top:3px;
+}
+
+.algo-pill {
+  display:inline-flex;
+  padding:6px 9px;
+  border-radius:999px;
+  font-weight:900;
+  font-size:12px;
+  border:1px solid rgba(148, 163, 184, 0.2);
+}
+
+.algo-pill.buy {
+  color:#86efac;
+  background:rgba(22, 101, 52, 0.28);
+  border-color:rgba(34, 197, 94, 0.36);
+}
+
+.algo-pill.sell {
+  color:#fca5a5;
+  background:rgba(127, 29, 29, 0.3);
+  border-color:rgba(239, 68, 68, 0.36);
+}
+
+.algo-pill.wait {
+  color:#fde68a;
+  background:rgba(120, 53, 15, 0.28);
+  border-color:rgba(245, 158, 11, 0.32);
+}
+
+.algo-bars {
+  display:grid;
+  gap:10px;
+  margin-top:16px;
+}
+
+.algo-bar-row {
+  display:grid;
+  grid-template-columns:110px minmax(0, 1fr) 92px;
+  gap:10px;
+  align-items:center;
+}
+
+.algo-bar-track {
+  position:relative;
+  height:18px;
+  border-radius:999px;
+  background:rgba(15, 23, 42, 0.9);
+  overflow:hidden;
+}
+
+.algo-bar-fill {
+  position:absolute;
+  top:0;
+  bottom:0;
+  left:50%;
+  border-radius:999px;
+  background:linear-gradient(90deg, #14b8a6, #22c55e);
+}
+
+.algo-bar-fill.negative {
+  left:auto;
+  right:50%;
+  background:linear-gradient(90deg, #ef4444, #f97316);
+}
+
+.algo-decision-grid {
+  display:grid;
+  grid-template-columns:minmax(0, 1fr) minmax(280px, 0.72fr);
+  gap:16px;
+}
+
+.algo-decision-price {
+  font-size:clamp(38px, 8vw, 72px);
+  line-height:0.92;
+  font-weight:900;
+  letter-spacing:-0.06em;
+}
+
+.algo-empty {
+  padding:26px;
+  border-radius:22px;
+  border:1px dashed rgba(148, 163, 184, 0.24);
+  color:#9fb1c8;
+  background:rgba(15, 23, 42, 0.36);
+}
+
+@media (max-width:860px){
+  .algo-hero,
+  .algo-board,
+  .algo-search-card,
+  .algo-result-card {
+    border-radius:22px;
+    padding:16px;
+  }
+
+  .algo-hero-grid,
+  .algo-control-grid,
+  .algo-search-row,
+  .algo-decision-grid {
+    grid-template-columns:1fr;
+  }
+
+  .algo-stat-grid {
+    grid-template-columns:repeat(2, minmax(0, 1fr));
+  }
+
+  .algo-bar-row {
+    grid-template-columns:78px minmax(0, 1fr) 76px;
+  }
+}
 </style>
 </head>
 
@@ -1876,62 +2219,64 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
   </div>
 
   <div id="marketView" class="view-panel market-stack">
-  <div id="heroCard" class="hero-card compact">
-    <div class="hero-eyebrow">Trading Workspace</div>
-    <div class="hero-title">Trade the stock in front of you.</div>
-    <div class="hero-copy">Search, read the move, and act. The page stays focused on price, setup, chart, and the few things that matter most.</div>
-    <div class="hero-chip-row">
-      <div class="hero-chip live" id="providerChip">Market data connected</div>
-      <div class="hero-chip" id="alertsChip">Alerts idle</div>
-      <div class="hero-chip premium" id="premiumChip">Free plan</div>
-    </div>
-    <div class="action-card-grid">
-      <div class="hero-step"><strong>Search</strong><span>Ticker or company name</span></div>
-      <div class="hero-step"><strong>Analyze</strong><span>Signal, levels, and chart</span></div>
-      <div class="hero-step"><strong>Track</strong><span>Watchlist, alerts, and trades</span></div>
-    </div>
-  </div>
-
-  <div class="control-card" style="margin-bottom:18px;">
-    <div class="section-kicker">AI Trade Helper</div>
-    <div class="section-title">Built for cleaner trade planning, not chart watching</div>
-    <div class="compact-copy">Search a ticker to get the setup grade, trade plan, recent news, alerts, and portfolio context in one place.</div>
-  </div>
-
-  <div class="control-card">
-    <div class="section-head">
+  <section id="heroCard" class="algo-hero">
+    <div class="algo-hero-grid">
       <div>
-        <div class="section-kicker">Market Search</div>
-        <div class="section-title">Find the stock you want fast</div>
+        <div class="hero-eyebrow">AI Algorithm Terminal</div>
+        <h1 class="algo-title">One brain. Ten algos. Live decisions.</h1>
+        <div class="algo-copy">The app now opens around the algorithm first: scan the board, rank buy/sell pressure, arm alerts, and keep real-money execution locked until the broker and risk controls are connected.</div>
+        <div class="hero-chip-row">
+          <div class="hero-chip live" id="providerChip">Polygon connected</div>
+          <div class="hero-chip" id="alertsChip">Alerts idle</div>
+          <div class="hero-chip premium" id="premiumChip">Free plan</div>
+        </div>
+        <div class="algo-actions">
+          <button class="algo-primary" onclick="loadAlgorithmDashboard(true)">Run Algorithm</button>
+          <button class="algo-secondary" onclick="manualRefresh()">Refresh Ticker</button>
+        </div>
       </div>
-      <div class="helper-pill">Ticker or company name</div>
+      <div id="algoLivePanel" class="algo-live-card">
+        <div class="algo-live-orb"></div>
+        <div class="algo-live-label">Execution Status</div>
+        <div class="algo-live-title">Live trading locked</div>
+        <div class="algo-live-copy">The model can produce live buy/sell decisions now. Real order routing needs a broker adapter and strict risk caps before it can send money.</div>
+      </div>
     </div>
-    <div class="top">
-      <div class="search-wrap">
-        <input id="ticker" placeholder="Search ticker or company name"/>
-        <div id="searchSuggestions" class="search-suggestions hidden"></div>
-        <div class="search-helper">Try `AAPL`, `Apple`, `Microsoft`, or `NVDA`</div>
+  </section>
+
+  <div class="algo-control-grid">
+    <div class="algo-search-card">
+      <div class="section-head">
+        <div>
+          <div class="section-kicker">Ask The Algorithm</div>
+          <div class="section-title">Search one ticker or run the full board</div>
+        </div>
+        <div class="helper-pill">Momentum engine always on</div>
       </div>
-      <button class="analyze-btn" onclick="analyze()">Analyze</button>
+      <div class="algo-search-row">
+        <div class="search-wrap">
+          <input id="ticker" placeholder="Ticker or company name"/>
+          <div id="searchSuggestions" class="search-suggestions hidden"></div>
+          <div class="search-helper">Try AAPL, Tesla, NVDA, AMD, or SPY</div>
+        </div>
+        <button class="analyze-btn algo-primary" onclick="analyze()">Analyze</button>
+      </div>
+    </div>
+    <div class="algo-live-card">
+      <div class="algo-live-label">Last Updated</div>
+      <div class="algo-live-title" id="lastUpdated">Waiting for data...</div>
+      <div class="algo-live-copy">The dashboard refreshes manually so your Polygon usage stays controlled.</div>
+      <div class="algo-actions">
+        <button id="refreshBtn" class="algo-secondary" onclick="manualRefresh()">Refresh Now</button>
+      </div>
     </div>
   </div>
 
-  <div class="market-bar">
-    <div class="market-meta">
-      <div class="market-label">Last Updated</div>
-      <div class="market-value" id="lastUpdated">Waiting for data...</div>
-    </div>
-    <button id="refreshBtn" onclick="manualRefresh()">Refresh Now</button>
+  <div id="algoDashboard" class="algo-board">
+    <div class="algo-empty">Run the algorithm to load daily results, per-algo breakdown, and performance bars.</div>
   </div>
 
-  <div class="strategy" id="strategyBar">
-    <button data-s="scalp">Scalp</button>
-    <button data-s="day" class="active">Day</button>
-    <button data-s="swing">Swing</button>
-    <button data-s="momentum">Momentum</button>
-    <button data-s="mean">Mean</button>
-  </div>
-  <div id="result" class="result-shell"></div>
+  <div id="result" class="algo-result-card"></div>
   <div id="status"></div>
 
   <div id="marketInsights" class="insights-shell"></div>
@@ -2012,9 +2357,9 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
   </div>
 
   <div class="bottom-nav">
-      <button id="marketNav" class="active" onclick="switchView('market')">Market</button>
-      <button id="portfolioNav" onclick="switchView('portfolio')">Portfolio</button>
-      <button id="scannerNav" onclick="switchView('scanner')">Movers</button>
+      <button id="marketNav" class="active" onclick="switchView('market')">Algorithm</button>
+      <button id="portfolioNav" onclick="switchView('portfolio')">Journal</button>
+      <button id="scannerNav" onclick="switchView('scanner')">Results</button>
     </div>
 
 </div>
@@ -2098,7 +2443,7 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
 </div>
 
 <script>
-let strategy = "day";
+let strategy = "momentum";
 let timeframe = "5m";
 let lastTicker = null;
 let watchlist = [];
@@ -2148,6 +2493,7 @@ let latestAnalyzedSnapshot = null;
 let searchSuggestions = [];
 let searchDebounce = null;
 let latestHotList = [];
+let latestAlgorithmDashboard = null;
 let portfolioCoachState = null;
 let portfolioReviewState = [];
 let portfolioStreakState = null;
@@ -2199,23 +2545,20 @@ function updateProviderChip(label, tone=""){
 }
 
 function setOnboardingVisible(visible){
-  const hero = document.getElementById("heroCard");
-  if(hero){
-    hero.style.display = visible ? "" : "none";
-  }
+  return;
 }
 
-function renderMarketEmptyState(title="Search a stock or company name to begin.", copy="You will see the latest price move, trade plan, setup grade, key levels, and recent news once a ticker is analyzed."){
+function renderMarketEmptyState(title="Run the algorithm or search one ticker.", copy="The AI engine will return a buy, sell, or wait decision with scores, levels, and alert buttons."){
     const result = document.getElementById("result");
     const insights = document.getElementById("marketInsights");
     result.innerHTML = `
-      <div class="empty-state">
+      <div class="algo-empty">
         <div class="empty-title">${title}</div>
       <div class="empty-copy">${copy}</div>
       <div class="empty-grid">
         <div class="empty-tip">Use a ticker like <strong>AAPL</strong> or a company name like <strong>Apple</strong>.</div>
-        <div class="empty-tip">Use the analysis card to spot the best entry, stop, and target ideas fast.</div>
-        <div class="empty-tip">Save strong names to the watchlist or create an alert from the ticker card when a setup looks interesting.</div>
+        <div class="empty-tip">The algorithm requires multiple confirmations before calling a strong setup.</div>
+        <div class="empty-tip">Real-money routing stays locked until a broker adapter and risk caps are connected.</div>
         </div>
       </div>
     `;
@@ -3454,6 +3797,157 @@ function formatPercent(value){
   return `${amount >= 0 ? "+" : ""}${amount.toFixed(2)}%`;
 }
 
+function getAlgoPillClass(action){
+  if(action === "BUY") return "buy";
+  if(action === "SELL") return "sell";
+  return "wait";
+}
+
+function renderAlgoLivePanel(payload){
+  const panel = document.getElementById("algoLivePanel");
+  if(!panel){
+    return;
+  }
+
+  const live = payload?.live_trading || {};
+  panel.innerHTML = `
+    <div class="algo-live-orb"></div>
+    <div class="algo-live-label">Execution Status</div>
+    <div class="algo-live-title">${live.label || "Live execution locked"}</div>
+    <div class="algo-live-copy">${live.summary || "The algorithm can generate live decisions now. Real orders stay locked until broker routing and risk limits are connected."}</div>
+    <div class="confirmation-list" style="margin-top:14px;">
+      <div class="confirmation-pill">${live.broker_connected ? "Broker detected" : "Broker not connected"}</div>
+      <div class="confirmation-pill">${live.enabled ? "Auto trading enabled" : "Manual approval only"}</div>
+    </div>
+  `;
+}
+
+function renderAlgorithmDashboard(payload){
+  const container = document.getElementById("algoDashboard");
+  if(!container){
+    return;
+  }
+
+  const totals = payload?.totals || {};
+  const rows = Array.isArray(payload?.rows) ? payload.rows : [];
+  const maxAbsPnl = Math.max(1, ...rows.map(row => Math.abs(Number(row.net_pnl || 0))));
+  const generated = payload?.generated_at ? new Date(payload.generated_at) : new Date();
+
+  renderAlgoLivePanel(payload);
+
+  if(!rows.length){
+    container.innerHTML = '<div class="algo-empty">No algorithm rows loaded yet. Add tickers to the watchlist or run again in a moment.</div>';
+    return;
+  }
+
+  container.innerHTML = `
+    <div class="algo-board-head">
+      <div>
+        <div class="section-kicker">Algorithm Results</div>
+        <div class="section-title">Results for ${payload.date || "today"}</div>
+        <div class="compact-copy">Model P/L is a signal-performance estimate using a $1,000 reference size per active decision, not a real filled order.</div>
+      </div>
+      <button class="algo-secondary" onclick="loadAlgorithmDashboard(true)">Refresh Board</button>
+    </div>
+
+    <div class="algo-stat-grid">
+      <div class="algo-stat">
+        <div class="algo-stat-label">Total P/L</div>
+        <div class="algo-stat-value ${Number(totals.total_pnl || 0) >= 0 ? "up" : "down"}">${formatMoney(totals.total_pnl || 0)}</div>
+      </div>
+      <div class="algo-stat">
+        <div class="algo-stat-label">Trades</div>
+        <div class="algo-stat-value">${totals.trades || 0}</div>
+      </div>
+      <div class="algo-stat">
+        <div class="algo-stat-label">Win Rate</div>
+        <div class="algo-stat-value">${Number(totals.win_rate || 0).toFixed(1)}%</div>
+      </div>
+      <div class="algo-stat">
+        <div class="algo-stat-label">Best Trade</div>
+        <div class="algo-stat-value up">${formatMoney(totals.best_trade || 0)}</div>
+      </div>
+      <div class="algo-stat">
+        <div class="algo-stat-label">Worst Trade</div>
+        <div class="algo-stat-value down">${formatMoney(totals.worst_trade || 0)}</div>
+      </div>
+    </div>
+
+    <div class="algo-table-wrap">
+      <table class="algo-table">
+        <thead>
+          <tr>
+            <th>Algo</th>
+            <th>Decision</th>
+            <th>Confidence</th>
+            <th>Win Rate</th>
+            <th>Total P/L</th>
+            <th>Best</th>
+            <th>Worst</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map(row => `
+            <tr>
+              <td>
+                <div class="algo-name">${row.algo}</div>
+                <div class="algo-sub">${row.ticker} | ${row.market_mode || "Balanced"} | Vol ${Number(row.relative_volume || 1).toFixed(2)}x</div>
+              </td>
+              <td><span class="algo-pill ${getAlgoPillClass(row.action)}">${row.action || "WAIT"} ${row.grade || "C"}</span></td>
+              <td>${row.confidence || 0}%</td>
+              <td>${Number(row.win_rate || 0).toFixed(1)}%</td>
+              <td class="${Number(row.net_pnl || 0) >= 0 ? "up" : "down"}">${formatMoney(row.net_pnl || 0)}</td>
+              <td class="up">${formatMoney(row.best_trade || 0)}</td>
+              <td class="down">${formatMoney(row.worst_trade || 0)}</td>
+              <td><button class="ghost-btn" onclick="analyze('${row.ticker}')">Open</button></td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="algo-bars">
+      ${rows.map(row => {
+        const pnl = Number(row.net_pnl || 0);
+        const width = Math.max(2, Math.min(50, (Math.abs(pnl) / maxAbsPnl) * 50));
+        return `
+          <div class="algo-bar-row">
+            <div class="algo-sub">${row.ticker}</div>
+            <div class="algo-bar-track">
+              <div class="algo-bar-fill ${pnl < 0 ? "negative" : ""}" style="width:${width}%;"></div>
+            </div>
+            <div class="${pnl >= 0 ? "up" : "down"}">${formatMoney(pnl)}</div>
+          </div>
+        `;
+      }).join("")}
+    </div>
+    <div class="algo-sub" style="margin-top:12px;">Updated ${liveEtTimeFormatter.format(generated)} ET</div>
+  `;
+}
+
+async function loadAlgorithmDashboard(force=false){
+  const container = document.getElementById("algoDashboard");
+  if(container){
+    container.innerHTML = '<div class="algo-empty">Running the algorithm across the board...</div>';
+  }
+
+  try{
+    const universe = [...new Set([...(watchlist || []), ...TOP_MOVERS_UNIVERSE])].slice(0, 10);
+    const params = new URLSearchParams({ tickers: universe.join(",") });
+    const res = await fetch(`/algorithm-dashboard?${params.toString()}`);
+    const payload = await res.json();
+    latestAlgorithmDashboard = payload;
+    renderAlgorithmDashboard(payload);
+    setLastUpdated(`Algorithm refreshed at ${liveEtTimeFormatter.format(new Date())} ET`);
+  }catch(err){
+    console.log("Algorithm dashboard failed", err);
+    if(container){
+      container.innerHTML = '<div class="algo-empty">The algorithm board could not load. Try Refresh Board in a moment.</div>';
+    }
+  }
+}
+
 function getTickerSnapshot(ticker){
   return watchlistData.find(item => item.ticker === ticker) || null;
 }
@@ -3889,7 +4383,7 @@ function manualRefresh(){
   if(lastTicker){
     analyze(lastTicker);
   }else{
-    setStatus("Search a ticker first, then you can manually refresh it here.", "warning");
+    loadAlgorithmDashboard(true);
   }
 }
 
@@ -5113,53 +5607,39 @@ async function analyze(sym){
     setOnboardingVisible(false);
 
     document.getElementById("result").innerHTML = `
-      <div class="card">
-        <div class="ticker-label">${d.ticker}</div>
-        <div class="market-hero-grid">
-          <div class="market-main-card">
-            <div class="price-row">
-              <div id="livePrice" class="price">$${d.price}</div>
-              <div id="liveChange" class="change-pill ${d.change>=0?'up':'down'}">
-                <span class="trend-arrow">${getTrendArrow(d.change)}</span>
-                <span>${d.dollar_change>=0?'+':''}$${Math.abs(d.dollar_change).toFixed(2)} | ${d.change>=0?'+':''}${d.change}%</span>
+      <div class="algo-decision-grid">
+        <div>
+          <div class="ticker-label">${d.ticker}</div>
+          <div class="algo-decision-price" id="livePrice">$${Number(d.price || 0).toFixed(2)}</div>
+          <div id="liveChange" class="change-pill ${d.change>=0?'up':'down'}" style="margin:12px 0 16px;">
+            <span class="trend-arrow">${getTrendArrow(d.change)}</span>
+            <span>${d.dollar_change>=0?'+':''}$${Math.abs(d.dollar_change).toFixed(2)} | ${d.change>=0?'+':''}${d.change}%</span>
+          </div>
+          <div class="analytics-grid">
+            ${renderAnalyticsCard("Decision", d.indicators?.trade_signal?.action || "WAIT", d.indicators?.trade_signal?.action === "BUY" ? "up" : d.indicators?.trade_signal?.action === "SELL" ? "down" : "", `${d.indicators?.trade_signal?.grade || "C"} grade`)}
+            ${renderAnalyticsCard("Momentum", String(d.momentum_score?.value || "--"), "", d.momentum_score?.label || "Momentum read")}
+            ${renderAnalyticsCard("Buy Score", String(d.indicators?.trade_signal?.algorithm?.long_score || "--"))}
+            ${renderAnalyticsCard("Sell Score", String(d.indicators?.trade_signal?.algorithm?.short_score || "--"))}
+          </div>
+          <div class="section-stack" style="margin-top:14px;">
+            <div class="soft-section">
+              <div class="section-title-row">
+                <div>Algorithm Trade Plan</div>
+                <div class="helper-pill">Momentum AI</div>
               </div>
+              <div class="indicator-meta">Entry: $${Number(d.plan.entry || 0).toFixed(2)} | Stop: $${Number(d.plan.stop || 0).toFixed(2)} | Targets: ${(d.plan.targets || []).map(value => `$${Number(value).toFixed(2)}`).join(", ")}</div>
+              <div class="indicator-meta">${d.indicators?.trade_signal?.reason || d.summary || ""}</div>
             </div>
-            <div class="analytics-grid">
-              ${renderAnalyticsCard("Momentum Score", String(d.momentum_score?.value || "--"), "", d.momentum_score?.label || "Momentum read")}
-              ${renderAnalyticsCard("Market Mode", d.market_mode?.label || "--", "", d.market_mode?.summary || "Tape context")}
-              ${renderAnalyticsCard("Support", `$${Number(d.levels?.support || 0).toFixed(2)}`)}
-              ${renderAnalyticsCard("Resistance", `$${Number(d.levels?.resistance || 0).toFixed(2)}`)}
-            </div>
+            ${renderSmartAlerts(d.smart_alerts)}
             <div class="action-row">
               <div id="watchAction">${getWatchButtonMarkup(d.ticker)}</div>
             </div>
             ${renderPaperActions(d.ticker)}
           </div>
-          <div class="market-side-card">
-            ${renderTradeSignal(d.indicators?.trade_signal)}
-          </div>
         </div>
-
-        <div class="section-stack">
-          <div class="soft-section">
-            <div class="section-title-row">
-              <div>Trade Plan</div>
-              <div class="helper-pill">${strategy.toUpperCase()}</div>
-            </div>
-            <div class="indicator-meta">Entry: ${d.plan.entry}</div>
-            <div class="indicator-meta">Stop: ${d.plan.stop}</div>
-            <div class="indicator-meta">Targets: ${d.plan.targets.join(", ")}</div>
-          </div>
-
-          <div class="soft-section">
-            <div class="section-title-row">
-              <div>Why This Setup</div>
-            </div>
-            <div class="indicator-meta">${d.summary}</div>
-          </div>
-
+        <div>
+          ${renderTradeSignal(d.indicators?.trade_signal)}
           ${renderAiSetupCard(d.ai_setup)}
-          ${renderSmartAlerts(d.smart_alerts)}
         </div>
       </div>
       `;
@@ -5308,6 +5788,7 @@ async function initializeApp(){
   renderPortfolioContext();
   switchView(currentView || "market");
   await loadWatchlist();
+  await loadAlgorithmDashboard();
   if(currentView === "scanner"){
     await runScanner();
   }

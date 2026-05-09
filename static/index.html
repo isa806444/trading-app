@@ -2226,13 +2226,14 @@ body {
         <h1 class="algo-title">One brain. Ten algos. Live decisions.</h1>
         <div class="algo-copy">The app now opens around the algorithm first: scan the board, rank buy/sell pressure, arm alerts, and keep real-money execution locked until the broker and risk controls are connected.</div>
         <div class="hero-chip-row">
-          <div class="hero-chip live" id="providerChip">Polygon connected</div>
+          <div class="hero-chip live" id="providerChip">Databento connected</div>
           <div class="hero-chip" id="alertsChip">Alerts idle</div>
           <div class="hero-chip premium" id="premiumChip">Free plan</div>
         </div>
         <div class="algo-actions">
           <button class="algo-primary" onclick="loadAlgorithmDashboard(true)">Run Algorithm</button>
           <button class="algo-secondary" onclick="manualRefresh()">Refresh Ticker</button>
+          <button class="algo-secondary" onclick="window.open('/pine-script','_blank')">Export Pine Script</button>
         </div>
       </div>
       <div id="algoLivePanel" class="algo-live-card">
@@ -2265,7 +2266,7 @@ body {
     <div class="algo-live-card">
       <div class="algo-live-label">Last Updated</div>
       <div class="algo-live-title" id="lastUpdated">Waiting for data...</div>
-      <div class="algo-live-copy">The dashboard refreshes manually so your Polygon usage stays controlled.</div>
+      <div class="algo-live-copy">The dashboard refreshes manually so your Databento usage stays controlled.</div>
       <div class="algo-actions">
         <button id="refreshBtn" class="algo-secondary" onclick="manualRefresh()">Refresh Now</button>
       </div>
@@ -5581,8 +5582,8 @@ async function analyze(sym){
       statusMessage = `Showing recent cached quote data from ${Math.round(d.cache_age_seconds)}s ago.`;
       setLastUpdated(`Cached quote ${formatAge(d.cache_age_seconds)}`);
     }else{
-      updateProviderChip("Live market data");
-      setLastUpdated(`Live quote just updated at ${liveEtTimeFormatter.format(new Date())} ET`);
+      updateProviderChip(d.data_source === "databento" ? "Databento market data" : "Live market data");
+      setLastUpdated(`${d.data_source === "databento" ? "Databento" : "Live"} quote updated at ${liveEtTimeFormatter.format(new Date())} ET`);
     }
 
     latestQuotes[t] = d.price;

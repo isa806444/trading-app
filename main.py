@@ -1,6 +1,6 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from flask import Flask, jsonify, request, send_from_directory, session, has_request_context
+from flask import Flask, Response, jsonify, request, send_from_directory, session, has_request_context
 from flask_cors import CORS
 import hashlib
 import json
@@ -21,6 +21,9 @@ WATCHLIST_FILE = "watchlist.json"
 MARKET_CACHE_FILE = "market_cache.json"
 POLYGON_BASE_URL = "https://api.polygon.io"
 POLYGON_API_KEY_ENV = "POLYGON_API_KEY"
+DATABENTO_API_KEY_ENV = "DATABENTO_API_KEY"
+DATABENTO_DATASET_ENV = "DATABENTO_DATASET"
+DATABENTO_SCHEMA_ENV = "DATABENTO_SCHEMA"
 DATABASE_URL_ENV = "DATABASE_URL"
 STRIPE_SECRET_KEY_ENV = "STRIPE_SECRET_KEY"
 STRIPE_PUBLISHABLE_KEY_ENV = "STRIPE_PUBLISHABLE_KEY"
@@ -92,6 +95,18 @@ if os.environ.get(STRIPE_SECRET_KEY_ENV, "").strip():
 
 def get_polygon_api_key():
     return os.environ.get(POLYGON_API_KEY_ENV, "").strip()
+
+
+def get_databento_api_key():
+    return os.environ.get(DATABENTO_API_KEY_ENV, "").strip()
+
+
+def get_databento_dataset():
+    return os.environ.get(DATABENTO_DATASET_ENV, "EQUS.MINI").strip() or "EQUS.MINI"
+
+
+def get_databento_schema():
+    return os.environ.get(DATABENTO_SCHEMA_ENV, "").strip()
 
 
 def get_stripe_secret_key():
@@ -973,7 +988,7 @@ def get_quote_from_candles(symbol, preferred_source="cache"):
     return {
         "data": quote_data,
         "source": preferred_source,
-        "cached": preferred_source != "live",
+        "cached": preferred_source == "cache",
         "stale": cached["stale"],
         "age_seconds": cached["age_seconds"]
     }
@@ -989,6 +1004,131 @@ def get_polygon_range_config(tf):
     if tf == "1d":
         return {"multiplier": 1, "timespan": "day", "days": 60}
     return {"multiplier": 5, "timespan": "minute", "days": 5}
+
+
+def get_databento_range_config(tf):
+    configured_schema = get_databento_schema()
+    if tf == "1d":
+        return {"schema": configured_schema or "ohlcv-1d", "days": 120, "resample_seconds": None}
+    if tf == "15m":
+        return {"schema": configured_schema or "ohlcv-1m", "days": 10, "resample_seconds": 15 * 60}
+    if tf == "5m":
+        return {"schema": configured_schema or "ohlcv-1m", "days": 5, "resample_seconds": 5 * 60}
+    return {"schema": configured_schema or "ohlcv-1m", "days": 2, "resample_seconds": None}
+
+
+def parse_databento_timestamp(value):
+    if value is None:
+        return None
+    try:
+        if hasattr(value, "timestamp"):
+            return int(value.timestamp())
+        if isinstance(value, (int, float)):
+            return int(value / 1_000_000_000) if value > 10_000_000_000 else int(value)
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return int(parsed.timestamp())
+    except (TypeError, ValueError, OSError):
+        return None
+
+
+def normalize_databento_ohlcv(df, symbol):
+    if df is None or getattr(df, "empty", True):
+        return []
+
+    frame = df.reset_index() if hasattr(df, "reset_index") else df
+    time_column = None
+    sample_columns = list(getattr(frame, "columns", []))
+    for candidate in ("ts_event", "ts_recv", "time", "index", "datetime"):
+        if candidate in sample_columns:
+            time_column = candidate
+            break
+
+    candles = []
+    for _, row in frame.iterrows():
+        row_symbol = str(row.get("symbol") or row.get("raw_symbol") or "").upper().strip()
+        if row_symbol and row_symbol != symbol:
+            continue
+        timestamp = parse_databento_timestamp(row.get(time_column)) if time_column else None
+        if timestamp is None:
+            continue
+        try:
+            open_price = float(row.get("open"))
+            high_price = float(row.get("high"))
+            low_price = float(row.get("low"))
+            close_price = float(row.get("close"))
+            volume = int(float(row.get("volume") or 0))
+        except (TypeError, ValueError):
+            continue
+        candles.append({
+            "time": timestamp,
+            "open": round(open_price, 4),
+            "high": round(max(high_price, open_price, close_price), 4),
+            "low": round(min(low_price, open_price, close_price), 4),
+            "close": round(close_price, 4),
+            "volume": volume
+        })
+
+    candles.sort(key=lambda item: item["time"])
+    return candles
+
+
+def resample_candles(candles, seconds):
+    if not candles or not seconds:
+        return candles
+
+    buckets = []
+    current = None
+    for candle in sorted(candles, key=lambda item: item["time"]):
+        bucket_time = candle["time"] - (candle["time"] % seconds)
+        if not current or current["time"] != bucket_time:
+            if current:
+                buckets.append(current)
+            current = {
+                "time": bucket_time,
+                "open": candle["open"],
+                "high": candle["high"],
+                "low": candle["low"],
+                "close": candle["close"],
+                "volume": candle.get("volume", 0)
+            }
+            continue
+        current["high"] = max(current["high"], candle["high"])
+        current["low"] = min(current["low"], candle["low"])
+        current["close"] = candle["close"]
+        current["volume"] += candle.get("volume", 0)
+
+    if current:
+        buckets.append(current)
+    return buckets
+
+
+def fetch_databento_candles(symbol, tf):
+    api_key = get_databento_api_key()
+    if not api_key:
+        return None
+
+    try:
+        import databento as db
+    except ImportError:
+        print("Databento package is not installed. Install requirements to enable Databento data.")
+        return None
+
+    config = get_databento_range_config(tf)
+    end_dt = datetime.now(tz=ZoneInfo("UTC"))
+    start_dt = end_dt - timedelta(days=config["days"])
+    client = db.Historical(api_key)
+    data = client.timeseries.get_range(
+        dataset=get_databento_dataset(),
+        schema=config["schema"],
+        symbols=[symbol],
+        stype_in="raw_symbol",
+        start=start_dt.isoformat(),
+        end=end_dt.isoformat(),
+    )
+    candles = normalize_databento_ohlcv(data.to_df(), symbol)
+    if config["resample_seconds"] and config["schema"] == "ohlcv-1m":
+        candles = resample_candles(candles, config["resample_seconds"])
+    return candles or None
 
 
 def fetch_polygon_candles(symbol, tf):
@@ -1212,8 +1352,11 @@ def fetch_and_cache_candles(symbol, tf):
         }
 
     try:
-        candle_rows = fetch_polygon_candles(symbol, tf) if get_polygon_api_key() else None
-        source = "live"
+        candle_rows = fetch_databento_candles(symbol, tf) if get_databento_api_key() else None
+        source = "databento" if candle_rows else None
+        if not candle_rows:
+            candle_rows = fetch_polygon_candles(symbol, tf) if get_polygon_api_key() else None
+            source = "polygon" if candle_rows else None
 
         if not candle_rows:
             if cached_candles:
@@ -1232,7 +1375,7 @@ def fetch_and_cache_candles(symbol, tf):
 
         return {
             "candles": candle_rows,
-            "source": source,
+            "source": source or "live",
             "cached": False,
             "stale": False,
             "age_seconds": 0
@@ -3010,6 +3153,17 @@ def algorithm_dashboard_route():
             tickers.append(clean)
 
     return jsonify(build_algorithm_dashboard(tickers))
+
+
+@app.route("/pine-script")
+def pine_script_route():
+    from algo_research.pinescript import build_pine_script
+
+    return Response(
+        build_pine_script(),
+        mimetype="text/plain",
+        headers={"Content-Disposition": "inline; filename=ai_algorithm_strategy.pine"}
+    )
 
 
 @app.route("/search-symbols")

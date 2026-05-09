@@ -1,0 +1,33 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Run AI Databento Backtest",
+      "type": "shell",
+      "command": "python",
+      "args": [
+        "-m",
+        "algo_research.run_backtest",
+        "--symbol",
+        "AAPL",
+        "--start",
+        "2026-05-01T13:30:00Z",
+        "--end",
+        "2026-05-08T20:00:00Z"
+      ],
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "Export TradingView Pine Script",
+      "type": "shell",
+      "command": "python",
+      "args": [
+        "-m",
+        "algo_research.export_pine"
+      ],
+      "group": "build",
+      "problemMatcher": []
+    }
+  ]
+}

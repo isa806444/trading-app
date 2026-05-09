@@ -1,0 +1,6 @@
+databento>=0.64.0
+pandas>=2.2.0
+numpy>=2.0.0
+matplotlib>=3.8.0
+ipykernel>=6.29.0
+notebook>=7.2.0

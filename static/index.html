@@ -2226,8 +2226,10 @@ body {
 
   <details id="messagesPanel" class="messages-panel details-panel">
     <summary>Messages</summary>
-    <div class="paper-subtitle">Triggered alerts will appear here</div>
+    <div class="paper-subtitle">Triggered alerts and algorithm demo trades will appear here</div>
     <div class="details-body">
+      <div class="paper-summary" id="botTradeSummary">No algorithm trades yet.</div>
+      <div class="alert-list" id="botTradeList"></div>
       <div class="paper-summary" id="alertSummary">No alert messages yet.</div>
       <div class="alert-list" id="alertList"></div>
     </div>
@@ -2405,6 +2407,7 @@ const TOP_MOVERS_UNIVERSE = ["AAPL","NVDA","TSLA","AMD","META","AMZN","MSFT","GO
 let paperPositions = [];
 let paperHistory = [];
 let alerts = [];
+let botTrades = [];
 const latestQuotes = {};
 let serverStateEnabled = false;
 let latestAnalyzedSnapshot = null;
@@ -5502,6 +5505,68 @@ function getWatchButtonMarkup(ticker){
   return `<button onclick="addWatch('${ticker}')">+ Watch</button>`;
 }
 
+function formatBotTradePrice(value){
+  const number = Number(value);
+  return Number.isFinite(number) ? `$${number.toFixed(2)}` : "--";
+}
+
+function renderBotTrades(){
+  const summary = document.getElementById("botTradeSummary");
+  const list = document.getElementById("botTradeList");
+  const panel = document.getElementById("messagesPanel");
+  if(!summary || !list){
+    return;
+  }
+  list.innerHTML = "";
+
+  if(!botTrades.length){
+    summary.innerText = "No algorithm trades yet.";
+    list.innerHTML = '<div class="paper-empty">TradingView bot alerts will show here as simulated demo trades or Tradovate demo orders.</div>';
+    return;
+  }
+
+  const routed = botTrades.filter(trade => trade.routed).length;
+  const simulated = botTrades.filter(trade => trade.simulated).length;
+  summary.innerText = `${botTrades.length} bot trade${botTrades.length === 1 ? "" : "s"} | ${routed} routed | ${simulated} demo logged`;
+  if(panel){
+    panel.open = true;
+  }
+
+  botTrades.slice(0, 8).forEach(trade => {
+    const item = document.createElement("div");
+    item.className = `alert-item ${trade.routed ? "triggered" : ""}`;
+    item.innerHTML = `
+      <div>
+        <div class="alert-topline">
+          <div class="paper-symbol">${trade.symbol || "--"} | ${trade.action || "SIGNAL"} | ${trade.mode || "Demo"}</div>
+          <div class="alert-status-pill">${trade.status || "Logged"}</div>
+        </div>
+        <div class="alert-meta">Qty ${trade.qty || 1} | Entry ${formatBotTradePrice(trade.price)} | Target ${formatBotTradePrice(trade.target)} | Stop ${formatBotTradePrice(trade.stop)}</div>
+        <div class="alert-meta">Edge ${Number(trade.edge || 0).toFixed(1)} | ${trade.reason || "Algorithm signal received."}</div>
+      </div>
+    `;
+    list.appendChild(item);
+  });
+}
+
+async function loadBotTrades(silent=false){
+  try{
+    const res = await fetch("/bot-trades");
+    if(!res.ok){
+      throw new Error("Bot trades failed");
+    }
+    const payload = await res.json();
+    botTrades = Array.isArray(payload) ? payload : [];
+    renderBotTrades();
+  }catch(err){
+    console.log("Bot trades failed", err);
+    if(!silent){
+      botTrades = [];
+      renderBotTrades();
+    }
+  }
+}
+
 function renderAlerts(){
   const summary = document.getElementById("alertSummary");
   const list = document.getElementById("alertList");
@@ -5513,7 +5578,7 @@ function renderAlerts(){
   const activeAlerts = alerts.filter(alert => alert.status === "active");
 
   if(!triggered.length){
-    if(panel){
+    if(panel && !botTrades.length){
       panel.open = false;
     }
     if(alertsChip){
@@ -5582,10 +5647,12 @@ async function initializeApp(){
   renderPortfolioContext();
   switchView(currentView || "market");
   await loadWatchlist();
+  await loadBotTrades();
   await loadAlgorithmDashboard();
   if(currentView === "scanner"){
     await runScanner();
   }
+  setInterval(() => loadBotTrades(true), 15000);
 }
 
 initializeApp();

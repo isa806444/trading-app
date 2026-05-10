@@ -74,6 +74,7 @@ candle_cache = {}
 tradovate_token_cache = {}
 tradingview_alert_messages = []
 tradingview_recent_signal_keys = {}
+bot_trade_messages = []
 database_enabled = False
 news_cache = {}
 events_cache = {}
@@ -1479,6 +1480,54 @@ def route_tradingview_signal_to_tradovate(payload):
         result["reason"] = str(exc)
 
     return result
+
+
+def build_bot_trade_message(payload, execution):
+    execution = execution or {}
+    signal = execution.get("signal") or build_tradingview_execution_signal(payload)
+    action = signal.get("action", "")
+    symbol = signal.get("symbol", "")
+    if action not in {"BUY", "SELL", "EXIT_LONG", "EXIT_SHORT"} or not symbol:
+        return None
+
+    routed = bool(execution.get("routed"))
+    env = get_tradovate_env()
+    simulated = not routed
+    mode = f"Tradovate {env}" if routed else "Simulated demo"
+    status = "Placed" if routed else "Logged"
+    if routed and env == "live":
+        status = "Live order placed"
+
+    return {
+        "id": f"bot-{int(time.time() * 1000)}-{len(bot_trade_messages)}",
+        "received_at": datetime.now(DEMO_TIMEZONE).isoformat(),
+        "source": "TradingView",
+        "mode": mode,
+        "status": status,
+        "simulated": simulated,
+        "routed": routed,
+        "environment": env,
+        "symbol": symbol,
+        "tradovate_symbol": signal.get("tradovate_symbol"),
+        "action": action,
+        "qty": signal.get("qty"),
+        "price": signal.get("price"),
+        "target": signal.get("target"),
+        "stop": signal.get("stop"),
+        "edge": signal.get("edge"),
+        "reason": execution.get("reason") or ("Tradovate order routed." if routed else "Demo trade logged from algorithm alert."),
+        "order": execution.get("order"),
+        "tag": signal.get("tag")
+    }
+
+
+def record_bot_trade_message(payload, execution):
+    message = build_bot_trade_message(payload, execution)
+    if not message:
+        return None
+    bot_trade_messages.insert(0, message)
+    del bot_trade_messages[100:]
+    return message
 
 
 def fetch_polygon_candles(symbol, tf):
@@ -3415,20 +3464,28 @@ def tradingview_webhook_route():
         except json.JSONDecodeError:
             payload = {"raw": raw_body}
 
+    execution = route_tradingview_signal_to_tradovate(payload)
+    bot_trade = record_bot_trade_message(payload, execution)
     message = {
         "received_at": datetime.now(DEMO_TIMEZONE).isoformat(),
         "source": "tradingview",
         "payload": payload,
-        "execution": route_tradingview_signal_to_tradovate(payload)
+        "execution": execution,
+        "bot_trade": bot_trade
     }
     tradingview_alert_messages.insert(0, message)
     del tradingview_alert_messages[50:]
-    return jsonify({"ok": True, "stored": True, "execution": message["execution"]})
+    return jsonify({"ok": True, "stored": True, "execution": execution, "bot_trade": bot_trade})
 
 
 @app.route("/tradingview-alerts")
 def tradingview_alerts_route():
     return jsonify(tradingview_alert_messages[:25])
+
+
+@app.route("/bot-trades")
+def bot_trades_route():
+    return jsonify(bot_trade_messages[:50])
 
 
 @app.route("/search-symbols")

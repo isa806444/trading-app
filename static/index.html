@@ -2198,7 +2198,7 @@ body {
       </div>
       <div class="algo-search-row">
         <div class="search-wrap">
-          <input id="ticker" placeholder="ES, NQ, MES, MNQ, CL, GC"/>
+          <input id="ticker" name="futures-symbol-search" type="text" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" placeholder="ES, NQ, MES, MNQ, CL, GC"/>
           <div id="searchSuggestions" class="search-suggestions hidden"></div>
           <div class="search-helper">Try ES, NQ, MES, MNQ, CL, GC, SI, or ZN</div>
         </div>
@@ -2303,8 +2303,6 @@ body {
 
   <div class="bottom-nav">
       <button id="marketNav" class="active" onclick="switchView('market')">Algorithm</button>
-      <button id="portfolioNav" onclick="switchView('portfolio')">Journal</button>
-      <button id="scannerNav" onclick="switchView('scanner')">Results</button>
     </div>
 
 </div>
@@ -2893,7 +2891,7 @@ function loadLayoutPrefs(){
     if(parsed.indicatorVisibility) indicatorVisibility = { ...indicatorVisibility, ...parsed.indicatorVisibility };
     if(parsed.watchSort) watchSort = parsed.watchSort;
     if(typeof parsed.chartZones === "boolean") chartToolState.zones = parsed.chartZones;
-    if(parsed.currentView) currentView = parsed.currentView === "live" ? "market" : parsed.currentView;
+    currentView = "market";
   }catch(err){
     console.log("Layout prefs load failed", err);
   }
@@ -4103,19 +4101,14 @@ function closeWatchlist(){
 }
 
 function switchView(view){
-  if(view === "live"){
-    view = "market";
-  }
-  if(view === "community"){
+  if(view !== "market"){
     view = "market";
   }
   currentView = view;
-  document.getElementById("marketView").classList.toggle("hidden", view !== "market");
-  document.getElementById("portfolioView").classList.toggle("hidden", view !== "portfolio");
-  document.getElementById("scannerView").classList.toggle("hidden", view !== "scanner");
-  document.getElementById("marketNav").classList.toggle("active", view === "market");
-  document.getElementById("portfolioNav").classList.toggle("active", view === "portfolio");
-  document.getElementById("scannerNav").classList.toggle("active", view === "scanner");
+  document.getElementById("marketView")?.classList.toggle("hidden", false);
+  document.getElementById("portfolioView")?.classList.add("hidden");
+  document.getElementById("scannerView")?.classList.add("hidden");
+  document.getElementById("marketNav")?.classList.toggle("active", true);
   saveLayoutPrefs();
 }
 
@@ -5363,6 +5356,11 @@ async function analyze(sym){
   if(isLoading) return;
 
   let t=sym||document.getElementById("ticker").value.trim();
+  if(t.includes("@")){
+    document.getElementById("ticker").value = "";
+    setStatus("Enter a futures symbol like ES or NQ.", "warning");
+    return;
+  }
   if(!t) return;
 
   t=t.toUpperCase();
@@ -5422,7 +5420,7 @@ async function analyze(sym){
     latestBacktest = null;
     latestCorrelations = d.correlations || null;
     latestSqueeze = d.squeeze_detector || null;
-    latestEarningsVolatility = d.earnings_volatility || null;
+    latestEarningsVolatility = null;
     checkAlerts();
     renderAlerts();
     renderPortfolioContext();
@@ -5470,7 +5468,6 @@ async function analyze(sym){
     document.getElementById("marketInsights").innerHTML = `
       <div class="insights-grid">
         ${renderNewsSection(d.news)}
-        ${renderEarningsVolatilityCard(d.earnings_volatility)}
       </div>
     `;
 
@@ -5503,6 +5500,12 @@ document.getElementById("ticker").addEventListener("keydown", (e)=>{
 
 document.getElementById("ticker").addEventListener("input", (e)=>{
   const value = e.target.value;
+  if(value.includes("@")){
+    e.target.value = "";
+    searchSuggestions = [];
+    renderSuggestions();
+    return;
+  }
   if(searchDebounce){
     clearTimeout(searchDebounce);
   }
@@ -5644,14 +5647,15 @@ function renderAlerts(){
 
 async function initializeApp(){
   loadLayoutPrefs();
-  const scannerTitle = document.querySelector("#scannerView .section-title");
-  const scannerCopy = document.querySelector("#scannerView .compact-copy");
-  if(scannerTitle){
-    scannerTitle.innerText = "Today's top movers from the tracked liquid universe";
+  const tickerInput = document.getElementById("ticker");
+  if(tickerInput && tickerInput.value.includes("@")){
+    tickerInput.value = "";
   }
-  if(scannerCopy){
-    scannerCopy.innerText = "A tighter top-10 board built to surface the names actually moving today.";
-  }
+  setTimeout(() => {
+    if(tickerInput && tickerInput.value.includes("@")){
+      tickerInput.value = "";
+    }
+  }, 500);
   setAuthMode("login");
   renderIndicatorToggles();
   syncTradeInputs();
@@ -5672,9 +5676,6 @@ async function initializeApp(){
   await loadWatchlist();
   await loadBotTrades();
   await loadAlgorithmDashboard();
-  if(currentView === "scanner"){
-    await runScanner();
-  }
   setInterval(() => loadBotTrades(true), 15000);
 }
 

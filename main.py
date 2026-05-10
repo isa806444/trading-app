@@ -28,9 +28,19 @@ TRADOVATE_APP_VERSION_ENV = "TRADOVATE_APP_VERSION"
 TRADOVATE_CID_ENV = "TRADOVATE_CID"
 TRADOVATE_SECRET_ENV = "TRADOVATE_SECRET"
 TRADOVATE_DEVICE_ID_ENV = "TRADOVATE_DEVICE_ID"
+TRADOVATE_ACCOUNT_SPEC_ENV = "TRADOVATE_ACCOUNT_SPEC"
+TRADOVATE_ACCOUNT_ID_ENV = "TRADOVATE_ACCOUNT_ID"
 TRADOVATE_REST_URL_ENV = "TRADOVATE_REST_URL"
 TRADOVATE_MD_WS_URL_ENV = "TRADOVATE_MD_WS_URL"
 TRADOVATE_SYMBOL_MAP_ENV = "TRADOVATE_SYMBOL_MAP"
+TRADOVATE_AUTO_TRADE_ENABLED_ENV = "TRADOVATE_AUTO_TRADE_ENABLED"
+TRADOVATE_LIVE_TRADING_ACK_ENV = "TRADOVATE_LIVE_TRADING_ACK"
+TRADOVATE_DEFAULT_ORDER_QTY_ENV = "TRADOVATE_DEFAULT_ORDER_QTY"
+TRADOVATE_MAX_ORDER_QTY_ENV = "TRADOVATE_MAX_ORDER_QTY"
+TRADOVATE_MAX_DAILY_ORDERS_ENV = "TRADOVATE_MAX_DAILY_ORDERS"
+ALGO_MIN_EDGE_FOR_AUTO_TRADE_ENV = "ALGO_MIN_EDGE_FOR_AUTO_TRADE"
+ALGO_DEFAULT_TARGET_PCT_ENV = "ALGO_DEFAULT_TARGET_PCT"
+ALGO_DEFAULT_STOP_PCT_ENV = "ALGO_DEFAULT_STOP_PCT"
 TRADINGVIEW_WEBHOOK_SECRET_ENV = "TRADINGVIEW_WEBHOOK_SECRET"
 DATABASE_URL_ENV = "DATABASE_URL"
 QUOTE_CACHE_TTL = 90
@@ -63,6 +73,7 @@ quote_cache = {}
 candle_cache = {}
 tradovate_token_cache = {}
 tradingview_alert_messages = []
+tradingview_recent_signal_keys = {}
 database_enabled = False
 news_cache = {}
 events_cache = {}
@@ -132,6 +143,41 @@ def tradovate_configured():
 
 def tradingview_webhook_secret():
     return os.environ.get(TRADINGVIEW_WEBHOOK_SECRET_ENV, "").strip()
+
+
+def env_bool(key, default=False):
+    raw = os.environ.get(key, "").strip().lower()
+    if not raw:
+        return default
+    return raw in {"1", "true", "yes", "y", "on"}
+
+
+def env_float(key, default):
+    try:
+        return float(os.environ.get(key, default))
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def env_int(key, default):
+    try:
+        return int(float(os.environ.get(key, default)))
+    except (TypeError, ValueError):
+        return int(default)
+
+
+def tradovate_auto_trade_enabled():
+    return env_bool(TRADOVATE_AUTO_TRADE_ENABLED_ENV, False)
+
+
+def live_trading_acknowledged():
+    if get_tradovate_env() != "live":
+        return True
+    return os.environ.get(TRADOVATE_LIVE_TRADING_ACK_ENV, "").strip() == "I_UNDERSTAND_REAL_MONEY_RISK"
+
+
+def tradovate_execution_ready():
+    return tradovate_configured() and tradovate_auto_trade_enabled() and live_trading_acknowledged()
 
 
 def get_database_url():
@@ -941,8 +987,9 @@ def parse_tradovate_expiration_time(value):
         return time.time() + (80 * 60)
 
 
-def get_tradovate_access_token():
-    cached = tradovate_token_cache.get("token")
+def get_tradovate_access_token(token_type="trade"):
+    cache_key = "md_token" if token_type == "market" else "token"
+    cached = tradovate_token_cache.get(cache_key)
     if cached and time.time() < tradovate_token_cache.get("expires_at", 0) - 300:
         return cached
 
@@ -968,13 +1015,15 @@ def get_tradovate_access_token():
     )
     response.raise_for_status()
     data = response.json()
-    token = data.get("mdAccessToken") or data.get("accessToken")
-    if not token:
+    trade_token = data.get("accessToken")
+    market_token = data.get("mdAccessToken") or trade_token
+    if not trade_token and not market_token:
         raise RuntimeError(data.get("errorText") or "Tradovate did not return an access token.")
 
-    tradovate_token_cache["token"] = token
+    tradovate_token_cache["token"] = trade_token
+    tradovate_token_cache["md_token"] = market_token
     tradovate_token_cache["expires_at"] = parse_tradovate_expiration_time(data.get("expirationTime"))
-    return token
+    return market_token if token_type == "market" else trade_token
 
 
 def parse_tradovate_symbol_map():
@@ -1077,7 +1126,7 @@ def fetch_tradovate_candles(symbol, tf):
         print("websocket-client is not installed. Install requirements to enable Tradovate live data.")
         return None
 
-    token = get_tradovate_access_token()
+    token = get_tradovate_access_token("market")
     if not token:
         return None
 
@@ -1134,6 +1183,302 @@ def fetch_tradovate_candles(symbol, tf):
         unique = {candle["time"]: candle for candle in candles}
         return [unique[key] for key in sorted(unique)]
     return None
+
+
+def get_tradovate_account_spec():
+    return (
+        os.environ.get(TRADOVATE_ACCOUNT_SPEC_ENV, "").strip()
+        or os.environ.get(TRADOVATE_USERNAME_ENV, "").strip()
+    )
+
+
+def get_tradovate_account_id():
+    raw = os.environ.get(TRADOVATE_ACCOUNT_ID_ENV, "").strip()
+    if not raw:
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        return None
+
+
+def tradovate_headers():
+    token = get_tradovate_access_token("trade")
+    if not token:
+        raise RuntimeError("Tradovate trade token is unavailable.")
+    return {
+        "Accept": "application/json",
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json"
+    }
+
+
+def fetch_tradovate_accounts():
+    response = requests.get(
+        f"{get_tradovate_rest_url()}/account/list",
+        headers=tradovate_headers(),
+        timeout=12
+    )
+    response.raise_for_status()
+    data = response.json()
+    return data if isinstance(data, list) else []
+
+
+def resolve_tradovate_account():
+    configured_id = get_tradovate_account_id()
+    configured_spec = get_tradovate_account_spec()
+    if configured_id:
+        return {"accountId": configured_id, "accountSpec": configured_spec}
+
+    if get_tradovate_env() == "live":
+        raise RuntimeError("Set TRADOVATE_ACCOUNT_ID before enabling live Tradovate orders.")
+
+    accounts = fetch_tradovate_accounts()
+    if configured_spec:
+        for account in accounts:
+            if str(account.get("name", "")).upper() == configured_spec.upper():
+                return {"accountId": account.get("id"), "accountSpec": account.get("name") or configured_spec}
+
+    active_accounts = [account for account in accounts if account.get("active", True)]
+    if active_accounts:
+        account = active_accounts[0]
+        return {"accountId": account.get("id"), "accountSpec": account.get("name") or configured_spec}
+
+    raise RuntimeError("No Tradovate account was found for order routing.")
+
+
+def normalize_tradingview_action(value):
+    clean = str(value or "").upper().strip().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "LONG": "BUY",
+        "ENTER_LONG": "BUY",
+        "BUY_TO_OPEN": "BUY",
+        "SHORT": "SELL",
+        "ENTER_SHORT": "SELL",
+        "SELL_SHORT": "SELL",
+        "SELL_TO_OPEN": "SELL",
+        "CLOSE_LONG": "EXIT_LONG",
+        "SELL_TO_CLOSE": "EXIT_LONG",
+        "CLOSE_SHORT": "EXIT_SHORT",
+        "BUY_TO_COVER": "EXIT_SHORT"
+    }
+    return aliases.get(clean, clean)
+
+
+def first_payload_value(payload, keys, default=None):
+    for key in keys:
+        if isinstance(payload, dict) and payload.get(key) not in (None, ""):
+            return payload.get(key)
+    return default
+
+
+def first_payload_float(payload, keys, default=None):
+    value = first_payload_value(payload, keys, None)
+    if value in (None, ""):
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def build_tradingview_execution_signal(payload):
+    payload = payload if isinstance(payload, dict) else {}
+    action = normalize_tradingview_action(first_payload_value(payload, ["action", "side", "signal"], ""))
+    symbol = str(first_payload_value(payload, ["ticker", "symbol", "contract"], "")).upper().strip()
+    price = first_payload_float(payload, ["price", "close", "mark", "entry"], None)
+    edge = first_payload_float(payload, ["edge", "score"], 0)
+    qty = env_int(TRADOVATE_DEFAULT_ORDER_QTY_ENV, 1)
+    payload_qty = first_payload_float(payload, ["qty", "quantity", "orderQty", "contracts"], None)
+    if payload_qty is not None:
+        qty = int(payload_qty)
+    qty = max(1, min(qty, env_int(TRADOVATE_MAX_ORDER_QTY_ENV, 1)))
+
+    target = first_payload_float(payload, ["target", "take_profit", "takeProfit", "tp"], None)
+    stop = first_payload_float(payload, ["stop", "stop_loss", "stopLoss", "sl"], None)
+    target_pct = first_payload_float(payload, ["target_pct", "targetPct"], env_float(ALGO_DEFAULT_TARGET_PCT_ENV, 0.02))
+    stop_pct = first_payload_float(payload, ["stop_pct", "stopPct"], env_float(ALGO_DEFAULT_STOP_PCT_ENV, 0.01))
+
+    if price and action in {"BUY", "SELL"}:
+        if target is None:
+            target = price * (1 + target_pct) if action == "BUY" else price * (1 - target_pct)
+        if stop is None:
+            stop = price * (1 - stop_pct) if action == "BUY" else price * (1 + stop_pct)
+
+    signal_key = str(first_payload_value(payload, ["trade_id", "id", "bar_time", "time"], "")).strip()
+    if not signal_key:
+        signal_key = str(int(time.time() // 60))
+
+    return {
+        "action": action,
+        "symbol": symbol,
+        "tradovate_symbol": normalize_tradovate_symbol(symbol),
+        "price": round(price, 4) if price else None,
+        "edge": round(edge, 2),
+        "qty": qty,
+        "target": round(target, 4) if target else None,
+        "stop": round(stop, 4) if stop else None,
+        "tag": str(first_payload_value(payload, ["tag"], "ai-algo")),
+        "signal_key": f"{symbol}:{action}:{signal_key}"
+    }
+
+
+def duplicate_tradingview_signal(signal, ttl=90):
+    now = time.time()
+    for key, timestamp in list(tradingview_recent_signal_keys.items()):
+        if now - timestamp > ttl:
+            tradingview_recent_signal_keys.pop(key, None)
+
+    key = signal.get("signal_key")
+    if key in tradingview_recent_signal_keys:
+        return True
+    tradingview_recent_signal_keys[key] = now
+    return False
+
+
+def count_today_tradovate_routes():
+    today = datetime.now(DEMO_TIMEZONE).date().isoformat()
+    count = 0
+    for message in tradingview_alert_messages:
+        execution = message.get("execution") or {}
+        if execution.get("routed") and str(message.get("received_at", "")).startswith(today):
+            count += 1
+    return count
+
+
+def post_tradovate_order(endpoint, body):
+    response = requests.post(
+        f"{get_tradovate_rest_url()}/order/{endpoint}",
+        headers=tradovate_headers(),
+        json=body,
+        timeout=12
+    )
+    if response.status_code == 404 and endpoint == "placeoso":
+        response = requests.post(
+            f"{get_tradovate_rest_url()}/order/placeOSO",
+            headers=tradovate_headers(),
+            json=body,
+            timeout=12
+        )
+    response.raise_for_status()
+    data = response.json()
+    failure = data.get("failureReason") if isinstance(data, dict) else None
+    return {
+        "ok": failure in (None, "", "Success"),
+        "response": data,
+        "failure": failure,
+        "failure_text": data.get("failureText") if isinstance(data, dict) else None
+    }
+
+
+def place_tradovate_market_order(signal, account):
+    action = "Sell" if signal["action"] == "EXIT_LONG" else "Buy"
+    body = {
+        "accountSpec": account["accountSpec"],
+        "accountId": account["accountId"],
+        "action": action,
+        "symbol": signal["tradovate_symbol"],
+        "orderQty": signal["qty"],
+        "orderType": "Market",
+        "isAutomated": True,
+        "customTag50": signal.get("tag", "ai-algo")[:64]
+    }
+    return post_tradovate_order("placeorder", body)
+
+
+def place_tradovate_bracket_order(signal, account):
+    entry_action = "Buy" if signal["action"] == "BUY" else "Sell"
+    exit_action = "Sell" if signal["action"] == "BUY" else "Buy"
+    if not signal.get("target") or not signal.get("stop"):
+        raise RuntimeError("TradingView alert needs a target and stop before routing a bracket order.")
+
+    body = {
+        "accountSpec": account["accountSpec"],
+        "accountId": account["accountId"],
+        "action": entry_action,
+        "symbol": signal["tradovate_symbol"],
+        "orderQty": signal["qty"],
+        "orderType": "Market",
+        "isAutomated": True,
+        "customTag50": signal.get("tag", "ai-algo")[:64],
+        "bracket1": {
+            "action": exit_action,
+            "orderType": "Limit",
+            "price": signal["target"]
+        },
+        "bracket2": {
+            "action": exit_action,
+            "orderType": "Stop",
+            "stopPrice": signal["stop"]
+        }
+    }
+    return post_tradovate_order("placeoso", body)
+
+
+def route_tradingview_signal_to_tradovate(payload):
+    signal = build_tradingview_execution_signal(payload)
+    result = {
+        "enabled": tradovate_auto_trade_enabled(),
+        "ready": tradovate_execution_ready(),
+        "routed": False,
+        "signal": signal,
+        "reason": ""
+    }
+
+    if signal["action"] not in {"BUY", "SELL", "EXIT_LONG", "EXIT_SHORT"}:
+        result["reason"] = "TradingView alert was stored but action is not routable."
+        return result
+    if not signal["symbol"]:
+        result["reason"] = "TradingView alert was stored but no ticker/contract was supplied."
+        return result
+    if not tradovate_configured():
+        result["reason"] = "Tradovate credentials are not configured."
+        return result
+    if not tradovate_auto_trade_enabled():
+        result["reason"] = "Auto-trading is off. Set TRADOVATE_AUTO_TRADE_ENABLED=true after demo testing."
+        return result
+    if not live_trading_acknowledged():
+        result["reason"] = "Live Tradovate orders require TRADOVATE_LIVE_TRADING_ACK=I_UNDERSTAND_REAL_MONEY_RISK."
+        return result
+    if duplicate_tradingview_signal(signal):
+        result["reason"] = "Duplicate TradingView signal ignored."
+        return result
+
+    max_daily_orders = env_int(TRADOVATE_MAX_DAILY_ORDERS_ENV, 5)
+    if count_today_tradovate_routes() >= max_daily_orders:
+        result["reason"] = f"Daily Tradovate order cap reached ({max_daily_orders})."
+        return result
+
+    if signal["action"] in {"BUY", "SELL"}:
+        min_edge = env_float(ALGO_MIN_EDGE_FOR_AUTO_TRADE_ENV, 18)
+        if abs(signal.get("edge") or 0) < min_edge:
+            result["reason"] = f"Signal edge is below auto-trade minimum ({min_edge})."
+            return result
+        if not signal.get("price"):
+            result["reason"] = "Entry alerts need a live TradingView price."
+            return result
+
+    try:
+        account = resolve_tradovate_account()
+        order_result = (
+            place_tradovate_bracket_order(signal, account)
+            if signal["action"] in {"BUY", "SELL"}
+            else place_tradovate_market_order(signal, account)
+        )
+        result.update({
+            "routed": bool(order_result.get("ok")),
+            "account": {
+                "accountSpec": account.get("accountSpec"),
+                "accountId": account.get("accountId")
+            },
+            "order": order_result.get("response"),
+            "failure": order_result.get("failure"),
+            "reason": order_result.get("failure_text") or ("Tradovate order routed." if order_result.get("ok") else "Tradovate rejected the order.")
+        })
+    except Exception as exc:
+        result["reason"] = str(exc)
+
+    return result
 
 
 def fetch_polygon_candles(symbol, tf):
@@ -2198,26 +2543,22 @@ def build_algorithm_dashboard(tickers):
     best_trade = round(max([row["best_trade"] for row in rows] or [0]), 2)
     worst_trade = round(min([row["worst_trade"] for row in rows] or [0]), 2)
     win_rate = round((wins / total_trades) * 100, 1) if total_trades else 0
-    broker_connected = bool(
-        os.environ.get("BROKER_API_KEY")
-        or os.environ.get("ALPACA_API_KEY")
-        or os.environ.get("ALPACA_KEY_ID")
-    )
-
     return {
         "date": datetime.now(DEMO_TIMEZONE).strftime("%Y-%m-%d"),
         "generated_at": datetime.now(DEMO_TIMEZONE).isoformat(),
-        "mode": "tradingview-tradovate-live" if tradovate_configured() else "signal-only",
+        "mode": "tradingview-signals-tradovate-execution" if tradovate_configured() else "signal-only",
         "live_trading": {
-            "enabled": False,
-            "broker_connected": broker_connected,
+            "enabled": tradovate_execution_ready(),
+            "broker_connected": tradovate_configured(),
             "tradovate_configured": tradovate_configured(),
+            "tradovate_auto_trade_enabled": tradovate_auto_trade_enabled(),
+            "tradovate_environment": get_tradovate_env(),
             "tradingview_webhook_configured": bool(tradingview_webhook_secret()),
-            "label": "TradingView + Tradovate live mode" if tradovate_configured() else "Live execution locked",
+            "label": "TradingView live signals + Tradovate execution" if tradovate_configured() else "Live execution locked",
             "summary": (
-                "Live data is set to Tradovate, and TradingView can send Pine alerts into the app. Real order routing still stays approval-only until the final risk layer is connected."
-                if tradovate_configured()
-                else "TradingView alerts and Tradovate live data are not fully configured yet. Databento remains reserved for Python/Jupyter backtesting."
+                "TradingView alerts are the live signal feed. Valid alerts can route bracket orders to Tradovate when auto-trading is enabled."
+                if tradovate_execution_ready()
+                else "TradingView alerts can be received now. Tradovate order routing stays locked until credentials, account ID, and auto-trade env vars are set."
             )
         },
         "totals": {
@@ -3048,9 +3389,12 @@ def pine_script_route():
 @app.route("/live-data-status")
 def live_data_status_route():
     return jsonify({
-        "live_data": "tradovate" if tradovate_configured() else "not_configured",
+        "live_data": "tradingview_webhooks",
         "tradovate_configured": tradovate_configured(),
         "tradovate_environment": get_tradovate_env(),
+        "tradovate_auto_trade_enabled": tradovate_auto_trade_enabled(),
+        "tradovate_execution_ready": tradovate_execution_ready(),
+        "live_trading_acknowledged": live_trading_acknowledged(),
         "tradingview_webhook_configured": bool(tradingview_webhook_secret()),
         "backtesting_data": "databento"
     })
@@ -3065,16 +3409,21 @@ def tradingview_webhook_route():
 
     payload = request.get_json(silent=True)
     if payload is None:
-        payload = {"raw": request.get_data(as_text=True)}
+        raw_body = request.get_data(as_text=True)
+        try:
+            payload = json.loads(raw_body) if raw_body else {}
+        except json.JSONDecodeError:
+            payload = {"raw": raw_body}
 
     message = {
         "received_at": datetime.now(DEMO_TIMEZONE).isoformat(),
         "source": "tradingview",
-        "payload": payload
+        "payload": payload,
+        "execution": route_tradingview_signal_to_tradovate(payload)
     }
     tradingview_alert_messages.insert(0, message)
     del tradingview_alert_messages[50:]
-    return jsonify({"ok": True, "stored": True})
+    return jsonify({"ok": True, "stored": True, "execution": message["execution"]})
 
 
 @app.route("/tradingview-alerts")

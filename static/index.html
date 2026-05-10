@@ -2182,7 +2182,7 @@ body {
         <div class="algo-live-orb"></div>
         <div class="algo-live-label">Execution Status</div>
         <div class="algo-live-title">Live trading locked</div>
-        <div class="algo-live-copy">The model can produce live buy/sell decisions now. Real order routing needs a broker adapter and strict risk caps before it can send money.</div>
+        <div class="algo-live-copy">TradingView feeds live bot alerts. Tradovate routing stays locked until demo credentials, account ID, and risk caps are enabled.</div>
       </div>
     </div>
   </section>
@@ -2208,7 +2208,7 @@ body {
     <div class="algo-live-card">
       <div class="algo-live-label">Last Updated</div>
       <div class="algo-live-title" id="lastUpdated">Waiting for data...</div>
-      <div class="algo-live-copy">TradingView handles chart alerts. Tradovate handles live market data. Databento stays in the research/backtest tools.</div>
+      <div class="algo-live-copy">TradingView handles live prices and alert triggers. Tradovate handles execution. Databento stays in the research/backtest tools.</div>
       <div class="algo-actions">
         <button id="refreshBtn" class="algo-secondary" onclick="manualRefresh()">Refresh Now</button>
       </div>
@@ -2475,7 +2475,7 @@ function renderMarketEmptyState(title="Run the algorithm or search one ticker.",
       <div class="empty-grid">
         <div class="empty-tip">Use a ticker like <strong>AAPL</strong> or a company name like <strong>Apple</strong>.</div>
         <div class="empty-tip">The algorithm requires multiple confirmations before calling a strong setup.</div>
-        <div class="empty-tip">Real-money routing stays locked until a broker adapter and risk caps are connected.</div>
+        <div class="empty-tip">Real-money routing stays locked until Tradovate demo mode is tested and live-trading acknowledgment is set.</div>
         </div>
       </div>
     `;
@@ -3608,7 +3608,7 @@ function renderAlgoLivePanel(payload){
     <div class="algo-live-orb"></div>
     <div class="algo-live-label">Execution Status</div>
     <div class="algo-live-title">${live.label || "Live execution locked"}</div>
-    <div class="algo-live-copy">${live.summary || "The algorithm can generate live decisions now. Real orders stay locked until broker routing and risk limits are connected."}</div>
+    <div class="algo-live-copy">${live.summary || "TradingView can generate live decisions now. Tradovate orders stay locked until routing and risk env vars are set."}</div>
     <div class="confirmation-list" style="margin-top:14px;">
       <div class="confirmation-pill">${live.tradovate_configured ? "Tradovate ready" : "Tradovate not configured"}</div>
       <div class="confirmation-pill">${live.tradingview_webhook_configured ? "TradingView webhook ready" : "Webhook not configured"}</div>

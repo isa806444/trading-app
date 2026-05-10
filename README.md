@@ -1,16 +1,16 @@
 # Trading App
 
-This project is a lightweight trading dashboard built with Flask, vanilla HTML, and real market data.
+This project is an AI algorithm trading dashboard built with Flask, vanilla HTML, TradingView alerts, Tradovate execution hooks, and Databento research tools.
 
 ## Current Features
 
-- Search a ticker and generate a basic trade plan
-- Switch between strategy presets: `scalp`, `day`, `swing`, `momentum`, `mean`
-- View candlestick charts with timeframe controls
+- Search a ticker and generate an algorithm trade plan
+- Run the AI algorithm board
+- Export the TradingView Pine Script strategy
+- Receive TradingView webhook alerts
+- Route valid alerts to Tradovate OSO bracket orders when auto-trading is enabled
 - Save and remove watchlist tickers with persistence in `watchlist.json`
-- Manual refresh with live/cache/demo status messaging
-- Real market data through Polygon when `POLYGON_API_KEY` is configured
-- Demo fallback when no provider key is set or the provider errors
+- Backtest with Databento in Python, VS Code, and Jupyter
 
 ## Project Structure
 
@@ -18,6 +18,8 @@ This project is a lightweight trading dashboard built with Flask, vanilla HTML, 
 - `static/index.html`: frontend UI
 - `watchlist.json`: saved watchlist data
 - `market_cache.json`: cached quote and candle data
+- `tradingview/ai_algorithm_strategy.pine`: TradingView live alert strategy
+- `algo_research/`: Databento backtesting tools
 - `.env.example`: environment variable template for API keys
 - `requirements.txt`: Python dependencies
 
@@ -43,16 +45,25 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-6. Create a `.env` file from `.env.example` and add your market data key:
+6. Create a `.env` file from `.env.example` and add your keys:
 
 ```powershell
 copy .env.example .env
 ```
 
-Then edit `.env` and set:
+For live bot routing, start with demo mode:
 
 ```text
-POLYGON_API_KEY=your_real_polygon_api_key
+TRADINGVIEW_WEBHOOK_SECRET=make_a_private_secret
+TRADOVATE_ENV=demo
+TRADOVATE_USERNAME=your_tradovate_username
+TRADOVATE_PASSWORD=your_tradovate_password
+TRADOVATE_APP_ID=your_tradovate_app_id
+TRADOVATE_CID=your_tradovate_cid
+TRADOVATE_SECRET=your_tradovate_secret
+TRADOVATE_ACCOUNT_SPEC=your_account_name
+TRADOVATE_ACCOUNT_ID=your_account_id
+TRADOVATE_AUTO_TRADE_ENABLED=false
 ```
 
 ## Run
@@ -73,10 +84,12 @@ This project is set up for Render with `render.yaml`.
 
 1. Push this folder to a GitHub repository.
 2. In Render, create a new `Blueprint` deployment and select that repo.
-3. Add the environment variable:
+3. Add the environment variables from `.env.example`.
+
+TradingView webhook URL:
 
 ```text
-POLYGON_API_KEY=your_real_polygon_api_key
+https://trading-app-kb38.onrender.com/tradingview-webhook?secret=make_a_private_secret
 ```
 
 4. Deploy the service.
@@ -97,8 +110,8 @@ gunicorn main:app
 
 ## Notes
 
-- Market data now uses Polygon when `POLYGON_API_KEY` is set.
-- The CBOE SKEW Index uses a separate market-data fetch path.
-- If the provider is unavailable, the app falls back to cached data and then demo data.
-- The strategy output is still placeholder logic, not real financial advice or broker-connected execution.
+- TradingView is the live signal source for bots.
+- Tradovate execution is locked until `TRADOVATE_AUTO_TRADE_ENABLED=true`.
+- Live Tradovate orders also require `TRADOVATE_LIVE_TRADING_ACK=I_UNDERSTAND_REAL_MONEY_RISK`.
+- Databento is only for research/backtesting.
 - If `python` does not work in PowerShell, try `py` instead.

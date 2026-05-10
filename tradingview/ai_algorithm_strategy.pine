@@ -1,10 +1,12 @@
 //@version=6
-strategy("AI Algorithm Bot - Momentum Edge", overlay=true, initial_capital=10000, commission_type=strategy.commission.percent, commission_value=0.02, pyramiding=0)
+//@strategy_alert_message {{strategy.order.alert_message}}
+strategy("AI Algorithm Bot - Momentum Edge", overlay=true, initial_capital=10000, commission_type=strategy.commission.percent, commission_value=0.02, pyramiding=0, calc_on_every_tick=true)
 
 fastEmaLen = input.int(9, "Fast EMA", minval=1)
 slowEmaLen = input.int(20, "Slow EMA", minval=1)
 rsiLen = input.int(14, "RSI Length", minval=1)
 rvLen = input.int(30, "Relative Volume Length", minval=5)
+contractQty = input.int(1, "Tradovate Contracts", minval=1)
 targetPct = input.float(2.0, "Target %", minval=0.1, step=0.1) / 100
 stopPct = input.float(1.0, "Stop %", minval=0.1, step=0.1) / 100
 minEdge = input.float(18.0, "Minimum Edge", minval=1.0)
@@ -73,15 +75,19 @@ edge = buyScore - sellScore
 
 longSignal = edge >= minEdge and buyScore >= minScore
 shortSignal = edge <= -minEdge and sellScore >= minScore
-longMessage = '{"source":"tradingview","action":"BUY","ticker":"' + syminfo.ticker + '","price":' + str.tostring(close) + ',"edge":' + str.tostring(edge) + ',"tag":"' + webhookTag + '"}'
-shortMessage = '{"source":"tradingview","action":"SELL","ticker":"' + syminfo.ticker + '","price":' + str.tostring(close) + ',"edge":' + str.tostring(edge) + ',"tag":"' + webhookTag + '"}'
+longTargetPrice = close * (1 + targetPct)
+longStopPrice = close * (1 - stopPct)
+shortTargetPrice = close * (1 - targetPct)
+shortStopPrice = close * (1 + stopPct)
+longMessage = '{"source":"tradingview","action":"BUY","ticker":"' + syminfo.ticker + '","price":' + str.tostring(close, format.mintick) + ',"target":' + str.tostring(longTargetPrice, format.mintick) + ',"stop":' + str.tostring(longStopPrice, format.mintick) + ',"qty":' + str.tostring(contractQty) + ',"edge":' + str.tostring(edge) + ',"bar_time":"' + str.tostring(time) + '","tag":"' + webhookTag + '"}'
+shortMessage = '{"source":"tradingview","action":"SELL","ticker":"' + syminfo.ticker + '","price":' + str.tostring(close, format.mintick) + ',"target":' + str.tostring(shortTargetPrice, format.mintick) + ',"stop":' + str.tostring(shortStopPrice, format.mintick) + ',"qty":' + str.tostring(contractQty) + ',"edge":' + str.tostring(edge) + ',"bar_time":"' + str.tostring(time) + '","tag":"' + webhookTag + '"}'
 
 if longSignal and strategy.position_size <= 0
-    strategy.entry("AI Long", strategy.long, alert_message=longMessage)
-    alert(longMessage, alert.freq_once_per_bar_close)
+    strategy.entry("AI Long", strategy.long, qty=contractQty, alert_message=longMessage)
+    alert(longMessage, alert.freq_once_per_bar)
 if shortSignal and strategy.position_size >= 0
-    strategy.entry("AI Short", strategy.short, alert_message=shortMessage)
-    alert(shortMessage, alert.freq_once_per_bar_close)
+    strategy.entry("AI Short", strategy.short, qty=contractQty, alert_message=shortMessage)
+    alert(shortMessage, alert.freq_once_per_bar)
 
 longStop = strategy.position_avg_price * (1 - stopPct)
 longTarget = strategy.position_avg_price * (1 + targetPct)

@@ -10,3 +10,47 @@ services:
         value: 3.12.7
       - key: POLYGON_API_KEY
         sync: false
+      - key: DATABENTO_API_KEY
+        sync: false
+      - key: DATABENTO_DATASET
+        value: EQUS.MINI
+      - key: DATABENTO_SCHEMA
+        value: ohlcv-1m
+      - key: TRADINGVIEW_WEBHOOK_SECRET
+        sync: false
+      - key: TRADOVATE_ENV
+        value: demo
+      - key: TRADOVATE_USERNAME
+        sync: false
+      - key: TRADOVATE_PASSWORD
+        sync: false
+      - key: TRADOVATE_APP_ID
+        sync: false
+      - key: TRADOVATE_APP_VERSION
+        value: 1.0.0
+      - key: TRADOVATE_CID
+        sync: false
+      - key: TRADOVATE_SECRET
+        sync: false
+      - key: TRADOVATE_ACCOUNT_SPEC
+        sync: false
+      - key: TRADOVATE_ACCOUNT_ID
+        sync: false
+      - key: TRADOVATE_SYMBOL_MAP
+        sync: false
+      - key: TRADOVATE_AUTO_TRADE_ENABLED
+        value: "false"
+      - key: TRADOVATE_LIVE_TRADING_ACK
+        sync: false
+      - key: TRADOVATE_DEFAULT_ORDER_QTY
+        value: "1"
+      - key: TRADOVATE_MAX_ORDER_QTY
+        value: "1"
+      - key: TRADOVATE_MAX_DAILY_ORDERS
+        value: "5"
+      - key: ALGO_MIN_EDGE_FOR_AUTO_TRADE
+        value: "18"
+      - key: ALGO_DEFAULT_TARGET_PCT
+        value: "0.02"
+      - key: ALGO_DEFAULT_STOP_PCT
+        value: "0.01"

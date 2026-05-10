@@ -1,14 +1,20 @@
-# Live Data Setup
+# Live Bot Setup
 
 The app now uses this split:
 
-- TradingView: charting, Pine Script strategy, and webhook alerts into the app.
-- Tradovate: live futures market data through the Market Data WebSocket API.
+- TradingView: live chart data, Pine Script algorithm, and webhook alerts.
+- Tradovate: broker execution for webhook alerts.
 - Databento: Python, VS Code, and Jupyter backtesting only.
 
-## Render Environment Variables
+## Render Environment
 
-Add these for Tradovate live data:
+Required for TradingView alerts:
+
+```text
+TRADINGVIEW_WEBHOOK_SECRET=make_a_private_secret
+```
+
+Required for Tradovate demo routing:
 
 ```text
 TRADOVATE_ENV=demo
@@ -18,36 +24,44 @@ TRADOVATE_APP_ID=your_tradovate_app_id
 TRADOVATE_APP_VERSION=1.0.0
 TRADOVATE_CID=your_tradovate_cid
 TRADOVATE_SECRET=your_tradovate_secret
+TRADOVATE_ACCOUNT_SPEC=your_account_name
+TRADOVATE_ACCOUNT_ID=your_account_id
 TRADOVATE_SYMBOL_MAP=ES=ESM6,NQ=NQM6
+TRADOVATE_AUTO_TRADE_ENABLED=false
+TRADOVATE_DEFAULT_ORDER_QTY=1
+TRADOVATE_MAX_ORDER_QTY=1
+TRADOVATE_MAX_DAILY_ORDERS=5
+ALGO_MIN_EDGE_FOR_AUTO_TRADE=18
+ALGO_DEFAULT_TARGET_PCT=0.02
+ALGO_DEFAULT_STOP_PCT=0.01
 ```
 
-Use `TRADOVATE_ENV=live` only after demo mode is working and the account/risk controls are ready.
-
-Add this for TradingView webhooks:
+Only after demo orders work, live routing also needs:
 
 ```text
-TRADINGVIEW_WEBHOOK_SECRET=make_a_private_secret
-```
-
-Then set your TradingView alert webhook URL to:
-
-```text
-https://trading-app-kb38.onrender.com/tradingview-webhook?secret=make_a_private_secret
+TRADOVATE_ENV=live
+TRADOVATE_LIVE_TRADING_ACK=I_UNDERSTAND_REAL_MONEY_RISK
 ```
 
 ## TradingView
 
-Open the Pine Script from:
+Open this file in TradingView Pine Editor:
 
 ```text
 tradingview/ai_algorithm_strategy.pine
 ```
 
-Paste it into TradingView Pine Editor, add it to a chart, then create an alert using the strategy's alert function or order-fill events.
+Create an alert using `Any alert() function call` and this webhook URL:
+
+```text
+https://trading-app-kb38.onrender.com/tradingview-webhook?secret=make_a_private_secret
+```
+
+The Pine alert sends `BUY` or `SELL` plus live price, target, stop, contracts, edge, and bar time. The app places an OSO bracket order in Tradovate so the target and stop are broker-side.
 
 ## Databento Backtesting
 
-Databento is intentionally not used by the live Flask app. Use it locally in Python/Jupyter:
+Databento is not used for live signals. Run it locally:
 
 ```powershell
 pip install -r requirements-research.txt

@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime
 from zoneinfo import ZoneInfo
 from flask import Flask, Response, jsonify, request, send_from_directory, session, has_request_context
 from flask_cors import CORS
@@ -21,9 +21,18 @@ WATCHLIST_FILE = "watchlist.json"
 MARKET_CACHE_FILE = "market_cache.json"
 POLYGON_BASE_URL = "https://api.polygon.io"
 POLYGON_API_KEY_ENV = "POLYGON_API_KEY"
-DATABENTO_API_KEY_ENV = "DATABENTO_API_KEY"
-DATABENTO_DATASET_ENV = "DATABENTO_DATASET"
-DATABENTO_SCHEMA_ENV = "DATABENTO_SCHEMA"
+TRADOVATE_ENV_ENV = "TRADOVATE_ENV"
+TRADOVATE_USERNAME_ENV = "TRADOVATE_USERNAME"
+TRADOVATE_PASSWORD_ENV = "TRADOVATE_PASSWORD"
+TRADOVATE_APP_ID_ENV = "TRADOVATE_APP_ID"
+TRADOVATE_APP_VERSION_ENV = "TRADOVATE_APP_VERSION"
+TRADOVATE_CID_ENV = "TRADOVATE_CID"
+TRADOVATE_SECRET_ENV = "TRADOVATE_SECRET"
+TRADOVATE_DEVICE_ID_ENV = "TRADOVATE_DEVICE_ID"
+TRADOVATE_REST_URL_ENV = "TRADOVATE_REST_URL"
+TRADOVATE_MD_WS_URL_ENV = "TRADOVATE_MD_WS_URL"
+TRADOVATE_SYMBOL_MAP_ENV = "TRADOVATE_SYMBOL_MAP"
+TRADINGVIEW_WEBHOOK_SECRET_ENV = "TRADINGVIEW_WEBHOOK_SECRET"
 DATABASE_URL_ENV = "DATABASE_URL"
 STRIPE_SECRET_KEY_ENV = "STRIPE_SECRET_KEY"
 STRIPE_PUBLISHABLE_KEY_ENV = "STRIPE_PUBLISHABLE_KEY"
@@ -53,9 +62,12 @@ STATIC_US_MACRO_EVENTS = [
 ]
 ALGORITHM_DEFAULT_UNIVERSE = ["AAPL", "NVDA", "TSLA", "AMD", "META", "AMZN", "MSFT", "GOOGL", "PLTR", "SPY"]
 ALGORITHM_SIGNAL_CAPITAL = 1000
+TRADOVATE_INDEX_ROOTS = {"ES", "MES", "NQ", "MNQ", "YM", "MYM", "RTY", "M2K"}
 
 quote_cache = {}
 candle_cache = {}
+tradovate_token_cache = {}
+tradingview_alert_messages = []
 database_enabled = False
 news_cache = {}
 events_cache = {}
@@ -97,16 +109,38 @@ def get_polygon_api_key():
     return os.environ.get(POLYGON_API_KEY_ENV, "").strip()
 
 
-def get_databento_api_key():
-    return os.environ.get(DATABENTO_API_KEY_ENV, "").strip()
+def get_tradovate_env():
+    env = os.environ.get(TRADOVATE_ENV_ENV, "demo").strip().lower()
+    return "live" if env == "live" else "demo"
 
 
-def get_databento_dataset():
-    return os.environ.get(DATABENTO_DATASET_ENV, "EQUS.MINI").strip() or "EQUS.MINI"
+def get_tradovate_rest_url():
+    configured = os.environ.get(TRADOVATE_REST_URL_ENV, "").strip()
+    if configured:
+        return configured.rstrip("/")
+    return "https://live.tradovateapi.com/v1" if get_tradovate_env() == "live" else "https://demo.tradovateapi.com/v1"
 
 
-def get_databento_schema():
-    return os.environ.get(DATABENTO_SCHEMA_ENV, "").strip()
+def get_tradovate_md_ws_url():
+    configured = os.environ.get(TRADOVATE_MD_WS_URL_ENV, "").strip()
+    if configured:
+        return configured
+    return "wss://md.tradovateapi.com/v1/websocket"
+
+
+def tradovate_configured():
+    required = [
+        TRADOVATE_USERNAME_ENV,
+        TRADOVATE_PASSWORD_ENV,
+        TRADOVATE_APP_ID_ENV,
+        TRADOVATE_CID_ENV,
+        TRADOVATE_SECRET_ENV
+    ]
+    return all(os.environ.get(key, "").strip() for key in required)
+
+
+def tradingview_webhook_secret():
+    return os.environ.get(TRADINGVIEW_WEBHOOK_SECRET_ENV, "").strip()
 
 
 def get_stripe_secret_key():
@@ -1006,18 +1040,7 @@ def get_polygon_range_config(tf):
     return {"multiplier": 5, "timespan": "minute", "days": 5}
 
 
-def get_databento_range_config(tf):
-    configured_schema = get_databento_schema()
-    if tf == "1d":
-        return {"schema": configured_schema or "ohlcv-1d", "days": 120, "resample_seconds": None}
-    if tf == "15m":
-        return {"schema": configured_schema or "ohlcv-1m", "days": 10, "resample_seconds": 15 * 60}
-    if tf == "5m":
-        return {"schema": configured_schema or "ohlcv-1m", "days": 5, "resample_seconds": 5 * 60}
-    return {"schema": configured_schema or "ohlcv-1m", "days": 2, "resample_seconds": None}
-
-
-def parse_databento_timestamp(value):
+def parse_market_timestamp(value):
     if value is None:
         return None
     try:
@@ -1031,104 +1054,206 @@ def parse_databento_timestamp(value):
         return None
 
 
-def normalize_databento_ohlcv(df, symbol):
-    if df is None or getattr(df, "empty", True):
+def parse_tradovate_expiration_time(value):
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp()
+    except (TypeError, ValueError):
+        return time.time() + (80 * 60)
+
+
+def get_tradovate_access_token():
+    cached = tradovate_token_cache.get("token")
+    if cached and time.time() < tradovate_token_cache.get("expires_at", 0) - 300:
+        return cached
+
+    if not tradovate_configured():
+        return None
+
+    payload = {
+        "name": os.environ.get(TRADOVATE_USERNAME_ENV, "").strip(),
+        "password": os.environ.get(TRADOVATE_PASSWORD_ENV, "").strip(),
+        "appId": os.environ.get(TRADOVATE_APP_ID_ENV, "").strip(),
+        "appVersion": os.environ.get(TRADOVATE_APP_VERSION_ENV, "1.0.0").strip() or "1.0.0",
+        "cid": os.environ.get(TRADOVATE_CID_ENV, "").strip(),
+        "sec": os.environ.get(TRADOVATE_SECRET_ENV, "").strip()
+    }
+    device_id = os.environ.get(TRADOVATE_DEVICE_ID_ENV, "").strip()
+    if device_id:
+        payload["deviceId"] = device_id
+
+    response = requests.post(
+        f"{get_tradovate_rest_url()}/auth/accesstokenrequest",
+        json=payload,
+        timeout=12,
+    )
+    response.raise_for_status()
+    data = response.json()
+    token = data.get("mdAccessToken") or data.get("accessToken")
+    if not token:
+        raise RuntimeError(data.get("errorText") or "Tradovate did not return an access token.")
+
+    tradovate_token_cache["token"] = token
+    tradovate_token_cache["expires_at"] = parse_tradovate_expiration_time(data.get("expirationTime"))
+    return token
+
+
+def parse_tradovate_symbol_map():
+    raw = os.environ.get(TRADOVATE_SYMBOL_MAP_ENV, "").strip()
+    if not raw:
+        return {}
+    try:
+        loaded = json.loads(raw)
+        if isinstance(loaded, dict):
+            return {str(k).upper(): str(v).upper() for k, v in loaded.items()}
+    except json.JSONDecodeError:
+        pass
+
+    mapping = {}
+    for pair in raw.split(","):
+        if "=" not in pair:
+            continue
+        key, value = pair.split("=", 1)
+        mapping[key.strip().upper()] = value.strip().upper()
+    return mapping
+
+
+def get_front_month_code(now=None):
+    now = now or datetime.now(DEMO_TIMEZONE)
+    quarter_months = [(3, "H"), (6, "M"), (9, "U"), (12, "Z")]
+    for month, code in quarter_months:
+        if now.month <= month:
+            return f"{code}{str(now.year)[-1]}"
+    return f"H{str(now.year + 1)[-1]}"
+
+
+def normalize_tradovate_symbol(symbol):
+    clean = str(symbol or "").upper().strip()
+    if not clean:
+        return clean
+    mapping = parse_tradovate_symbol_map()
+    if clean in mapping:
+        return mapping[clean]
+    if clean in TRADOVATE_INDEX_ROOTS:
+        return f"{clean}{get_front_month_code()}"
+    return clean
+
+
+def get_tradovate_chart_config(tf):
+    if tf == "1d":
+        return {"underlyingType": "DailyBar", "elementSize": 1, "asMuchAsElements": 120}
+    if tf == "15m":
+        return {"underlyingType": "MinuteBar", "elementSize": 15, "asMuchAsElements": 160}
+    if tf == "1m":
+        return {"underlyingType": "MinuteBar", "elementSize": 1, "asMuchAsElements": 240}
+    return {"underlyingType": "MinuteBar", "elementSize": 5, "asMuchAsElements": 180}
+
+
+def decode_tradovate_socket_payload(raw_message):
+    if not raw_message or raw_message in {"o", "h"}:
+        return []
+    try:
+        if raw_message.startswith("a"):
+            return json.loads(raw_message[1:])
+        parsed = json.loads(raw_message)
+        return parsed if isinstance(parsed, list) else [parsed]
+    except (json.JSONDecodeError, TypeError):
         return []
 
-    frame = df.reset_index() if hasattr(df, "reset_index") else df
-    time_column = None
-    sample_columns = list(getattr(frame, "columns", []))
-    for candidate in ("ts_event", "ts_recv", "time", "index", "datetime"):
-        if candidate in sample_columns:
-            time_column = candidate
-            break
 
+def normalize_tradovate_chart_bars(charts):
     candles = []
-    for _, row in frame.iterrows():
-        row_symbol = str(row.get("symbol") or row.get("raw_symbol") or "").upper().strip()
-        if row_symbol and row_symbol != symbol:
-            continue
-        timestamp = parse_databento_timestamp(row.get(time_column)) if time_column else None
-        if timestamp is None:
-            continue
-        try:
-            open_price = float(row.get("open"))
-            high_price = float(row.get("high"))
-            low_price = float(row.get("low"))
-            close_price = float(row.get("close"))
-            volume = int(float(row.get("volume") or 0))
-        except (TypeError, ValueError):
-            continue
-        candles.append({
-            "time": timestamp,
-            "open": round(open_price, 4),
-            "high": round(max(high_price, open_price, close_price), 4),
-            "low": round(min(low_price, open_price, close_price), 4),
-            "close": round(close_price, 4),
-            "volume": volume
-        })
-
+    for chart in charts or []:
+        for bar in chart.get("bars") or []:
+            timestamp = parse_market_timestamp(bar.get("timestamp"))
+            if timestamp is None:
+                continue
+            try:
+                open_price = float(bar.get("open"))
+                high_price = float(bar.get("high"))
+                low_price = float(bar.get("low"))
+                close_price = float(bar.get("close"))
+                volume = int(float(bar.get("upVolume") or 0) + float(bar.get("downVolume") or 0))
+            except (TypeError, ValueError):
+                continue
+            candles.append({
+                "time": timestamp,
+                "open": round(open_price, 4),
+                "high": round(max(high_price, open_price, close_price), 4),
+                "low": round(min(low_price, open_price, close_price), 4),
+                "close": round(close_price, 4),
+                "volume": volume
+            })
     candles.sort(key=lambda item: item["time"])
     return candles
 
 
-def resample_candles(candles, seconds):
-    if not candles or not seconds:
-        return candles
-
-    buckets = []
-    current = None
-    for candle in sorted(candles, key=lambda item: item["time"]):
-        bucket_time = candle["time"] - (candle["time"] % seconds)
-        if not current or current["time"] != bucket_time:
-            if current:
-                buckets.append(current)
-            current = {
-                "time": bucket_time,
-                "open": candle["open"],
-                "high": candle["high"],
-                "low": candle["low"],
-                "close": candle["close"],
-                "volume": candle.get("volume", 0)
-            }
-            continue
-        current["high"] = max(current["high"], candle["high"])
-        current["low"] = min(current["low"], candle["low"])
-        current["close"] = candle["close"]
-        current["volume"] += candle.get("volume", 0)
-
-    if current:
-        buckets.append(current)
-    return buckets
-
-
-def fetch_databento_candles(symbol, tf):
-    api_key = get_databento_api_key()
-    if not api_key:
+def fetch_tradovate_candles(symbol, tf):
+    if not tradovate_configured():
         return None
 
     try:
-        import databento as db
+        import websocket
     except ImportError:
-        print("Databento package is not installed. Install requirements to enable Databento data.")
+        print("websocket-client is not installed. Install requirements to enable Tradovate live data.")
         return None
 
-    config = get_databento_range_config(tf)
-    end_dt = datetime.now(tz=ZoneInfo("UTC"))
-    start_dt = end_dt - timedelta(days=config["days"])
-    client = db.Historical(api_key)
-    data = client.timeseries.get_range(
-        dataset=get_databento_dataset(),
-        schema=config["schema"],
-        symbols=[symbol],
-        stype_in="raw_symbol",
-        start=start_dt.isoformat(),
-        end=end_dt.isoformat(),
-    )
-    candles = normalize_databento_ohlcv(data.to_df(), symbol)
-    if config["resample_seconds"] and config["schema"] == "ohlcv-1m":
-        candles = resample_candles(candles, config["resample_seconds"])
-    return candles or None
+    token = get_tradovate_access_token()
+    if not token:
+        return None
+
+    config = get_tradovate_chart_config(tf)
+    request_body = {
+        "symbol": normalize_tradovate_symbol(symbol),
+        "chartDescription": {
+            "underlyingType": config["underlyingType"],
+            "elementSize": config["elementSize"],
+            "elementSizeUnit": "UnderlyingUnits",
+            "withHistogram": False
+        },
+        "timeRange": {
+            "asMuchAsElements": config["asMuchAsElements"]
+        }
+    }
+    candles = []
+    realtime_id = None
+    ws = None
+
+    try:
+        ws = websocket.create_connection(get_tradovate_md_ws_url(), timeout=12)
+        raw = ws.recv()
+        if raw == "o":
+            ws.send(f"authorize\n0\n\n{token}")
+        ws.send(f"md/getChart\n1\n\n{json.dumps(request_body)}")
+
+        started = time.time()
+        while time.time() - started < 12:
+            for item in decode_tradovate_socket_payload(ws.recv()):
+                if item.get("s") and item.get("s") >= 400:
+                    print("Tradovate chart error:", item.get("d"))
+                    return None
+                if item.get("s") == 200 and isinstance(item.get("d"), dict):
+                    realtime_id = item["d"].get("realtimeId")
+                if item.get("e") == "chart":
+                    charts = (item.get("d") or {}).get("charts") or []
+                    candles.extend(normalize_tradovate_chart_bars(charts))
+                    if candles and any(chart.get("eoh") for chart in charts):
+                        unique = {candle["time"]: candle for candle in candles}
+                        return [unique[key] for key in sorted(unique)]
+    except Exception as exc:
+        print("Tradovate candle fetch error:", exc)
+    finally:
+        try:
+            if ws and realtime_id:
+                ws.send(f"md/cancelChart\n2\n\n{json.dumps({'subscriptionId': realtime_id})}")
+            if ws:
+                ws.close()
+        except Exception:
+            pass
+
+    if candles:
+        unique = {candle["time"]: candle for candle in candles}
+        return [unique[key] for key in sorted(unique)]
+    return None
 
 
 def fetch_polygon_candles(symbol, tf):
@@ -1352,8 +1477,8 @@ def fetch_and_cache_candles(symbol, tf):
         }
 
     try:
-        candle_rows = fetch_databento_candles(symbol, tf) if get_databento_api_key() else None
-        source = "databento" if candle_rows else None
+        candle_rows = fetch_tradovate_candles(symbol, tf) if tradovate_configured() else None
+        source = "tradovate" if candle_rows else None
         if not candle_rows:
             candle_rows = fetch_polygon_candles(symbol, tf) if get_polygon_api_key() else None
             source = "polygon" if candle_rows else None
@@ -2202,15 +2327,17 @@ def build_algorithm_dashboard(tickers):
     return {
         "date": datetime.now(DEMO_TIMEZONE).strftime("%Y-%m-%d"),
         "generated_at": datetime.now(DEMO_TIMEZONE).isoformat(),
-        "mode": "signal-only",
+        "mode": "tradingview-tradovate-live" if tradovate_configured() else "signal-only",
         "live_trading": {
             "enabled": False,
             "broker_connected": broker_connected,
-            "label": "Broker detected, approval mode" if broker_connected else "Live execution locked",
+            "tradovate_configured": tradovate_configured(),
+            "tradingview_webhook_configured": bool(tradingview_webhook_secret()),
+            "label": "TradingView + Tradovate live mode" if tradovate_configured() else "Live execution locked",
             "summary": (
-                "Broker keys are present. The final order adapter and risk-confirmation layer still need to be connected before real orders can route."
-                if broker_connected
-                else "The algorithm can generate live buy/sell decisions now. Real order routing stays locked until a broker adapter, account keys, and risk caps are connected."
+                "Live data is set to Tradovate, and TradingView can send Pine alerts into the app. Real order routing still stays approval-only until the final risk layer is connected."
+                if tradovate_configured()
+                else "TradingView alerts and Tradovate live data are not fully configured yet. Databento remains reserved for Python/Jupyter backtesting."
             )
         },
         "totals": {
@@ -3164,6 +3291,43 @@ def pine_script_route():
         mimetype="text/plain",
         headers={"Content-Disposition": "inline; filename=ai_algorithm_strategy.pine"}
     )
+
+
+@app.route("/live-data-status")
+def live_data_status_route():
+    return jsonify({
+        "live_data": "tradovate" if tradovate_configured() else "not_configured",
+        "tradovate_configured": tradovate_configured(),
+        "tradovate_environment": get_tradovate_env(),
+        "tradingview_webhook_configured": bool(tradingview_webhook_secret()),
+        "backtesting_data": "databento"
+    })
+
+
+@app.route("/tradingview-webhook", methods=["POST"])
+def tradingview_webhook_route():
+    expected_secret = tradingview_webhook_secret()
+    provided_secret = request.headers.get("X-TradingView-Secret", "") or request.args.get("secret", "")
+    if expected_secret and provided_secret != expected_secret:
+        return jsonify({"ok": False, "error": "unauthorized"}), 401
+
+    payload = request.get_json(silent=True)
+    if payload is None:
+        payload = {"raw": request.get_data(as_text=True)}
+
+    message = {
+        "received_at": datetime.now(DEMO_TIMEZONE).isoformat(),
+        "source": "tradingview",
+        "payload": payload
+    }
+    tradingview_alert_messages.insert(0, message)
+    del tradingview_alert_messages[50:]
+    return jsonify({"ok": True, "stored": True})
+
+
+@app.route("/tradingview-alerts")
+def tradingview_alerts_route():
+    return jsonify(tradingview_alert_messages[:25])
 
 
 @app.route("/search-symbols")

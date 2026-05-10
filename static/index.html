@@ -2226,7 +2226,7 @@ body {
         <h1 class="algo-title">One brain. Ten algos. Live decisions.</h1>
         <div class="algo-copy">The app now opens around the algorithm first: scan the board, rank buy/sell pressure, arm alerts, and keep real-money execution locked until the broker and risk controls are connected.</div>
         <div class="hero-chip-row">
-          <div class="hero-chip live" id="providerChip">Databento connected</div>
+          <div class="hero-chip live" id="providerChip">TradingView + Tradovate</div>
           <div class="hero-chip" id="alertsChip">Alerts idle</div>
           <div class="hero-chip premium" id="premiumChip">Free plan</div>
         </div>
@@ -2266,7 +2266,7 @@ body {
     <div class="algo-live-card">
       <div class="algo-live-label">Last Updated</div>
       <div class="algo-live-title" id="lastUpdated">Waiting for data...</div>
-      <div class="algo-live-copy">The dashboard refreshes manually so your Databento usage stays controlled.</div>
+      <div class="algo-live-copy">TradingView handles chart alerts. Tradovate handles live market data. Databento stays in the research/backtest tools.</div>
       <div class="algo-actions">
         <button id="refreshBtn" class="algo-secondary" onclick="manualRefresh()">Refresh Now</button>
       </div>
@@ -3817,7 +3817,8 @@ function renderAlgoLivePanel(payload){
     <div class="algo-live-title">${live.label || "Live execution locked"}</div>
     <div class="algo-live-copy">${live.summary || "The algorithm can generate live decisions now. Real orders stay locked until broker routing and risk limits are connected."}</div>
     <div class="confirmation-list" style="margin-top:14px;">
-      <div class="confirmation-pill">${live.broker_connected ? "Broker detected" : "Broker not connected"}</div>
+      <div class="confirmation-pill">${live.tradovate_configured ? "Tradovate ready" : "Tradovate not configured"}</div>
+      <div class="confirmation-pill">${live.tradingview_webhook_configured ? "TradingView webhook ready" : "Webhook not configured"}</div>
       <div class="confirmation-pill">${live.enabled ? "Auto trading enabled" : "Manual approval only"}</div>
     </div>
   `;
@@ -5582,8 +5583,9 @@ async function analyze(sym){
       statusMessage = `Showing recent cached quote data from ${Math.round(d.cache_age_seconds)}s ago.`;
       setLastUpdated(`Cached quote ${formatAge(d.cache_age_seconds)}`);
     }else{
-      updateProviderChip(d.data_source === "databento" ? "Databento market data" : "Live market data");
-      setLastUpdated(`${d.data_source === "databento" ? "Databento" : "Live"} quote updated at ${liveEtTimeFormatter.format(new Date())} ET`);
+      const sourceLabel = d.data_source === "tradovate" ? "Tradovate live data" : d.data_source === "polygon" ? "Fallback market data" : "Live market data";
+      updateProviderChip(sourceLabel);
+      setLastUpdated(`${sourceLabel} updated at ${liveEtTimeFormatter.format(new Date())} ET`);
     }
 
     latestQuotes[t] = d.price;

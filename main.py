@@ -74,7 +74,7 @@ STATIC_US_MACRO_EVENTS = [
     ("2026-07-14T08:30:00-04:00", "Consumer Price Index", "June 2026"),
     ("2026-07-15T08:30:00-04:00", "Producer Price Index", "June 2026"),
 ]
-ALGORITHM_DEFAULT_UNIVERSE = ["ES", "NQ", "YM", "RTY", "MES", "MNQ", "CL", "GC", "SI", "ZN"]
+ALGORITHM_DEFAULT_UNIVERSE = ["NQ"]
 ALGORITHM_SIGNAL_CAPITAL = 1000
 FUTURES_ROOTS = {
     "ES", "MES", "NQ", "MNQ", "YM", "MYM", "RTY", "M2K",
@@ -1169,14 +1169,13 @@ def set_active_futures_market(symbol):
 
 
 def get_active_futures_market():
+    if not active_futures_market or active_futures_market.get("root") != "NQ":
+        return set_active_futures_market("NQ")
     return active_futures_market
 
 
 def active_market_matches_signal(signal):
-    active = get_active_futures_market()
-    if not active:
-        return False
-    return get_futures_root(signal.get("symbol")) == active.get("root")
+    return get_futures_root(signal.get("symbol")) == "NQ"
 
 
 def get_tradovate_chart_config(tf):
@@ -1695,7 +1694,7 @@ def route_tradingview_signal_to_tradovate(payload):
     active_market = get_active_futures_market()
     result["active_future"] = active_market
     if not active_market:
-        result["reason"] = "Rejected: search a futures market in the app first so the bot knows which market is armed."
+        result["reason"] = "Rejected: the bot is waiting for the default NQ market lock."
         return result
     if not active_market_matches_signal(signal):
         result["reason"] = f"Rejected: {active_market.get('root')} is armed, but this alert was for {get_futures_root(signal['symbol']) or signal['symbol']}."
@@ -2805,16 +2804,7 @@ def build_scanner_row(symbol):
 
 def build_algorithm_dashboard(tickers):
     rows = []
-    clean_tickers = []
-    for ticker in tickers or []:
-        symbol = strip_tradingview_symbol(ticker)
-        if symbol and symbol not in clean_tickers:
-            clean_tickers.append(symbol)
-
-    if not clean_tickers:
-        clean_tickers = [strip_tradingview_symbol(item) for item in load_watchlist() if is_futures_symbol(item)] or ALGORITHM_DEFAULT_UNIVERSE
-    else:
-        clean_tickers = [symbol for symbol in clean_tickers if is_futures_symbol(symbol)] or ALGORITHM_DEFAULT_UNIVERSE
+    clean_tickers = ["NQ"]
 
     for ticker in clean_tickers[:10]:
         scanner_row = build_scanner_row(ticker)
@@ -3561,12 +3551,9 @@ def auth_logout():
 
 @app.route("/analyze")
 def analyze():
-    symbol = request.args.get("ticker")
+    symbol = "NQ"
     strategy = request.args.get("strategy", "day")
     risk_profile = request.args.get("risk", "balanced").strip().lower() or "balanced"
-
-    if not symbol:
-        return jsonify({"error": "Missing ticker"}), 400
 
     result = analyze_strategy(symbol.upper(), strategy, risk_profile)
     if not result:

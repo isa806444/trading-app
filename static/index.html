@@ -310,6 +310,49 @@ body {
   color:#bbf7d0;
 }
 
+.nq-lock-card {
+  background:
+    linear-gradient(135deg, rgba(9, 20, 36, 0.96), rgba(5, 13, 25, 0.94)),
+    radial-gradient(circle at 18% 22%, rgba(45, 212, 191, 0.18), transparent 32%);
+}
+
+.locked-market-card {
+  display:grid;
+  grid-template-columns:auto minmax(0, 1fr) auto;
+  gap:16px;
+  align-items:center;
+  padding:18px;
+  border:1px solid rgba(45, 212, 191, 0.22);
+  border-radius:20px;
+  background:rgba(2, 6, 23, 0.42);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,0.05);
+}
+
+.locked-market-symbol {
+  width:72px;
+  height:72px;
+  display:grid;
+  place-items:center;
+  border-radius:18px;
+  color:#03130f;
+  background:linear-gradient(135deg, #2dd4bf, #22c55e);
+  font-size:28px;
+  font-weight:950;
+}
+
+.locked-market-title {
+  color:#f8fafc;
+  font-size:18px;
+  font-weight:900;
+}
+
+.locked-market-copy {
+  margin-top:5px;
+  color:#9fb1c8;
+  font-size:13px;
+  line-height:1.45;
+}
+
 .page-tools {
   display:flex;
   justify-content:space-between;
@@ -1817,6 +1860,15 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
     padding:6px 8px;
   }
 
+  .locked-market-card {
+    grid-template-columns:1fr;
+  }
+
+  .locked-market-symbol {
+    width:62px;
+    height:62px;
+  }
+
   .control-card,
   .chart-controls,
   .result-shell,
@@ -2260,7 +2312,7 @@ body {
         </div>
         <div class="algo-actions">
           <button class="algo-primary" onclick="loadAlgorithmDashboard(true)">Run Algorithm</button>
-          <button class="algo-secondary" onclick="manualRefresh()">Refresh Ticker</button>
+          <button class="algo-secondary" onclick="manualRefresh()">Refresh NQ</button>
           <button class="algo-secondary" onclick="window.open('/pine-script','_blank')">Export Pine Script</button>
         </div>
       </div>
@@ -2274,27 +2326,21 @@ body {
   </section>
 
   <div class="algo-control-grid">
-    <div class="algo-search-card">
+    <div class="algo-search-card nq-lock-card">
       <div class="section-head">
         <div>
-          <div class="section-kicker">Ask The Algorithm</div>
-          <div class="section-title">Search one futures market or run the board</div>
+          <div class="section-kicker">Armed Market</div>
+          <div class="section-title">NQ futures only</div>
         </div>
-        <div class="helper-pill">Momentum engine always on</div>
+        <div class="helper-pill">Auto-routed from TradingView</div>
       </div>
-      <div class="algo-search-row">
-        <div class="search-wrap">
-          <div class="search-shell">
-            <input id="ticker" name="armed-futures-market" type="text" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" placeholder="ES, NQ, MES, MNQ, CL, GC"/>
-            <div class="search-badge">Futures</div>
-            <div id="searchSuggestions" class="search-suggestions hidden"></div>
-          </div>
-          <div class="search-meta-row">
-            <div class="search-helper">Search one market to arm the bot.</div>
-            <div id="armedFuture" class="armed-future">No market armed</div>
-          </div>
+      <div class="locked-market-card">
+        <div class="locked-market-symbol">NQ</div>
+        <div>
+          <div class="locked-market-title">Nasdaq futures bot</div>
+          <div class="locked-market-copy">TradingView alerts must be NQ or NQ1!. All other markets are ignored before Databento and Tradeify/Tradovate routing.</div>
         </div>
-        <button class="analyze-btn algo-primary" onclick="analyze()">Analyze</button>
+        <div id="armedFuture" class="armed-future active">Armed: NQ</div>
       </div>
     </div>
     <div class="algo-live-card">
@@ -2458,7 +2504,7 @@ body {
 <script>
 let strategy = "momentum";
 let timeframe = "5m";
-let lastTicker = null;
+let lastTicker = "NQ";
 let watchlist = [];
 let watchlistData = [];
 let isLoading = false;
@@ -2493,7 +2539,7 @@ const PAPER_HISTORY_STORAGE_KEY = "trading-app-paper-history";
 const ALERTS_STORAGE_KEY = "trading-app-alerts";
 const LAYOUT_PREFS_STORAGE_KEY = "trading-app-layout-prefs";
 const STARTING_EQUITY = 10000;
-const TOP_MOVERS_UNIVERSE = ["ES","NQ","YM","RTY","MES","MNQ","CL","GC","SI","ZN","ZB","6E"];
+const TOP_MOVERS_UNIVERSE = ["NQ"];
 let paperPositions = [];
 let paperHistory = [];
 let alerts = [];
@@ -2511,7 +2557,7 @@ let portfolioStreakState = null;
 let communityState = { leaderboard: [], journals: [], heatmap: [], following: [] };
 let scannerCache = {};
 let scannerCacheTime = 0;
-const DEFAULT_SCANNER_UNIVERSE = ["ES", "NQ", "YM", "RTY", "MES", "MNQ", "CL", "GC"];
+const DEFAULT_SCANNER_UNIVERSE = ["NQ"];
 const FUTURES_SUGGESTIONS = [
   { symbol: "ES", name: "E-mini S&P 500", exchange: "CME" },
   { symbol: "MES", name: "Micro E-mini S&P 500", exchange: "CME" },
@@ -2585,7 +2631,7 @@ function setOnboardingVisible(visible){
   return;
 }
 
-function renderMarketEmptyState(title="Run the futures bot or search one market.", copy="The AI engine will return a buy, sell, or wait decision with scores, levels, and alert buttons."){
+function renderMarketEmptyState(title="NQ futures bot is armed.", copy="TradingView NQ alerts can be verified by Databento and routed through Tradeify/Tradovate when auto-trading is enabled."){
     const result = document.getElementById("result");
     const insights = document.getElementById("marketInsights");
     result.innerHTML = `
@@ -2593,9 +2639,9 @@ function renderMarketEmptyState(title="Run the futures bot or search one market.
         <div class="empty-title">${title}</div>
       <div class="empty-copy">${copy}</div>
       <div class="empty-grid">
-        <div class="empty-tip">Use a futures symbol like <strong>ES</strong>, <strong>NQ</strong>, <strong>MES</strong>, or <strong>CL</strong>.</div>
-        <div class="empty-tip">The algorithm requires multiple confirmations before calling a strong setup.</div>
-        <div class="empty-tip">Real-money routing stays locked until Tradovate demo mode is tested and live-trading acknowledgment is set.</div>
+        <div class="empty-tip">Only <strong>NQ</strong> and <strong>NQ1!</strong> TradingView alerts are accepted.</div>
+        <div class="empty-tip">The algorithm still requires Databento confirmation before routing an entry.</div>
+        <div class="empty-tip">Real-money routing stays locked until Tradeify/Tradovate demo mode is tested and live-trading acknowledgment is set.</div>
         </div>
       </div>
     `;
@@ -3752,7 +3798,7 @@ function renderAlgorithmDashboard(payload){
   renderAlgoLivePanel(payload);
 
   if(!rows.length){
-    container.innerHTML = '<div class="algo-empty">No algorithm rows loaded yet. Add tickers to the watchlist or run again in a moment.</div>';
+    container.innerHTML = '<div class="algo-empty">No NQ algorithm row loaded yet. Refresh again in a moment.</div>';
     return;
   }
 
@@ -3760,7 +3806,7 @@ function renderAlgorithmDashboard(payload){
     <div class="algo-board-head">
       <div>
         <div class="section-kicker">Algorithm Results</div>
-        <div class="section-title">Results for ${payload.date || "today"}</div>
+        <div class="section-title">NQ results for ${payload.date || "today"}</div>
         <div class="compact-copy">Model P/L is a signal-performance estimate using a $1,000 reference size per active decision, not a real filled order.</div>
       </div>
       <button class="algo-secondary" onclick="loadAlgorithmDashboard(true)">Refresh Board</button>
@@ -4241,13 +4287,16 @@ function renderPortfolioContext(){
 }
 
 function hideSuggestions(){
-  document.getElementById("searchSuggestions").classList.add("hidden");
+  document.getElementById("searchSuggestions")?.classList.add("hidden");
 }
 
 function chooseSuggestion(symbol, label){
-  document.getElementById("ticker").value = symbol;
+  const tickerInput = document.getElementById("ticker");
+  if(tickerInput){
+    tickerInput.value = symbol;
+  }
   hideSuggestions();
-  analyze(symbol);
+  analyze("NQ");
 }
 
 async function loadActiveFuture(){
@@ -4266,6 +4315,9 @@ async function loadActiveFuture(){
 
 function renderSuggestions(){
   const box = document.getElementById("searchSuggestions");
+  if(!box){
+    return;
+  }
   if(!searchSuggestions.length){
     box.innerHTML = "";
     box.classList.add("hidden");
@@ -4296,11 +4348,7 @@ async function fetchSuggestions(query){
 }
 
 function manualRefresh(){
-  if(lastTicker){
-    analyze(lastTicker);
-  }else{
-    loadAlgorithmDashboard(true);
-  }
+  analyze("NQ");
 }
 
 function setLoadingState(loading){
@@ -4311,7 +4359,7 @@ function setLoadingState(loading){
 
   if(analyzeBtn){
     analyzeBtn.disabled = loading;
-    analyzeBtn.innerText = loading ? "Loading..." : "Analyze";
+    analyzeBtn.innerText = loading ? "Loading..." : "Refresh";
   }
 
   if(refreshBtn){
@@ -5457,16 +5505,7 @@ async function loadCandles(ticker, options={}){
 async function analyze(sym){
   if(isLoading) return;
 
-  let t=sym||document.getElementById("ticker").value.trim();
-  if(t.includes("@")){
-    document.getElementById("ticker").value = "";
-    setStatus("Enter a futures symbol like ES or NQ.", "warning");
-    return;
-  }
-  if(!t) return;
-
-  t=t.toUpperCase();
-  document.getElementById("ticker").value = t;
+  let t = "NQ";
   lastTicker=t;
   riskProfile = "balanced";
   hideSuggestions();
@@ -5478,7 +5517,7 @@ async function analyze(sym){
 
     if(!d || d.error){
       setOnboardingVisible(true);
-      renderMarketEmptyState("Market data is temporarily unavailable.", "The app could not build the ticker card yet, but you can try Refresh Now in a moment or search a different symbol.");
+      renderMarketEmptyState("NQ data is temporarily unavailable.", "The bot is still armed to NQ, but the app could not build the NQ card yet. Try Refresh Now in a moment.");
       showChartMessage("No chart data is available yet. Try Refresh Now after a moment.");
       setLastUpdated("No recent market data available");
       setStatus("Live provider data is temporarily unavailable.", "warning");
@@ -5583,7 +5622,7 @@ async function analyze(sym){
   }catch(err){
     console.log(err);
     setOnboardingVisible(true);
-    renderMarketEmptyState("Something went wrong while loading market data.", "The search controls still work, but this request did not complete. Try again in a moment.");
+    renderMarketEmptyState("Something went wrong while loading NQ.", "The bot remains armed to NQ. Try again in a moment.");
     setLastUpdated("Update failed");
     setStatus("Something went wrong while loading market data.", "warning");
   }finally{
@@ -5591,30 +5630,28 @@ async function analyze(sym){
   }
 }
 
-document.getElementById("ticker").addEventListener("keydown", (e)=>{
-  if(e.key === "Enter"){
-    if(searchSuggestions.length){
-      const first = searchSuggestions[0];
-      chooseSuggestion(first.symbol, `${first.symbol} - ${first.name}`);
+const tickerInput = document.getElementById("ticker");
+if(tickerInput){
+  tickerInput.addEventListener("keydown", (e)=>{
+    if(e.key === "Enter"){
+      analyze("NQ");
+    }
+  });
+
+  tickerInput.addEventListener("input", (e)=>{
+    const value = e.target.value;
+    if(value.includes("@")){
+      e.target.value = "";
+      searchSuggestions = [];
+      renderSuggestions();
       return;
     }
-    analyze();
-  }
-});
-
-document.getElementById("ticker").addEventListener("input", (e)=>{
-  const value = e.target.value;
-  if(value.includes("@")){
-    e.target.value = "";
-    searchSuggestions = [];
-    renderSuggestions();
-    return;
-  }
-  if(searchDebounce){
-    clearTimeout(searchDebounce);
-  }
-  searchDebounce = setTimeout(() => fetchSuggestions(value), SEARCH_DEBOUNCE_MS);
-});
+    if(searchDebounce){
+      clearTimeout(searchDebounce);
+    }
+    searchDebounce = setTimeout(() => fetchSuggestions(value), SEARCH_DEBOUNCE_MS);
+  });
+}
 
 document.addEventListener("click", (e)=>{
   if(!e.target.closest(".search-wrap")){
@@ -5751,15 +5788,6 @@ function renderAlerts(){
 
 async function initializeApp(){
   loadLayoutPrefs();
-  const tickerInput = document.getElementById("ticker");
-  if(tickerInput && tickerInput.value.includes("@")){
-    tickerInput.value = "";
-  }
-  setTimeout(() => {
-    if(tickerInput && tickerInput.value.includes("@")){
-      tickerInput.value = "";
-    }
-  }, 500);
   setAuthMode("login");
   renderIndicatorToggles();
   syncTradeInputs();

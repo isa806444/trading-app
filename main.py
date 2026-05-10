@@ -89,6 +89,7 @@ tradovate_token_cache = {}
 tradingview_alert_messages = []
 tradingview_recent_signal_keys = {}
 bot_trade_messages = []
+active_futures_market = None
 database_enabled = False
 news_cache = {}
 events_cache = {}
@@ -1150,6 +1151,34 @@ def normalize_databento_symbol(symbol):
     return normalize_tradovate_symbol(clean)
 
 
+def set_active_futures_market(symbol):
+    global active_futures_market
+
+    root = get_futures_root(symbol)
+    if not root:
+        return None
+
+    active_futures_market = {
+        "root": root,
+        "searched_symbol": strip_tradingview_symbol(symbol),
+        "tradovate_symbol": normalize_tradovate_symbol(symbol),
+        "databento_symbol": normalize_databento_symbol(symbol),
+        "updated_at": datetime.now(DEMO_TIMEZONE).isoformat()
+    }
+    return active_futures_market
+
+
+def get_active_futures_market():
+    return active_futures_market
+
+
+def active_market_matches_signal(signal):
+    active = get_active_futures_market()
+    if not active:
+        return False
+    return get_futures_root(signal.get("symbol")) == active.get("root")
+
+
 def get_tradovate_chart_config(tf):
     if tf == "1d":
         return {"underlyingType": "DailyBar", "elementSize": 1, "asMuchAsElements": 120}
@@ -1663,6 +1692,14 @@ def route_tradingview_signal_to_tradovate(payload):
     if not is_futures_symbol(signal["symbol"]):
         result["reason"] = "Rejected: this bot only trades futures symbols from TradingView."
         return result
+    active_market = get_active_futures_market()
+    result["active_future"] = active_market
+    if not active_market:
+        result["reason"] = "Rejected: search a futures market in the app first so the bot knows which market is armed."
+        return result
+    if not active_market_matches_signal(signal):
+        result["reason"] = f"Rejected: {active_market.get('root')} is armed, but this alert was for {get_futures_root(signal['symbol']) or signal['symbol']}."
+        return result
     if duplicate_tradingview_signal(signal):
         result["reason"] = "Duplicate TradingView futures signal ignored."
         return result
@@ -1754,6 +1791,7 @@ def build_bot_trade_message(payload, execution):
         "edge": signal.get("edge"),
         "verification": verification,
         "verification_status": "Verified" if verification.get("passed") else "Not verified",
+        "active_future": execution.get("active_future"),
         "reason": execution.get("reason") or ("Tradeify/Tradovate order routed." if routed else "Demo trade logged from algorithm alert."),
         "order": execution.get("order"),
         "tag": signal.get("tag")
@@ -3534,6 +3572,9 @@ def analyze():
     if not result:
         return jsonify({"error": "No data"}), 500
 
+    active_market = set_active_futures_market(symbol) if is_futures_symbol(symbol) else None
+    result["active_future"] = active_market
+
     return jsonify(result)
 
 
@@ -3684,6 +3725,7 @@ def live_data_status_route():
         "live_data": "tradingview_webhooks",
         "futures_only": True,
         "execution_destination": "tradeify_tradovate",
+        "active_future": get_active_futures_market(),
         "tradovate_configured": tradovate_configured(),
         "tradovate_environment": get_tradovate_env(),
         "tradovate_auto_trade_enabled": tradovate_auto_trade_enabled(),
@@ -3693,6 +3735,14 @@ def live_data_status_route():
         "databento_verification_enabled": databento_alert_verification_enabled(),
         "backtesting_data": "databento",
         "databento_dataset": get_databento_dataset()
+    })
+
+
+@app.route("/active-future")
+def active_future_route():
+    return jsonify({
+        "active_future": get_active_futures_market(),
+        "futures_only": True
     })
 
 

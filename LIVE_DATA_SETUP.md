@@ -73,7 +73,7 @@ Run it on futures charts like `ES1!`, `NQ1!`, `MES1!`, or `MNQ1!`. Create an ale
 https://trading-app-kb38.onrender.com/tradingview-webhook?secret=make_a_private_secret
 ```
 
-The Pine alert sends `BUY` or `SELL` plus live price, target, stop, contracts, edge, and bar time. The app rejects non-futures symbols, checks Databento, then sends verified bracket orders through Tradeify/Tradovate.
+The Pine alert sends `BUY` or `SELL` plus live price, target, stop, contracts, edge, and bar time. The app rejects non-futures symbols, rejects alerts for any futures market other than the one currently searched/armed in the app, checks Databento, then sends verified bracket orders through Tradeify/Tradovate.
 
 ## Databento Backtesting
 

@@ -8,6 +8,7 @@ This project is a futures-only AI algorithm trading dashboard built with Flask, 
 - Run the futures AI algorithm board
 - Export the TradingView Pine Script strategy
 - Receive TradingView webhook alerts from live futures charts
+- Arm one searched futures market at a time so the bot ignores other futures alerts
 - Verify entry alerts against Databento historical futures data
 - Route verified alerts to Tradeify/Tradovate OSO bracket orders when auto-trading is enabled
 - Save and remove watchlist tickers with persistence in `watchlist.json`

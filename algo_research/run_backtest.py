@@ -11,10 +11,10 @@ from .databento_data import fetch_ohlcv
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run the AI algorithm backtest on Databento OHLCV data.")
-    parser.add_argument("--symbol", default="AAPL")
+    parser.add_argument("--symbol", default="ESM6")
     parser.add_argument("--start", default=None)
     parser.add_argument("--end", default=None)
-    parser.add_argument("--dataset", default="EQUS.MINI")
+    parser.add_argument("--dataset", default="GLBX.MDP3")
     parser.add_argument("--schema", default="ohlcv-1m")
     parser.add_argument("--cash", type=float, default=10_000)
     parser.add_argument("--risk-fraction", type=float, default=0.1)

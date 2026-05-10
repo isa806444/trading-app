@@ -10,7 +10,7 @@ from pathlib import Path
 import pandas as pd
 
 
-DEFAULT_DATASET = os.getenv("DATABENTO_DATASET", "EQUS.MINI")
+DEFAULT_DATASET = os.getenv("DATABENTO_DATASET", "GLBX.MDP3")
 DEFAULT_SCHEMA = os.getenv("DATABENTO_SCHEMA", "ohlcv-1m")
 
 
@@ -77,7 +77,7 @@ def save_ohlcv_csv(df: pd.DataFrame, symbol: str, output_dir: str = "data/databe
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Fetch Databento OHLCV bars for backtesting.")
-    parser.add_argument("--symbol", default="AAPL")
+    parser.add_argument("--symbol", default="ESM6")
     parser.add_argument("--start", default=None)
     parser.add_argument("--end", default=None)
     parser.add_argument("--dataset", default=DEFAULT_DATASET)

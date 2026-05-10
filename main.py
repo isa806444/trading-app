@@ -20,6 +20,15 @@ WATCHLIST_FILE = "watchlist.json"
 MARKET_CACHE_FILE = "market_cache.json"
 POLYGON_BASE_URL = "https://api.polygon.io"
 POLYGON_API_KEY_ENV = "POLYGON_API_KEY"
+DATABENTO_API_KEY_ENV = "DATABENTO_API_KEY"
+DATABENTO_DATASET_ENV = "DATABENTO_DATASET"
+DATABENTO_SCHEMA_ENV = "DATABENTO_SCHEMA"
+DATABENTO_STYPE_IN_ENV = "DATABENTO_STYPE_IN"
+DATABENTO_SYMBOL_MAP_ENV = "DATABENTO_SYMBOL_MAP"
+DATABENTO_VERIFY_ALERTS_ENABLED_ENV = "DATABENTO_VERIFY_ALERTS_ENABLED"
+DATABENTO_LOOKBACK_MINUTES_ENV = "DATABENTO_LOOKBACK_MINUTES"
+DATABENTO_MIN_RECORDS_ENV = "DATABENTO_MIN_RECORDS"
+DATABENTO_MAX_ALERT_DEVIATION_PCT_ENV = "DATABENTO_MAX_ALERT_DEVIATION_PCT"
 TRADOVATE_ENV_ENV = "TRADOVATE_ENV"
 TRADOVATE_USERNAME_ENV = "TRADOVATE_USERNAME"
 TRADOVATE_PASSWORD_ENV = "TRADOVATE_PASSWORD"
@@ -65,9 +74,14 @@ STATIC_US_MACRO_EVENTS = [
     ("2026-07-14T08:30:00-04:00", "Consumer Price Index", "June 2026"),
     ("2026-07-15T08:30:00-04:00", "Producer Price Index", "June 2026"),
 ]
-ALGORITHM_DEFAULT_UNIVERSE = ["AAPL", "NVDA", "TSLA", "AMD", "META", "AMZN", "MSFT", "GOOGL", "PLTR", "SPY"]
+ALGORITHM_DEFAULT_UNIVERSE = ["ES", "NQ", "YM", "RTY", "MES", "MNQ", "CL", "GC", "SI", "ZN"]
 ALGORITHM_SIGNAL_CAPITAL = 1000
-TRADOVATE_INDEX_ROOTS = {"ES", "MES", "NQ", "MNQ", "YM", "MYM", "RTY", "M2K"}
+FUTURES_ROOTS = {
+    "ES", "MES", "NQ", "MNQ", "YM", "MYM", "RTY", "M2K",
+    "CL", "MCL", "GC", "MGC", "SI", "SIL", "HG", "NG",
+    "ZB", "ZN", "ZF", "ZT", "6E", "6B", "6J", "6A", "6C"
+}
+TRADOVATE_INDEX_ROOTS = FUTURES_ROOTS
 
 quote_cache = {}
 candle_cache = {}
@@ -110,6 +124,22 @@ app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 def get_polygon_api_key():
     return os.environ.get(POLYGON_API_KEY_ENV, "").strip()
+
+
+def get_databento_api_key():
+    return os.environ.get(DATABENTO_API_KEY_ENV, "").strip()
+
+
+def get_databento_dataset():
+    return os.environ.get(DATABENTO_DATASET_ENV, "GLBX.MDP3").strip() or "GLBX.MDP3"
+
+
+def get_databento_schema():
+    return os.environ.get(DATABENTO_SCHEMA_ENV, "ohlcv-1m").strip() or "ohlcv-1m"
+
+
+def get_databento_stype_in():
+    return os.environ.get(DATABENTO_STYPE_IN_ENV, "raw_symbol").strip() or "raw_symbol"
 
 
 def get_tradovate_env():
@@ -179,6 +209,10 @@ def live_trading_acknowledged():
 
 def tradovate_execution_ready():
     return tradovate_configured() and tradovate_auto_trade_enabled() and live_trading_acknowledged()
+
+
+def databento_alert_verification_enabled():
+    return env_bool(DATABENTO_VERIFY_ALERTS_ENABLED_ENV, True)
 
 
 def get_database_url():
@@ -807,7 +841,8 @@ def fetch_stock_news(symbol, change):
     if cached and not cached["stale"]:
         return cached["data"]
 
-    query = quote_plus(f"{symbol} stock when:1d")
+    topic = "futures market" if is_futures_symbol(symbol) else "stock"
+    query = quote_plus(f"{symbol} {topic} when:1d")
     url = f"https://news.google.com/rss/search?q={query}&hl=en-US&gl=US&ceid=US:en"
 
     try:
@@ -1029,12 +1064,21 @@ def get_tradovate_access_token(token_type="trade"):
 
 def parse_tradovate_symbol_map():
     raw = os.environ.get(TRADOVATE_SYMBOL_MAP_ENV, "").strip()
+    return parse_symbol_map(raw)
+
+
+def parse_databento_symbol_map():
+    raw = os.environ.get(DATABENTO_SYMBOL_MAP_ENV, "").strip()
+    return parse_symbol_map(raw)
+
+
+def parse_symbol_map(raw):
     if not raw:
         return {}
     try:
         loaded = json.loads(raw)
         if isinstance(loaded, dict):
-            return {str(k).upper(): str(v).upper() for k, v in loaded.items()}
+            return {str(k).upper(): str(v).strip() for k, v in loaded.items()}
     except json.JSONDecodeError:
         pass
 
@@ -1043,7 +1087,7 @@ def parse_tradovate_symbol_map():
         if "=" not in pair:
             continue
         key, value = pair.split("=", 1)
-        mapping[key.strip().upper()] = value.strip().upper()
+        mapping[key.strip().upper()] = value.strip()
     return mapping
 
 
@@ -1056,16 +1100,54 @@ def get_front_month_code(now=None):
     return f"H{str(now.year + 1)[-1]}"
 
 
-def normalize_tradovate_symbol(symbol):
+def strip_tradingview_symbol(symbol):
     clean = str(symbol or "").upper().strip()
+    if ":" in clean:
+        clean = clean.split(":", 1)[1]
+    return clean.replace("!", "").replace(" ", "")
+
+
+def get_futures_root(symbol):
+    clean = strip_tradingview_symbol(symbol)
+    alnum = "".join(ch for ch in clean if ch.isalnum())
+    if not alnum:
+        return ""
+    for root in sorted(FUTURES_ROOTS, key=len, reverse=True):
+        if alnum == root or alnum.startswith(root):
+            return root
+    return ""
+
+
+def is_futures_symbol(symbol):
+    return bool(get_futures_root(symbol))
+
+
+def normalize_tradovate_symbol(symbol):
+    clean = strip_tradingview_symbol(symbol)
     if not clean:
         return clean
     mapping = parse_tradovate_symbol_map()
     if clean in mapping:
         return mapping[clean]
+    root = get_futures_root(clean)
+    if root and root in mapping:
+        return mapping[root]
+    if clean.endswith("1") and root:
+        return f"{root}{get_front_month_code()}"
     if clean in TRADOVATE_INDEX_ROOTS:
         return f"{clean}{get_front_month_code()}"
     return clean
+
+
+def normalize_databento_symbol(symbol):
+    clean = strip_tradingview_symbol(symbol)
+    mapping = parse_databento_symbol_map()
+    if clean in mapping:
+        return mapping[clean]
+    root = get_futures_root(clean)
+    if root and root in mapping:
+        return mapping[root]
+    return normalize_tradovate_symbol(clean)
 
 
 def get_tradovate_chart_config(tf):
@@ -1324,6 +1406,150 @@ def build_tradingview_execution_signal(payload):
     }
 
 
+def parse_databento_price(value):
+    if value in (None, ""):
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed / 1_000_000_000 if abs(parsed) > 1_000_000 else parsed
+
+
+def parse_databento_candles(text):
+    candles = []
+    for line in str(text or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(row, dict):
+            continue
+
+        timestamp = parse_market_timestamp(row.get("ts_event") or row.get("ts_recv") or row.get("time"))
+        open_price = parse_databento_price(row.get("open") or row.get("open_px"))
+        high_price = parse_databento_price(row.get("high") or row.get("high_px"))
+        low_price = parse_databento_price(row.get("low") or row.get("low_px"))
+        close_price = parse_databento_price(row.get("close") or row.get("close_px") or row.get("price"))
+        if timestamp is None or None in {open_price, high_price, low_price, close_price}:
+            continue
+        try:
+            volume = int(float(row.get("volume") or row.get("vol") or row.get("size") or 0))
+        except (TypeError, ValueError):
+            volume = 0
+        candles.append({
+            "time": timestamp,
+            "open": round(open_price, 6),
+            "high": round(max(high_price, open_price, close_price), 6),
+            "low": round(min(low_price, open_price, close_price), 6),
+            "close": round(close_price, 6),
+            "volume": volume
+        })
+    unique = {candle["time"]: candle for candle in candles}
+    return [unique[key] for key in sorted(unique)]
+
+
+def fetch_databento_verification_candles(symbol):
+    api_key = get_databento_api_key()
+    if not api_key:
+        return None, "DATABENTO_API_KEY is not set."
+
+    lookback_minutes = env_int(DATABENTO_LOOKBACK_MINUTES_ENV, 240)
+    end_ts = int(time.time())
+    start_ts = end_ts - max(30, lookback_minutes) * 60
+    request_symbol = normalize_databento_symbol(symbol)
+    try:
+        response = requests.get(
+            "https://hist.databento.com/v0/timeseries.get_range",
+            params={
+                "dataset": get_databento_dataset(),
+                "schema": get_databento_schema(),
+                "symbols": request_symbol,
+                "stype_in": get_databento_stype_in(),
+                "start": datetime.fromtimestamp(start_ts, ZoneInfo("UTC")).isoformat(),
+                "end": datetime.fromtimestamp(end_ts, ZoneInfo("UTC")).isoformat(),
+                "encoding": "json",
+                "compression": "none",
+                "limit": 500
+            },
+            auth=(api_key, ""),
+            timeout=18
+        )
+        response.raise_for_status()
+    except Exception as exc:
+        return None, f"Databento verification request failed: {exc}"
+
+    candles = parse_databento_candles(response.text)
+    if not candles:
+        return None, f"Databento returned no verification candles for {request_symbol}."
+    return candles, ""
+
+
+def verify_tradingview_signal_with_databento(signal):
+    verification = {
+        "enabled": databento_alert_verification_enabled(),
+        "passed": False,
+        "source": "databento",
+        "reason": "",
+        "candles": 0,
+        "symbol": normalize_databento_symbol(signal.get("symbol")),
+        "model_action": "WAIT",
+        "model_edge": 0,
+        "price_deviation_pct": None
+    }
+    if not verification["enabled"]:
+        verification["passed"] = True
+        verification["reason"] = "Databento verification is disabled by environment setting."
+        return verification
+
+    if signal.get("action") in {"EXIT_LONG", "EXIT_SHORT"}:
+        verification["passed"] = True
+        verification["reason"] = "Exit alert accepted; entry quality was checked when the trade opened."
+        return verification
+
+    candles, error = fetch_databento_verification_candles(signal.get("symbol"))
+    if error:
+        verification["reason"] = error
+        return verification
+
+    min_records = env_int(DATABENTO_MIN_RECORDS_ENV, 40)
+    verification["candles"] = len(candles)
+    if len(candles) < min_records:
+        verification["reason"] = f"Databento only returned {len(candles)} candles; need at least {min_records}."
+        return verification
+
+    first_close = float(candles[0]["close"])
+    last_close = float(candles[-1]["close"])
+    change = ((last_close - first_close) / first_close) * 100 if first_close else 0
+    model = build_trade_signal(round(change, 2), "neutral", "momentum", candles)
+    model_algo = model.get("algorithm") or {}
+    model_edge = float(model_algo.get("edge") or 0)
+    verification["model_action"] = model.get("action", "WAIT")
+    verification["model_edge"] = round(model_edge, 2)
+
+    alert_price = signal.get("price")
+    if alert_price and last_close:
+        deviation = abs(float(alert_price) - last_close) / last_close * 100
+        verification["price_deviation_pct"] = round(deviation, 3)
+        max_deviation = env_float(DATABENTO_MAX_ALERT_DEVIATION_PCT_ENV, 1.25)
+        if deviation > max_deviation:
+            verification["reason"] = f"TradingView price is {round(deviation, 2)}% away from Databento context; max allowed is {max_deviation}%."
+            return verification
+
+    expected = signal.get("action")
+    min_edge = env_float(ALGO_MIN_EDGE_FOR_AUTO_TRADE_ENV, 18) * 0.75
+    if model.get("action") == expected and abs(model_edge) >= min_edge:
+        verification["passed"] = True
+        verification["reason"] = f"Databento confirmed {expected} with model edge {round(model_edge, 1)}."
+        return verification
+
+    verification["reason"] = f"Databento did not confirm {expected}; model says {model.get('action')} with edge {round(model_edge, 1)}."
+    return verification
+
+
 def duplicate_tradingview_signal(signal, ttl=90):
     now = time.time()
     for key, timestamp in list(tradingview_recent_signal_keys.items()):
@@ -1422,7 +1648,9 @@ def route_tradingview_signal_to_tradovate(payload):
         "enabled": tradovate_auto_trade_enabled(),
         "ready": tradovate_execution_ready(),
         "routed": False,
+        "destination": "tradeify_tradovate",
         "signal": signal,
+        "verification": None,
         "reason": ""
     }
 
@@ -1432,17 +1660,25 @@ def route_tradingview_signal_to_tradovate(payload):
     if not signal["symbol"]:
         result["reason"] = "TradingView alert was stored but no ticker/contract was supplied."
         return result
+    if not is_futures_symbol(signal["symbol"]):
+        result["reason"] = "Rejected: this bot only trades futures symbols from TradingView."
+        return result
+    if duplicate_tradingview_signal(signal):
+        result["reason"] = "Duplicate TradingView futures signal ignored."
+        return result
+    verification = verify_tradingview_signal_with_databento(signal)
+    result["verification"] = verification
+    if not verification.get("passed"):
+        result["reason"] = verification.get("reason") or "Databento did not verify this alert."
+        return result
     if not tradovate_configured():
-        result["reason"] = "Tradovate credentials are not configured."
+        result["reason"] = "Tradeify/Tradovate credentials are not configured."
         return result
     if not tradovate_auto_trade_enabled():
         result["reason"] = "Auto-trading is off. Set TRADOVATE_AUTO_TRADE_ENABLED=true after demo testing."
         return result
     if not live_trading_acknowledged():
         result["reason"] = "Live Tradovate orders require TRADOVATE_LIVE_TRADING_ACK=I_UNDERSTAND_REAL_MONEY_RISK."
-        return result
-    if duplicate_tradingview_signal(signal):
-        result["reason"] = "Duplicate TradingView signal ignored."
         return result
 
     max_daily_orders = env_int(TRADOVATE_MAX_DAILY_ORDERS_ENV, 5)
@@ -1474,7 +1710,7 @@ def route_tradingview_signal_to_tradovate(payload):
             },
             "order": order_result.get("response"),
             "failure": order_result.get("failure"),
-            "reason": order_result.get("failure_text") or ("Tradovate order routed." if order_result.get("ok") else "Tradovate rejected the order.")
+            "reason": order_result.get("failure_text") or ("Tradeify/Tradovate order routed." if order_result.get("ok") else "Tradeify/Tradovate rejected the order.")
         })
     except Exception as exc:
         result["reason"] = str(exc)
@@ -1485,6 +1721,7 @@ def route_tradingview_signal_to_tradovate(payload):
 def build_bot_trade_message(payload, execution):
     execution = execution or {}
     signal = execution.get("signal") or build_tradingview_execution_signal(payload)
+    verification = execution.get("verification") or {}
     action = signal.get("action", "")
     symbol = signal.get("symbol", "")
     if action not in {"BUY", "SELL", "EXIT_LONG", "EXIT_SHORT"} or not symbol:
@@ -1515,7 +1752,9 @@ def build_bot_trade_message(payload, execution):
         "target": signal.get("target"),
         "stop": signal.get("stop"),
         "edge": signal.get("edge"),
-        "reason": execution.get("reason") or ("Tradovate order routed." if routed else "Demo trade logged from algorithm alert."),
+        "verification": verification,
+        "verification_status": "Verified" if verification.get("passed") else "Not verified",
+        "reason": execution.get("reason") or ("Tradeify/Tradovate order routed." if routed else "Demo trade logged from algorithm alert."),
         "order": execution.get("order"),
         "tag": signal.get("tag")
     }
@@ -2328,7 +2567,7 @@ def detect_market_mode(change, candles):
         note = "Range and participation both look soft, so follow-through risk is lower."
     elif relative_volume >= 1.5 and abs(change) >= 1:
         mode = "Expansion"
-        note = "Participation is elevated and the stock is stretching away from its baseline."
+        note = "Participation is elevated and the market is stretching away from its baseline."
     else:
         mode = "Balanced"
         note = "The tape is active enough to trade, but the trend is not dominant yet."
@@ -2530,12 +2769,14 @@ def build_algorithm_dashboard(tickers):
     rows = []
     clean_tickers = []
     for ticker in tickers or []:
-        symbol = str(ticker or "").upper().strip()
+        symbol = strip_tradingview_symbol(ticker)
         if symbol and symbol not in clean_tickers:
             clean_tickers.append(symbol)
 
     if not clean_tickers:
-        clean_tickers = load_watchlist() or ALGORITHM_DEFAULT_UNIVERSE
+        clean_tickers = [strip_tradingview_symbol(item) for item in load_watchlist() if is_futures_symbol(item)] or ALGORITHM_DEFAULT_UNIVERSE
+    else:
+        clean_tickers = [symbol for symbol in clean_tickers if is_futures_symbol(symbol)] or ALGORITHM_DEFAULT_UNIVERSE
 
     for ticker in clean_tickers[:10]:
         scanner_row = build_scanner_row(ticker)
@@ -2595,7 +2836,7 @@ def build_algorithm_dashboard(tickers):
     return {
         "date": datetime.now(DEMO_TIMEZONE).strftime("%Y-%m-%d"),
         "generated_at": datetime.now(DEMO_TIMEZONE).isoformat(),
-        "mode": "tradingview-signals-tradovate-execution" if tradovate_configured() else "signal-only",
+        "mode": "tradingview-databento-tradeify-futures" if tradovate_configured() else "signal-only",
         "live_trading": {
             "enabled": tradovate_execution_ready(),
             "broker_connected": tradovate_configured(),
@@ -2603,11 +2844,13 @@ def build_algorithm_dashboard(tickers):
             "tradovate_auto_trade_enabled": tradovate_auto_trade_enabled(),
             "tradovate_environment": get_tradovate_env(),
             "tradingview_webhook_configured": bool(tradingview_webhook_secret()),
-            "label": "TradingView live signals + Tradovate execution" if tradovate_configured() else "Live execution locked",
+            "databento_verification_enabled": databento_alert_verification_enabled(),
+            "futures_only": True,
+            "label": "TradingView -> Databento -> Tradeify" if tradovate_configured() else "Live execution locked",
             "summary": (
-                "TradingView alerts are the live signal feed. Valid alerts can route bracket orders to Tradovate when auto-trading is enabled."
+                "Futures alerts come from TradingView, Databento verifies the setup, then verified orders route to your Tradeify account through Tradovate."
                 if tradovate_execution_ready()
-                else "TradingView alerts can be received now. Tradovate order routing stays locked until credentials, account ID, and auto-trade env vars are set."
+                else "TradingView futures alerts can be received now. Databento verification and Tradeify/Tradovate routing stay locked until the env vars are set."
             )
         },
         "totals": {
@@ -2690,7 +2933,7 @@ def pearson_correlation(series_a, series_b):
 
 def build_correlation_tracker(symbol, base_candles):
     closes = [candle["close"] for candle in base_candles]
-    peers = [("SPY", "SPY"), ("QQQ", "QQQ"), ("XLK", "XLK")]
+    peers = [("ES", "S&P futures"), ("NQ", "Nasdaq futures"), ("YM", "Dow futures"), ("RTY", "Russell futures")]
     rows = []
     for peer_symbol, label in peers:
         if peer_symbol == symbol:
@@ -3439,13 +3682,17 @@ def pine_script_route():
 def live_data_status_route():
     return jsonify({
         "live_data": "tradingview_webhooks",
+        "futures_only": True,
+        "execution_destination": "tradeify_tradovate",
         "tradovate_configured": tradovate_configured(),
         "tradovate_environment": get_tradovate_env(),
         "tradovate_auto_trade_enabled": tradovate_auto_trade_enabled(),
         "tradovate_execution_ready": tradovate_execution_ready(),
         "live_trading_acknowledged": live_trading_acknowledged(),
         "tradingview_webhook_configured": bool(tradingview_webhook_secret()),
-        "backtesting_data": "databento"
+        "databento_verification_enabled": databento_alert_verification_enabled(),
+        "backtesting_data": "databento",
+        "databento_dataset": get_databento_dataset()
     })
 
 

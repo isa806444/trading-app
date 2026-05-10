@@ -8,14 +8,24 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.7
-      - key: POLYGON_API_KEY
-        sync: false
       - key: DATABENTO_API_KEY
         sync: false
       - key: DATABENTO_DATASET
-        value: EQUS.MINI
+        value: GLBX.MDP3
       - key: DATABENTO_SCHEMA
         value: ohlcv-1m
+      - key: DATABENTO_STYPE_IN
+        value: raw_symbol
+      - key: DATABENTO_SYMBOL_MAP
+        sync: false
+      - key: DATABENTO_VERIFY_ALERTS_ENABLED
+        value: "true"
+      - key: DATABENTO_LOOKBACK_MINUTES
+        value: "240"
+      - key: DATABENTO_MIN_RECORDS
+        value: "40"
+      - key: DATABENTO_MAX_ALERT_DEVIATION_PCT
+        value: "1.25"
       - key: TRADINGVIEW_WEBHOOK_SECRET
         sync: false
       - key: TRADOVATE_ENV

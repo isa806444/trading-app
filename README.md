@@ -1,14 +1,15 @@
 # Trading App
 
-This project is an AI algorithm trading dashboard built with Flask, vanilla HTML, TradingView alerts, Tradovate execution hooks, and Databento research tools.
+This project is a futures-only AI algorithm trading dashboard built with Flask, TradingView alerts, Databento verification/backtesting, and Tradeify/Tradovate execution hooks.
 
 ## Current Features
 
-- Search a ticker and generate an algorithm trade plan
-- Run the AI algorithm board
+- Search a futures market and generate an algorithm trade plan
+- Run the futures AI algorithm board
 - Export the TradingView Pine Script strategy
-- Receive TradingView webhook alerts
-- Route valid alerts to Tradovate OSO bracket orders when auto-trading is enabled
+- Receive TradingView webhook alerts from live futures charts
+- Verify entry alerts against Databento historical futures data
+- Route verified alerts to Tradeify/Tradovate OSO bracket orders when auto-trading is enabled
 - Save and remove watchlist tickers with persistence in `watchlist.json`
 - Backtest with Databento in Python, VS Code, and Jupyter
 
@@ -55,14 +56,18 @@ For live bot routing, start with demo mode:
 
 ```text
 TRADINGVIEW_WEBHOOK_SECRET=make_a_private_secret
+DATABENTO_API_KEY=your_databento_key
+DATABENTO_DATASET=GLBX.MDP3
+DATABENTO_SCHEMA=ohlcv-1m
+DATABENTO_VERIFY_ALERTS_ENABLED=true
 TRADOVATE_ENV=demo
-TRADOVATE_USERNAME=your_tradovate_username
-TRADOVATE_PASSWORD=your_tradovate_password
+TRADOVATE_USERNAME=your_tradeify_tradovate_username
+TRADOVATE_PASSWORD=your_tradeify_tradovate_password
 TRADOVATE_APP_ID=your_tradovate_app_id
 TRADOVATE_CID=your_tradovate_cid
 TRADOVATE_SECRET=your_tradovate_secret
-TRADOVATE_ACCOUNT_SPEC=your_account_name
-TRADOVATE_ACCOUNT_ID=your_account_id
+TRADOVATE_ACCOUNT_SPEC=your_tradeify_account_name
+TRADOVATE_ACCOUNT_ID=your_tradeify_account_id
 TRADOVATE_AUTO_TRADE_ENABLED=false
 ```
 
@@ -110,8 +115,9 @@ gunicorn main:app
 
 ## Notes
 
-- TradingView is the live signal source for bots.
-- Tradovate execution is locked until `TRADOVATE_AUTO_TRADE_ENABLED=true`.
-- Live Tradovate orders also require `TRADOVATE_LIVE_TRADING_ACK=I_UNDERSTAND_REAL_MONEY_RISK`.
-- Databento is only for research/backtesting.
+- TradingView is the live signal source for futures bots.
+- Databento verifies entry alerts and powers research/backtesting.
+- Tradeify execution uses the Tradovate credentials provided by your Tradeify account.
+- Tradeify/Tradovate execution is locked until `TRADOVATE_AUTO_TRADE_ENABLED=true`.
+- Live orders also require `TRADOVATE_LIVE_TRADING_ACK=I_UNDERSTAND_REAL_MONEY_RISK`.
 - If `python` does not work in PowerShell, try `py` instead.

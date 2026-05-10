@@ -4,7 +4,7 @@
 def build_pine_script() -> str:
     return """//@version=6
 //@strategy_alert_message {{strategy.order.alert_message}}
-strategy("AI Algorithm Bot - Momentum Edge", overlay=true, initial_capital=10000, commission_type=strategy.commission.percent, commission_value=0.02, pyramiding=0, calc_on_every_tick=true)
+strategy("AI Futures Bot - Momentum Edge", overlay=true, initial_capital=10000, commission_type=strategy.commission.percent, commission_value=0.02, pyramiding=0, calc_on_every_tick=true)
 
 fastEmaLen = input.int(9, "Fast EMA", minval=1)
 slowEmaLen = input.int(20, "Slow EMA", minval=1)

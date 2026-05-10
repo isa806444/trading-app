@@ -125,11 +125,6 @@ body {
   background:rgba(6, 46, 22, 0.82);
 }
 
-.hero-chip.premium {
-  border-color:#7c3aed;
-  background:rgba(59, 7, 100, 0.55);
-}
-
 .control-card,
 .chart-controls,
 .result-shell {
@@ -1040,8 +1035,7 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
   border-color:var(--line);
 }
 
-.profile-trigger,
-.discord-btn {
+.profile-trigger {
   width:44px;
   height:44px;
   display:inline-flex;
@@ -1052,13 +1046,6 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
   border:1px solid var(--line);
   color:#e2e8f0;
 }
-
-.discord-btn {
-  background:linear-gradient(180deg, #5865f2, #4854d4);
-  border-color:#7480ff;
-}
-
-.discord-btn svg,
 .profile-trigger svg {
   width:20px;
   height:20px;
@@ -1098,47 +1085,6 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
 .profile-title {
   font-size:18px;
   font-weight:700;
-}
-
-.premium-card {
-  border:1px solid rgba(124, 58, 237, 0.5);
-  border-radius:18px;
-  padding:14px;
-  background:
-    radial-gradient(circle at top right, rgba(168, 85, 247, 0.18), transparent 35%),
-    linear-gradient(180deg, rgba(34, 16, 58, 0.96), rgba(18, 11, 34, 0.96));
-}
-
-.premium-title-row {
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
-  gap:10px;
-}
-
-.premium-badge {
-  display:inline-flex;
-  align-items:center;
-  padding:5px 10px;
-  border-radius:999px;
-  font-size:11px;
-  font-weight:700;
-  letter-spacing:0.06em;
-  text-transform:uppercase;
-  border:1px solid rgba(196, 181, 253, 0.45);
-  color:#f5f3ff;
-  background:rgba(109, 40, 217, 0.45);
-}
-
-.premium-perks {
-  display:grid;
-  gap:8px;
-  margin-top:12px;
-}
-
-.premium-perk {
-  color:#ddd6fe;
-  font-size:13px;
 }
 
 .compact-copy {
@@ -2212,9 +2158,6 @@ body {
     </div>
     <div class="page-tool-group">
       <button class="watch-toggle" onclick="openWatchlist()">Watchlist</button>
-      <button class="discord-btn" onclick="openDiscordLink()" aria-label="Open Discord">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.32 4.37A17.43 17.43 0 0 0 16 3l-.2.41a16.1 16.1 0 0 1 3.9 1.34 13.6 13.6 0 0 0-3.4-1.05 12.12 12.12 0 0 0-8.6 0A13.6 13.6 0 0 0 4.3 4.75 16.1 16.1 0 0 1 8.2 3.4L8 3A17.43 17.43 0 0 0 3.68 4.37C.93 8.47.19 12.45.56 16.38A17.73 17.73 0 0 0 5.9 19l1.15-1.58c-.63-.24-1.23-.54-1.79-.89.15.11.31.21.47.3a11.8 11.8 0 0 0 10.54 0c.16-.09.32-.19.47-.3-.56.35-1.16.65-1.79.89L16.1 19a17.73 17.73 0 0 0 5.34-2.62c.43-4.55-.73-8.5-1.12-12.01ZM9.35 14.1c-1.03 0-1.88-.95-1.88-2.13 0-1.17.83-2.13 1.88-2.13 1.06 0 1.9.96 1.88 2.13 0 1.18-.82 2.13-1.88 2.13Zm5.3 0c-1.03 0-1.88-.95-1.88-2.13 0-1.17.83-2.13 1.88-2.13 1.06 0 1.9.96 1.88 2.13 0 1.18-.82 2.13-1.88 2.13Z"/></svg>
-      </button>
     </div>
   </div>
 
@@ -2228,7 +2171,6 @@ body {
         <div class="hero-chip-row">
           <div class="hero-chip live" id="providerChip">TradingView + Tradovate</div>
           <div class="hero-chip" id="alertsChip">Alerts idle</div>
-          <div class="hero-chip premium" id="premiumChip">Free plan</div>
         </div>
         <div class="algo-actions">
           <button class="algo-primary" onclick="loadAlgorithmDashboard(true)">Run Algorithm</button>
@@ -2371,33 +2313,11 @@ body {
     <div class="profile-title">Account & Settings</div>
     <div id="authSummary" class="auth-summary">Using local mode</div>
   </div>
-  <div class="profile-block premium-card">
-    <div class="premium-title-row">
-      <div class="profile-title" style="font-size:16px;">Premium</div>
-      <div id="premiumStatusBadge" class="premium-badge">Free</div>
-    </div>
-    <div id="premiumCardCopy" class="compact-copy" style="margin-top:8px;">Upgrade to unlock the premium side of the workspace on your account.</div>
-    <div class="premium-perks">
-      <div class="premium-perk">Advanced coaching and community tools</div>
-      <div class="premium-perk">Cleaner account-based sync across devices</div>
-      <div class="premium-perk">Discord opens after upgrade success</div>
-    </div>
-  </div>
   <div class="profile-block">
     <div class="profile-actions">
       <button id="authBtn" class="auth-btn" onclick="openAuthModal()">Sign In</button>
       <button id="logoutBtn" class="logout-btn hidden" onclick="logoutUser()">Logout</button>
-      <button id="upgradeBtn" class="auth-btn hidden" onclick="startPremiumCheckout()">Upgrade</button>
-      <button id="manageBillingBtn" class="logout-btn hidden" onclick="openBillingPortal()">Manage Billing</button>
       <button class="ghost-btn" onclick="closeProfilePanel()">Close</button>
-    </div>
-  </div>
-  <div class="profile-block">
-    <div class="mini-label">Discord</div>
-    <div class="compact-copy">Set the invite link used by the top-right Discord button and the premium success flow.</div>
-    <div class="settings-grid">
-      <input id="discordLinkInput" type="text" placeholder="https://discord.gg/your-server" />
-      <button class="paper-btn close" onclick="saveDiscordSettings()">Save Discord Link</button>
     </div>
   </div>
 </div>
@@ -2454,8 +2374,6 @@ let indicatorPreset = "momentum";
 let currentView = "market";
 let authMode = "login";
 let currentUser = null;
-let billingEnabled = false;
-let premiumPriceCents = 999;
 let lastChartState = null;
 let candleRefreshTimer = null;
 let latestAnalyzedSignal = null;
@@ -2482,7 +2400,6 @@ const PAPER_POSITIONS_STORAGE_KEY = "trading-app-paper-positions";
 const PAPER_HISTORY_STORAGE_KEY = "trading-app-paper-history";
 const ALERTS_STORAGE_KEY = "trading-app-alerts";
 const LAYOUT_PREFS_STORAGE_KEY = "trading-app-layout-prefs";
-const DISCORD_LINK_STORAGE_KEY = "trading-app-discord-link";
 const STARTING_EQUITY = 10000;
 const TOP_MOVERS_UNIVERSE = ["AAPL","NVDA","TSLA","AMD","META","AMZN","MSFT","GOOGL","PLTR","SMCI","COIN","MSTR","RIVN","SOFI","SPY","QQQ"];
 let paperPositions = [];
@@ -2505,7 +2422,6 @@ const DEFAULT_SCANNER_UNIVERSE = ["AAPL", "MSFT", "NVDA", "AMZN", "META", "TSLA"
 const CANDLE_REFRESH_INTERVAL_MS = 15000;
 const SEARCH_DEBOUNCE_MS = 400;
 const SCANNER_CACHE_MS = 30000;
-const DEFAULT_DISCORD_LINK = "https://discord.gg/P2EhQgt7";
 const intradayEtFormatter = new Intl.DateTimeFormat("en-US", {
   timeZone: "America/New_York",
   month: "numeric",
@@ -2590,33 +2506,6 @@ function closeProfilePanel(){
   document.getElementById("profileBackdrop").classList.remove("open");
 }
 
-function getDiscordLink(){
-  try{
-    return localStorage.getItem(DISCORD_LINK_STORAGE_KEY) || DEFAULT_DISCORD_LINK;
-  }catch(err){
-    return DEFAULT_DISCORD_LINK;
-  }
-}
-
-function saveDiscordSettings(){
-  const value = (document.getElementById("discordLinkInput")?.value || "").trim() || DEFAULT_DISCORD_LINK;
-  try{
-    localStorage.setItem(DISCORD_LINK_STORAGE_KEY, value);
-  }catch(err){
-    console.log("Discord link save failed", err);
-  }
-  setStatus("Discord link saved.", "ok");
-}
-
-function openDiscordLink(openInNewTab=true){
-  const url = getDiscordLink();
-  if(openInNewTab){
-    window.open(url, "_blank", "noopener");
-  }else{
-    window.location.href = url;
-  }
-}
-
 function closeAuthModal(event){
   if(event && event.target && event.target.id !== "authModal"){
     return;
@@ -2628,38 +2517,15 @@ function renderAuthState(){
   const summary = document.getElementById("authSummary");
   const authBtn = document.getElementById("authBtn");
   const logoutBtn = document.getElementById("logoutBtn");
-  const upgradeBtn = document.getElementById("upgradeBtn");
-  const manageBillingBtn = document.getElementById("manageBillingBtn");
-  const premiumStatusBadge = document.getElementById("premiumStatusBadge");
-  const premiumCardCopy = document.getElementById("premiumCardCopy");
-  const premiumChip = document.getElementById("premiumChip");
-  const premiumPrice = (premiumPriceCents / 100).toFixed(2);
 
   if(currentUser){
-    const premiumLabel = currentUser.is_premium
-      ? `Premium active${currentUser.premium_current_period_end ? ` until ${formatLongDate(currentUser.premium_current_period_end)}` : ""}`
-      : `Free plan${billingEnabled ? ` | Premium $${premiumPrice}/mo` : ""}`;
-    summary.innerText = `${currentUser.display_name || currentUser.email} | ${premiumLabel}`;
+    summary.innerText = `${currentUser.display_name || currentUser.email} | Signed in`;
     authBtn.classList.add("hidden");
     logoutBtn.classList.remove("hidden");
-    upgradeBtn.classList.toggle("hidden", !billingEnabled || !!currentUser.is_premium);
-    manageBillingBtn.classList.toggle("hidden", !billingEnabled || !currentUser.is_premium);
-    if(premiumStatusBadge) premiumStatusBadge.innerText = currentUser.is_premium ? "Active" : "Free";
-    if(premiumCardCopy) premiumCardCopy.innerText = currentUser.is_premium
-      ? "Your account is on Premium and ready for the advanced side of the workspace."
-      : `Upgrade to Premium for $${premiumPrice}/month to unlock the premium side of the workspace.`;
-    if(premiumChip) premiumChip.innerText = currentUser.is_premium ? "Premium active" : "Free plan";
   }else{
-    summary.innerText = billingEnabled ? `Using local mode | Premium $${premiumPrice}/mo` : "Using local mode";
+    summary.innerText = "Using local mode";
     authBtn.classList.remove("hidden");
     logoutBtn.classList.add("hidden");
-    upgradeBtn.classList.add("hidden");
-    manageBillingBtn.classList.add("hidden");
-    if(premiumStatusBadge) premiumStatusBadge.innerText = "Free";
-    if(premiumCardCopy) premiumCardCopy.innerText = billingEnabled
-      ? `Sign in to upgrade for $${premiumPrice}/month and unlock the premium side of the workspace.`
-      : "Sign in to keep your account synced across devices.";
-    if(premiumChip) premiumChip.innerText = billingEnabled ? `Premium $${premiumPrice}/mo` : "Free plan";
   }
 }
 
@@ -2699,14 +2565,11 @@ async function refreshAuthStatus(){
     const payload = await res.json();
     currentUser = payload.authenticated ? payload.user : null;
     serverStateEnabled = !!payload.database_enabled && !!payload.authenticated;
-    billingEnabled = !!payload.stripe_enabled;
-    premiumPriceCents = Number(payload.premium_price_cents || 999);
     renderAuthState();
   }catch(err){
     console.log("Auth status load failed", err);
     currentUser = null;
     serverStateEnabled = false;
-    billingEnabled = false;
     renderAuthState();
   }
 }
@@ -2770,76 +2633,6 @@ async function logoutUser(){
   renderAlerts();
   renderAuthState();
   setStatus("Signed out. The app is back in local mode on this device.", "ok");
-}
-
-async function startPremiumCheckout(){
-  if(!currentUser){
-    openAuthModal();
-    setStatus("Sign in first, then you can upgrade to Premium.", "warning");
-    return;
-  }
-
-  try{
-    const res = await fetch("/billing/create-checkout-session", { method: "POST" });
-    const payload = await res.json();
-    if(!res.ok || payload.error || !payload.url){
-      setStatus(payload.error || "Could not start premium checkout right now.", "warning");
-      return;
-    }
-    window.location.href = payload.url;
-  }catch(err){
-    console.log("Checkout start failed", err);
-    setStatus("Could not start premium checkout right now.", "warning");
-  }
-}
-
-async function openBillingPortal(){
-  try{
-    const res = await fetch("/billing/create-portal-session", { method: "POST" });
-    const payload = await res.json();
-    if(!res.ok || payload.error || !payload.url){
-      setStatus(payload.error || "Could not open billing management right now.", "warning");
-      return;
-    }
-    window.location.href = payload.url;
-  }catch(err){
-    console.log("Billing portal failed", err);
-    setStatus("Could not open billing management right now.", "warning");
-  }
-}
-
-async function handleCheckoutReturn(){
-  const params = new URLSearchParams(window.location.search);
-  const checkoutState = params.get("checkout");
-  const sessionId = params.get("session_id");
-  if(!checkoutState){
-    return;
-  }
-
-  if(checkoutState === "canceled"){
-    setStatus("Premium checkout was canceled.", "warning");
-  }else if(checkoutState === "success" && sessionId){
-    try{
-      const res = await fetch(`/billing/checkout-status?session_id=${encodeURIComponent(sessionId)}`);
-      const payload = await res.json();
-      if(res.ok && payload.user){
-        currentUser = payload.user;
-        renderAuthState();
-        setStatus("Premium is active on your account now.", "ok");
-        openDiscordLink(true);
-      }else{
-        setStatus(payload.error || "Checkout finished, but premium could not be verified yet.", "warning");
-      }
-    }catch(err){
-      console.log("Checkout return failed", err);
-      setStatus("Checkout finished, but premium could not be verified yet.", "warning");
-    }
-  }
-
-  const cleanedUrl = new URL(window.location.href);
-  cleanedUrl.searchParams.delete("checkout");
-  cleanedUrl.searchParams.delete("session_id");
-  window.history.replaceState({}, "", cleanedUrl.toString());
 }
 
 function applyIndicatorPreset(preset){
@@ -5773,7 +5566,6 @@ async function initializeApp(){
   }
   setAuthMode("login");
   renderIndicatorToggles();
-  document.getElementById("discordLinkInput").value = getDiscordLink();
   syncTradeInputs();
   applyIndicatorPreset("momentum");
   document.querySelectorAll("#strategyBar button").forEach(button => button.classList.toggle("active", button.dataset.s === strategy));
@@ -5782,7 +5574,6 @@ async function initializeApp(){
   loadPaperHistory();
   loadAlerts();
   await refreshAuthStatus();
-  await handleCheckoutReturn();
   await loadPortfolioInsights();
   renderPaperPositions();
   renderAlerts();

@@ -20,7 +20,6 @@ This project is a lightweight trading dashboard built with Flask, vanilla HTML, 
 - `market_cache.json`: cached quote and candle data
 - `.env.example`: environment variable template for API keys
 - `requirements.txt`: Python dependencies
-- `discord_bot.py`: Discord bot for price, analysis, movers, and news commands
 
 ## Setup
 
@@ -54,13 +53,6 @@ Then edit `.env` and set:
 
 ```text
 POLYGON_API_KEY=your_real_polygon_api_key
-TWELVE_DATA_API_KEY=your_real_twelve_data_key
-STRIPE_PUBLISHABLE_KEY=your_stripe_publishable_key
-STRIPE_SECRET_KEY=your_stripe_secret_key
-STRIPE_PREMIUM_PRICE_CENTS=999
-APP_BASE_URL=https://trading-app-kb38.onrender.com
-DISCORD_BOT_TOKEN=your_discord_bot_token
-DISCORD_GUILD_ID=your_discord_server_id
 ```
 
 ## Run
@@ -75,24 +67,6 @@ Then open:
 
 - `http://127.0.0.1:5000`
 
-## Discord Bot
-
-The repo also includes a Discord bot that talks to the app's live endpoints.
-
-Run it with:
-
-```powershell
-python discord_bot.py
-```
-
-Current slash commands:
-
-- `/ping`
-- `/price`
-- `/analyze`
-- `/movers`
-- `/news`
-
 ## Deploy To Render
 
 This project is set up for Render with `render.yaml`.
@@ -103,10 +77,6 @@ This project is set up for Render with `render.yaml`.
 
 ```text
 POLYGON_API_KEY=your_real_polygon_api_key
-TWELVE_DATA_API_KEY=your_real_twelve_data_key
-STRIPE_PUBLISHABLE_KEY=your_stripe_publishable_key
-STRIPE_SECRET_KEY=your_stripe_secret_key
-STRIPE_PREMIUM_PRICE_CENTS=999
 ```
 
 4. Deploy the service.
@@ -127,8 +97,7 @@ gunicorn main:app
 
 ## Notes
 
-- Market data now prefers Polygon when `POLYGON_API_KEY` is set.
-- Premium billing uses Stripe Checkout and Stripe Customer Portal when the Stripe keys are configured.
+- Market data now uses Polygon when `POLYGON_API_KEY` is set.
 - The CBOE SKEW Index uses a separate market-data fetch path.
 - If the provider is unavailable, the app falls back to cached data and then demo data.
 - The strategy output is still placeholder logic, not real financial advice or broker-connected execution.

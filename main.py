@@ -8,7 +8,6 @@ import math
 import os
 import psycopg2
 import requests
-import stripe
 import time
 from urllib.parse import quote_plus
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -34,9 +33,6 @@ TRADOVATE_MD_WS_URL_ENV = "TRADOVATE_MD_WS_URL"
 TRADOVATE_SYMBOL_MAP_ENV = "TRADOVATE_SYMBOL_MAP"
 TRADINGVIEW_WEBHOOK_SECRET_ENV = "TRADINGVIEW_WEBHOOK_SECRET"
 DATABASE_URL_ENV = "DATABASE_URL"
-STRIPE_SECRET_KEY_ENV = "STRIPE_SECRET_KEY"
-STRIPE_PUBLISHABLE_KEY_ENV = "STRIPE_PUBLISHABLE_KEY"
-STRIPE_PREMIUM_PRICE_CENTS_ENV = "STRIPE_PREMIUM_PRICE_CENTS"
 QUOTE_CACHE_TTL = 90
 LIVE_PRICE_CACHE_TTL = 5
 CANDLE_CACHE_TTL = 180
@@ -44,7 +40,6 @@ PREVIOUS_CLOSE_CACHE_TTL = 60 * 60
 INDICATOR_CACHE_TTL = 900
 NEWS_CACHE_TTL = 900
 EVENTS_CACHE_TTL = 1800
-DEFAULT_PREMIUM_PRICE_CENTS = 999
 DEMO_TIMEZONE = ZoneInfo("America/New_York")
 STATIC_US_MACRO_EVENTS = [
     ("2026-04-03T08:30:00-04:00", "Employment Situation", "March 2026"),
@@ -101,10 +96,6 @@ load_env_file()
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "trading-app-dev-secret")
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_HTTPONLY"] = True
-if os.environ.get(STRIPE_SECRET_KEY_ENV, "").strip():
-    stripe.api_key = os.environ.get(STRIPE_SECRET_KEY_ENV, "").strip()
-
-
 def get_polygon_api_key():
     return os.environ.get(POLYGON_API_KEY_ENV, "").strip()
 
@@ -141,26 +132,6 @@ def tradovate_configured():
 
 def tradingview_webhook_secret():
     return os.environ.get(TRADINGVIEW_WEBHOOK_SECRET_ENV, "").strip()
-
-
-def get_stripe_secret_key():
-    return os.environ.get(STRIPE_SECRET_KEY_ENV, "").strip()
-
-
-def get_stripe_publishable_key():
-    return os.environ.get(STRIPE_PUBLISHABLE_KEY_ENV, "").strip()
-
-
-def get_premium_price_cents():
-    raw_value = os.environ.get(STRIPE_PREMIUM_PRICE_CENTS_ENV, "").strip()
-    try:
-        return max(100, int(raw_value))
-    except (TypeError, ValueError):
-        return DEFAULT_PREMIUM_PRICE_CENTS
-
-
-def stripe_enabled():
-    return bool(get_stripe_secret_key() and get_stripe_publishable_key())
 
 
 def get_database_url():
@@ -217,11 +188,6 @@ def initialize_database():
                     )
                     """
                 )
-                cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_customer_id TEXT")
-                cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_subscription_id TEXT")
-                cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS premium_status TEXT NOT NULL DEFAULT 'free'")
-                cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS premium_plan TEXT")
-                cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS premium_current_period_end TIMESTAMPTZ")
                 cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS public_profile BOOLEAN NOT NULL DEFAULT FALSE")
                 cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS public_alias TEXT")
                 cursor.execute(
@@ -411,8 +377,7 @@ def get_user_by_email(email):
                 cursor.execute(
                     """
                     SELECT id, email, display_name, password_hash, created_at,
-                           stripe_customer_id, stripe_subscription_id, premium_status,
-                           premium_plan, premium_current_period_end, public_profile, public_alias
+                           public_profile, public_alias
                     FROM users
                     WHERE email = %s
                     """,
@@ -428,13 +393,8 @@ def get_user_by_email(email):
             "display_name": row[2],
             "password_hash": row[3],
             "created_at": row[4].isoformat() if row[4] else None,
-            "stripe_customer_id": row[5],
-            "stripe_subscription_id": row[6],
-            "premium_status": row[7] or "free",
-            "premium_plan": row[8],
-            "premium_current_period_end": row[9].isoformat() if row[9] else None,
-            "public_profile": bool(row[10]) if row[10] is not None else False,
-            "public_alias": row[11] or row[2]
+            "public_profile": bool(row[5]) if row[5] is not None else False,
+            "public_alias": row[6] or row[2]
         }
     except Exception as exc:
         print("User lookup failed:", exc)
@@ -454,8 +414,7 @@ def get_user_by_id(user_id):
                 cursor.execute(
                     """
                     SELECT id, email, display_name, created_at,
-                           stripe_customer_id, stripe_subscription_id, premium_status,
-                           premium_plan, premium_current_period_end, public_profile, public_alias
+                           public_profile, public_alias
                     FROM users
                     WHERE id = %s
                     """,
@@ -470,13 +429,8 @@ def get_user_by_id(user_id):
             "email": row[1],
             "display_name": row[2],
             "created_at": row[3].isoformat() if row[3] else None,
-            "stripe_customer_id": row[4],
-            "stripe_subscription_id": row[5],
-            "premium_status": row[6] or "free",
-            "premium_plan": row[7],
-            "premium_current_period_end": row[8].isoformat() if row[8] else None,
-            "public_profile": bool(row[9]) if row[9] is not None else False,
-            "public_alias": row[10] or row[2]
+            "public_profile": bool(row[4]) if row[4] is not None else False,
+            "public_alias": row[5] or row[2]
         }
     except Exception as exc:
         print("User load by id failed:", exc)
@@ -495,54 +449,9 @@ def serialize_user(user):
         "email": user["email"],
         "display_name": user["display_name"],
         "created_at": user["created_at"],
-        "premium_status": user.get("premium_status", "free"),
-        "premium_plan": user.get("premium_plan"),
-        "premium_current_period_end": user.get("premium_current_period_end"),
-        "is_premium": user.get("premium_status") == "active",
         "public_profile": bool(user.get("public_profile")),
         "public_alias": user.get("public_alias") or user["display_name"]
     }
-
-
-def get_request_base_url():
-    forwarded_proto = request.headers.get("X-Forwarded-Proto")
-    scheme = forwarded_proto.split(",")[0].strip() if forwarded_proto else request.scheme
-    host = request.headers.get("X-Forwarded-Host") or request.host
-    return f"{scheme}://{host}"
-
-
-def update_user_billing_fields(user_id, premium_status="free", premium_plan=None, premium_current_period_end=None,
-                               stripe_customer_id=None, stripe_subscription_id=None):
-    if not database_enabled or not user_id:
-        return
-    try:
-        conn = get_db_connection()
-        if not conn:
-            return
-        with conn:
-            with conn.cursor() as cursor:
-                cursor.execute(
-                    """
-                    UPDATE users
-                    SET premium_status = %s,
-                        premium_plan = %s,
-                        premium_current_period_end = %s,
-                        stripe_customer_id = COALESCE(%s, stripe_customer_id),
-                        stripe_subscription_id = %s
-                    WHERE id = %s
-                    """,
-                    (
-                        premium_status,
-                        premium_plan,
-                        premium_current_period_end,
-                        stripe_customer_id,
-                        stripe_subscription_id,
-                        user_id
-                    )
-                )
-        conn.close()
-    except Exception as exc:
-        print("Billing update failed:", exc)
 
 
 def update_user_profile_fields(user_id, public_profile=None, public_alias=None):
@@ -566,33 +475,6 @@ def update_user_profile_fields(user_id, public_profile=None, public_alias=None):
         conn.close()
     except Exception as exc:
         print("Profile update failed:", exc)
-
-
-def sync_user_subscription_from_stripe(user):
-    if not user or not stripe_enabled():
-        return user
-    subscription_id = user.get("stripe_subscription_id")
-    if not subscription_id:
-        return user
-
-    try:
-        subscription = stripe.Subscription.retrieve(subscription_id)
-        status = subscription.get("status", "incomplete")
-        premium_status = "active" if status in {"active", "trialing", "past_due"} else "free"
-        current_period_end = subscription.get("current_period_end")
-        period_end_dt = datetime.fromtimestamp(current_period_end, tz=DEMO_TIMEZONE) if current_period_end else None
-        update_user_billing_fields(
-            user["id"],
-            premium_status=premium_status,
-            premium_plan="premium-monthly" if premium_status == "active" else None,
-            premium_current_period_end=period_end_dt,
-            stripe_customer_id=subscription.get("customer"),
-            stripe_subscription_id=subscription_id if premium_status == "active" else None
-        )
-        return get_user_by_id(user["id"])
-    except Exception as exc:
-        print("Stripe sync failed:", exc)
-        return user
 
 
 def create_user(email, password, display_name):
@@ -628,9 +510,8 @@ def create_user(email, password, display_name):
             "email": row[1],
             "display_name": row[2],
             "created_at": row[3].isoformat() if row[3] else None,
-            "premium_status": "free",
-            "premium_plan": None,
-            "premium_current_period_end": None
+            "public_profile": False,
+            "public_alias": row[2]
         }, None
     except Exception as exc:
         print("Create user failed:", exc)
@@ -641,8 +522,7 @@ def authenticate_user(email, password):
     user = get_user_by_email(email)
     if not user or not check_password_hash(user["password_hash"], password or ""):
         return None
-    synced = sync_user_subscription_from_stripe(user)
-    return serialize_user(synced)
+    return serialize_user(user)
 
 
 # =========================
@@ -2960,11 +2840,9 @@ def home():
 
 @app.route("/auth/status")
 def auth_status():
-    user = sync_user_subscription_from_stripe(get_current_user())
+    user = get_current_user()
     return jsonify({
         "database_enabled": database_enabled,
-        "stripe_enabled": stripe_enabled(),
-        "premium_price_cents": get_premium_price_cents(),
         "authenticated": bool(user),
         "user": serialize_user(user)
     })
@@ -3008,132 +2886,6 @@ def auth_login():
 def auth_logout():
     session.pop("user_id", None)
     return jsonify({"ok": True, "authenticated": False})
-
-
-def get_or_create_stripe_customer(user):
-    if not user or not stripe_enabled():
-        return None
-    if user.get("stripe_customer_id"):
-        return user["stripe_customer_id"]
-
-    customer = stripe.Customer.create(
-        email=user["email"],
-        name=user["display_name"],
-        metadata={"user_id": str(user["id"])}
-    )
-    update_user_billing_fields(user["id"], stripe_customer_id=customer["id"])
-    return customer["id"]
-
-
-@app.route("/billing/config")
-def billing_config():
-    user = sync_user_subscription_from_stripe(get_current_user())
-    return jsonify({
-        "stripe_enabled": stripe_enabled(),
-        "publishable_key": get_stripe_publishable_key(),
-        "premium_price_cents": get_premium_price_cents(),
-        "currency": "usd",
-        "user": serialize_user(user)
-    })
-
-
-@app.route("/billing/create-checkout-session", methods=["POST"])
-def create_checkout_session():
-    user = sync_user_subscription_from_stripe(get_current_user())
-    if not user:
-        return jsonify({"error": "Sign in first to upgrade to Premium."}), 401
-    if not stripe_enabled():
-        return jsonify({"error": "Billing is not configured yet."}), 400
-
-    try:
-        customer_id = get_or_create_stripe_customer(user)
-        base_url = get_request_base_url()
-        checkout_session = stripe.checkout.Session.create(
-            mode="subscription",
-            customer=customer_id,
-            client_reference_id=str(user["id"]),
-            success_url=f"{base_url}/?checkout=success&session_id={{CHECKOUT_SESSION_ID}}",
-            cancel_url=f"{base_url}/?checkout=canceled",
-            metadata={"user_id": str(user["id"]), "plan": "premium-monthly"},
-            line_items=[{
-                "price_data": {
-                    "currency": "usd",
-                    "product_data": {
-                        "name": "Trading App Premium",
-                        "description": "Premium subscription for advanced trading workspace features."
-                    },
-                    "unit_amount": get_premium_price_cents(),
-                    "recurring": {"interval": "month"}
-                },
-                "quantity": 1
-            }],
-            allow_promotion_codes=True
-        )
-        return jsonify({"url": checkout_session.url})
-    except Exception as exc:
-        print("Stripe checkout failed:", exc)
-        return jsonify({"error": "Could not start checkout right now."}), 500
-
-
-@app.route("/billing/checkout-status")
-def checkout_status():
-    user = get_current_user()
-    session_id = request.args.get("session_id", "").strip()
-    if not user:
-        return jsonify({"error": "Sign in first."}), 401
-    if not stripe_enabled() or not session_id:
-        return jsonify({"error": "Missing billing session."}), 400
-
-    try:
-        checkout_session = stripe.checkout.Session.retrieve(session_id)
-        if str(checkout_session.get("client_reference_id")) != str(user["id"]):
-            return jsonify({"error": "That checkout session does not belong to this user."}), 403
-
-        subscription_id = checkout_session.get("subscription")
-        customer_id = checkout_session.get("customer")
-        payment_status = checkout_session.get("payment_status")
-        if subscription_id and payment_status in {"paid", "no_payment_required"}:
-            subscription = stripe.Subscription.retrieve(subscription_id)
-            current_period_end = subscription.get("current_period_end")
-            period_end_dt = datetime.fromtimestamp(current_period_end, tz=DEMO_TIMEZONE) if current_period_end else None
-            update_user_billing_fields(
-                user["id"],
-                premium_status="active",
-                premium_plan="premium-monthly",
-                premium_current_period_end=period_end_dt,
-                stripe_customer_id=customer_id,
-                stripe_subscription_id=subscription_id
-            )
-            fresh_user = get_user_by_id(user["id"])
-            return jsonify({"ok": True, "user": serialize_user(fresh_user)})
-
-        return jsonify({"ok": False, "error": "Checkout has not completed yet."}), 400
-    except Exception as exc:
-        print("Stripe checkout status failed:", exc)
-        return jsonify({"error": "Could not verify checkout right now."}), 500
-
-
-@app.route("/billing/create-portal-session", methods=["POST"])
-def create_portal_session():
-    user = sync_user_subscription_from_stripe(get_current_user())
-    if not user:
-        return jsonify({"error": "Sign in first to manage billing."}), 401
-    if not stripe_enabled():
-        return jsonify({"error": "Billing is not configured yet."}), 400
-
-    customer_id = get_or_create_stripe_customer(user)
-    if not customer_id:
-        return jsonify({"error": "Billing profile is unavailable right now."}), 400
-
-    try:
-        portal = stripe.billing_portal.Session.create(
-            customer=customer_id,
-            return_url=f"{get_request_base_url()}/"
-        )
-        return jsonify({"url": portal.url})
-    except Exception as exc:
-        print("Stripe portal failed:", exc)
-        return jsonify({"error": "Could not open billing management right now."}), 500
 
 
 @app.route("/analyze")

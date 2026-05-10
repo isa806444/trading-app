@@ -10,9 +10,3 @@ services:
         value: 3.12.7
       - key: POLYGON_API_KEY
         sync: false
-      - key: STRIPE_PUBLISHABLE_KEY
-        sync: false
-      - key: STRIPE_SECRET_KEY
-        sync: false
-      - key: STRIPE_PREMIUM_PRICE_CENTS
-        value: "999"

@@ -67,13 +67,15 @@ Open this file in TradingView Pine Editor:
 tradingview/ai_algorithm_strategy.pine
 ```
 
-Run it on an NQ futures chart like `NQ1!`. Create an alert using `Any alert() function call` and this webhook URL:
+Run it on an NQ futures chart like `NQ1!` with the chart set to `1H`. The strategy is intentionally single-timeframe and only fires confirmed bar-close alerts, so it does not use multi-timeframe lookups or repainting live-bar signals.
+
+Create an alert using `Any alert() function call` and this webhook URL:
 
 ```text
 https://trading-app-kb38.onrender.com/tradingview-webhook?secret=make_a_private_secret
 ```
 
-The Pine alert sends `BUY` or `SELL` plus live price, target, stop, contracts, edge, and bar time. The app is permanently armed to NQ, rejects non-futures symbols, rejects all non-NQ futures alerts, checks Databento, then sends verified bracket orders through Tradeify/Tradovate.
+The Pine alert sends `BUY` or `SELL` plus live price, target, stop, contracts, edge, score, timeframe, and bar time. The app is permanently armed to NQ, rejects non-futures symbols, rejects all non-NQ futures alerts, checks Databento, then sends verified bracket orders through Tradeify/Tradovate.
 
 ## Databento Backtesting
 

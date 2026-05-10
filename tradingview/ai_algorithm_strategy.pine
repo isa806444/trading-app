@@ -1,104 +1,116 @@
 //@version=6
 //@strategy_alert_message {{strategy.order.alert_message}}
-strategy("AI Futures Bot - Momentum Edge", overlay=true, initial_capital=10000, commission_type=strategy.commission.percent, commission_value=0.02, pyramiding=0, calc_on_every_tick=true)
+strategy("AI NQ 1H Paper Bot - Trend Breakout", overlay=true, initial_capital=100000, default_qty_type=strategy.fixed, default_qty_value=1, commission_type=strategy.commission.cash_per_contract, commission_value=2.5, slippage=1, pyramiding=0, process_orders_on_close=true, calc_on_every_tick=false)
 
-fastEmaLen = input.int(9, "Fast EMA", minval=1)
-slowEmaLen = input.int(20, "Slow EMA", minval=1)
-rsiLen = input.int(14, "RSI Length", minval=1)
-rvLen = input.int(30, "Relative Volume Length", minval=5)
-contractQty = input.int(1, "Tradovate Contracts", minval=1)
-targetPct = input.float(2.0, "Target %", minval=0.1, step=0.1) / 100
-stopPct = input.float(1.0, "Stop %", minval=0.1, step=0.1) / 100
-minEdge = input.float(18.0, "Minimum Edge", minval=1.0)
-minScore = input.float(58.0, "Minimum Score", minval=1.0)
-webhookTag = input.string("ai-algo", "Webhook Tag")
+contractQty = input.int(1, "Contracts", minval=1, maxval=10)
+requireOneHour = input.bool(true, "Only Fire On 1H Chart")
+emaTrendLen = input.int(200, "Trend EMA", minval=20)
+emaSignalLen = input.int(34, "Signal EMA", minval=5)
+rsiLen = input.int(14, "RSI Length", minval=2)
+adxLen = input.int(14, "ADX Length", minval=2)
+adxSmoothing = input.int(14, "ADX Smoothing", minval=2)
+breakoutLen = input.int(8, "Breakout Lookback", minval=2)
+atrLen = input.int(14, "ATR Stop Length", minval=2)
+atrStopMult = input.float(1.6, "ATR Stop Multiplier", minval=0.25, step=0.05)
+rewardToRisk = input.float(2.0, "Reward/Risk Target", minval=0.5, step=0.1)
+minAdx = input.float(18.0, "Minimum Trend Strength", minval=1.0, step=0.5)
+minScore = input.float(75.0, "Minimum Setup Score", minval=50.0, maxval=100.0, step=1.0)
+useSessionFilter = input.bool(false, "Use Regular Session Filter")
+tradeSession = input.session("0930-1600", "Trading Session")
+webhookTag = input.string("nq-1h-paper", "Webhook Tag")
 
-emaFast = ta.ema(close, fastEmaLen)
-emaSlow = ta.ema(close, slowEmaLen)
-vwapValue = ta.vwap(hlc3)
+timeframeOk = not requireOneHour or (timeframe.isminutes and timeframe.multiplier == 60)
+inSession = not useSessionFilter or not na(time(timeframe.period, tradeSession))
+emaTrend = ta.ema(close, emaTrendLen)
+emaSignal = ta.ema(close, emaSignalLen)
 rsiValue = ta.rsi(close, rsiLen)
-relativeVolume = volume / math.max(ta.sma(volume, rvLen), 1)
-recentMove = ((close - close[7]) / close[7]) * 100
-higherLows = low >= low[2]
-lowerHighs = high <= high[2]
-recentHigh = ta.highest(high[1], 8)
-recentLow = ta.lowest(low[1], 8)
+[plusDi, minusDi, adxValue] = ta.dmi(adxLen, adxSmoothing)
+atrValue = ta.atr(atrLen)
+priorHigh = ta.highest(high, breakoutLen)[1]
+priorLow = ta.lowest(low, breakoutLen)[1]
 
-float buyScore = 35
-float sellScore = 35
+trendUp = close > emaTrend and emaSignal > emaTrend and emaTrend > emaTrend[1]
+trendDown = close < emaTrend and emaSignal < emaTrend and emaTrend < emaTrend[1]
+longMomentum = rsiValue >= 52 and plusDi > minusDi
+shortMomentum = rsiValue <= 48 and minusDi > plusDi
+longBreakout = close > priorHigh
+shortBreakout = close < priorLow
+healthyRange = atrValue > syminfo.mintick * 10
 
-if close > emaFast and emaFast > emaSlow
-    buyScore += 16
-else if close < emaFast and emaFast < emaSlow
-    sellScore += 16
-else if close > emaSlow
-    buyScore += 7
-else if close < emaSlow
-    sellScore += 7
+float buyScore = 0.0
+float sellScore = 0.0
 
-if close > vwapValue
-    buyScore += 8
-else if close < vwapValue
-    sellScore += 8
-
-if rsiValue >= 58
-    buyScore += math.min(math.max((rsiValue - 50) * 0.65, 4), 16)
-else if rsiValue <= 42
-    sellScore += math.min(math.max((50 - rsiValue) * 0.65, 4), 16)
-
-if recentMove >= 0.4
-    buyScore += 10
-else if recentMove <= -0.4
-    sellScore += 10
-
-if higherLows
-    buyScore += 8
-if lowerHighs
-    sellScore += 8
-if close > recentHigh
-    buyScore += 12
-if close < recentLow
-    sellScore += 12
-
-if relativeVolume >= 1.35
-    if buyScore >= sellScore
-        buyScore += 11
-    else
-        sellScore += 11
-else if relativeVolume < 0.65
-    buyScore -= 5
-    sellScore -= 5
+if trendUp
+    buyScore += 35
+if trendDown
+    sellScore += 35
+if longMomentum
+    buyScore += 25
+if shortMomentum
+    sellScore += 25
+if adxValue >= minAdx and plusDi > minusDi
+    buyScore += 15
+if adxValue >= minAdx and minusDi > plusDi
+    sellScore += 15
+if longBreakout
+    buyScore += 20
+if shortBreakout
+    sellScore += 20
+if close > emaSignal and close > open
+    buyScore += 5
+if close < emaSignal and close < open
+    sellScore += 5
 
 buyScore := math.min(math.max(buyScore, 0), 100)
 sellScore := math.min(math.max(sellScore, 0), 100)
 edge = buyScore - sellScore
+ready = barstate.isconfirmed and timeframeOk and inSession and healthyRange and not na(priorHigh) and not na(priorLow)
 
-longSignal = edge >= minEdge and buyScore >= minScore
-shortSignal = edge <= -minEdge and sellScore >= minScore
-longTargetPrice = close * (1 + targetPct)
-longStopPrice = close * (1 - stopPct)
-shortTargetPrice = close * (1 - targetPct)
-shortStopPrice = close * (1 + stopPct)
-longMessage = '{"source":"tradingview","action":"BUY","ticker":"' + syminfo.ticker + '","price":' + str.tostring(close, format.mintick) + ',"target":' + str.tostring(longTargetPrice, format.mintick) + ',"stop":' + str.tostring(longStopPrice, format.mintick) + ',"qty":' + str.tostring(contractQty) + ',"edge":' + str.tostring(edge) + ',"bar_time":"' + str.tostring(time) + '","tag":"' + webhookTag + '"}'
-shortMessage = '{"source":"tradingview","action":"SELL","ticker":"' + syminfo.ticker + '","price":' + str.tostring(close, format.mintick) + ',"target":' + str.tostring(shortTargetPrice, format.mintick) + ',"stop":' + str.tostring(shortStopPrice, format.mintick) + ',"qty":' + str.tostring(contractQty) + ',"edge":' + str.tostring(edge) + ',"bar_time":"' + str.tostring(time) + '","tag":"' + webhookTag + '"}'
+longStopPrice = close - atrValue * atrStopMult
+longTargetPrice = close + (close - longStopPrice) * rewardToRisk
+shortStopPrice = close + atrValue * atrStopMult
+shortTargetPrice = close - (shortStopPrice - close) * rewardToRisk
 
-if longSignal and strategy.position_size <= 0
-    strategy.entry("AI Long", strategy.long, qty=contractQty, alert_message=longMessage)
-    alert(longMessage, alert.freq_once_per_bar)
-if shortSignal and strategy.position_size >= 0
-    strategy.entry("AI Short", strategy.short, qty=contractQty, alert_message=shortMessage)
-    alert(shortMessage, alert.freq_once_per_bar)
+longSignal = ready and buyScore >= minScore and edge > 0 and strategy.position_size <= 0
+shortSignal = ready and sellScore >= minScore and edge < 0 and strategy.position_size >= 0
+longMessage = '{"source":"tradingview","action":"BUY","ticker":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","price":' + str.tostring(close, format.mintick) + ',"target":' + str.tostring(longTargetPrice, format.mintick) + ',"stop":' + str.tostring(longStopPrice, format.mintick) + ',"qty":' + str.tostring(contractQty) + ',"edge":' + str.tostring(edge, "#.##") + ',"score":' + str.tostring(buyScore, "#.##") + ',"bar_time":"' + str.tostring(time) + '","tag":"' + webhookTag + '"}'
+shortMessage = '{"source":"tradingview","action":"SELL","ticker":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","price":' + str.tostring(close, format.mintick) + ',"target":' + str.tostring(shortTargetPrice, format.mintick) + ',"stop":' + str.tostring(shortStopPrice, format.mintick) + ',"qty":' + str.tostring(contractQty) + ',"edge":' + str.tostring(edge, "#.##") + ',"score":' + str.tostring(sellScore, "#.##") + ',"bar_time":"' + str.tostring(time) + '","tag":"' + webhookTag + '"}'
 
-longStop = strategy.position_avg_price * (1 - stopPct)
-longTarget = strategy.position_avg_price * (1 + targetPct)
-shortStop = strategy.position_avg_price * (1 + stopPct)
-shortTarget = strategy.position_avg_price * (1 - targetPct)
+var float activeLongStop = na
+var float activeLongTarget = na
+var float activeShortStop = na
+var float activeShortTarget = na
 
-strategy.exit("AI Long Exit", "AI Long", stop=longStop, limit=longTarget)
-strategy.exit("AI Short Exit", "AI Short", stop=shortStop, limit=shortTarget)
+if strategy.position_size == 0 and not longSignal and not shortSignal
+    activeLongStop := na
+    activeLongTarget := na
+    activeShortStop := na
+    activeShortTarget := na
 
-plot(emaFast, "EMA 9", color=color.new(color.teal, 0))
-plot(emaSlow, "EMA 20", color=color.new(color.orange, 0))
-plot(vwapValue, "VWAP", color=color.new(color.blue, 0))
-plotchar(longSignal, "BUY", "B", location.belowbar, color=color.lime)
-plotchar(shortSignal, "SELL", "S", location.abovebar, color=color.red)
+if longSignal
+    activeLongStop := longStopPrice
+    activeLongTarget := longTargetPrice
+    activeShortStop := na
+    activeShortTarget := na
+    strategy.entry("NQ Long", strategy.long, qty=contractQty, alert_message=longMessage)
+    alert(longMessage, alert.freq_once_per_bar_close)
+
+if shortSignal
+    activeShortStop := shortStopPrice
+    activeShortTarget := shortTargetPrice
+    activeLongStop := na
+    activeLongTarget := na
+    strategy.entry("NQ Short", strategy.short, qty=contractQty, alert_message=shortMessage)
+    alert(shortMessage, alert.freq_once_per_bar_close)
+
+if not na(activeLongStop) and not na(activeLongTarget)
+    strategy.exit("NQ Long Exit", "NQ Long", stop=activeLongStop, limit=activeLongTarget)
+
+if not na(activeShortStop) and not na(activeShortTarget)
+    strategy.exit("NQ Short Exit", "NQ Short", stop=activeShortStop, limit=activeShortTarget)
+
+plot(emaTrend, "Trend EMA", color=color.new(color.blue, 0), linewidth=2)
+plot(emaSignal, "Signal EMA", color=color.new(color.orange, 0), linewidth=1)
+plotshape(longSignal, "BUY", shape.labelup, location.belowbar, color=color.new(color.lime, 0), text="BUY", textcolor=color.black, size=size.tiny)
+plotshape(shortSignal, "SELL", shape.labeldown, location.abovebar, color=color.new(color.red, 0), text="SELL", textcolor=color.white, size=size.tiny)
+bgcolor(timeframeOk ? na : color.new(color.red, 88), title="Wrong Timeframe Warning")

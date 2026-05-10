@@ -5,7 +5,7 @@ This project is a futures-only AI algorithm trading dashboard built with Flask, 
 ## Current Features
 
 - Run the NQ futures AI algorithm board
-- Export the TradingView Pine Script strategy
+- Export the TradingView Pine Script strategy for the NQ 1-hour paper bot
 - Receive TradingView webhook alerts from live futures charts
 - Keep the bot permanently armed to NQ so all other futures alerts are ignored
 - Verify entry alerts against Databento historical futures data
@@ -120,4 +120,5 @@ gunicorn main:app
 - Tradeify execution uses the Tradovate credentials provided by your Tradeify account.
 - Tradeify/Tradovate execution is locked until `TRADOVATE_AUTO_TRADE_ENABLED=true`.
 - Live orders also require `TRADOVATE_LIVE_TRADING_ACK=I_UNDERSTAND_REAL_MONEY_RISK`.
+- The included Pine strategy is designed for paper testing on an NQ futures chart such as `NQ1!` using the 1-hour timeframe.
 - If `python` does not work in PowerShell, try `py` instead.

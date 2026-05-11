@@ -1,15 +1,15 @@
 # Trading App
 
-This project is a futures-only AI algorithm trading dashboard built with Flask, TradingView alerts, Databento verification/backtesting, and Tradeify/Tradovate execution hooks.
+This project is an NDX-focused AI algorithm paper-signal dashboard built with Flask, TradingView alerts, Polygon index quotes, and Databento research hooks.
 
 ## Current Features
 
-- Run the NQ futures AI algorithm board
-- Export the TradingView Pine Script strategy for the Nasdaq 100 / NQ 1-hour paper bot
-- Receive TradingView webhook alerts from live futures charts
-- Keep the bot permanently armed to NQ so all other futures alerts are ignored
-- Verify entry alerts against Databento historical futures data
-- Route verified alerts to Tradeify/Tradovate OSO bracket orders when auto-trading is enabled
+- Run the NDX AI algorithm board
+- Export the TradingView Pine Script strategy for the Nasdaq 100 1-hour paper bot
+- Receive TradingView webhook alerts from the live NDX strategy chart
+- Keep the bot permanently armed to NDX so all other alerts are ignored
+- Show real NDX index quotes through Polygon using `I:NDX`
+- Log NDX TradingView alerts as app paper signals
 - Save and remove watchlist tickers with persistence in `watchlist.json`
 - Backtest with Databento in Python, VS Code, and Jupyter
 
@@ -52,23 +52,11 @@ pip install -r requirements.txt
 copy .env.example .env
 ```
 
-For live bot routing, start with demo mode:
+For the NDX paper bot, start with:
 
 ```text
 TRADINGVIEW_WEBHOOK_SECRET=make_a_private_secret
-DATABENTO_API_KEY=your_databento_key
-DATABENTO_DATASET=GLBX.MDP3
-DATABENTO_SCHEMA=ohlcv-1m
-DATABENTO_VERIFY_ALERTS_ENABLED=true
-TRADOVATE_ENV=demo
-TRADOVATE_USERNAME=your_tradeify_tradovate_username
-TRADOVATE_PASSWORD=your_tradeify_tradovate_password
-TRADOVATE_APP_ID=your_tradovate_app_id
-TRADOVATE_CID=your_tradovate_cid
-TRADOVATE_SECRET=your_tradovate_secret
-TRADOVATE_ACCOUNT_SPEC=your_tradeify_account_name
-TRADOVATE_ACCOUNT_ID=your_tradeify_account_id
-TRADOVATE_AUTO_TRADE_ENABLED=false
+POLYGON_API_KEY=your_polygon_key
 ```
 
 ## Run
@@ -115,10 +103,9 @@ gunicorn main:app
 
 ## Notes
 
-- TradingView is the live signal source for futures bots.
-- Databento verifies entry alerts and powers research/backtesting.
-- Tradeify execution uses the Tradovate credentials provided by your Tradeify account.
-- Tradeify/Tradovate execution is locked until `TRADOVATE_AUTO_TRADE_ENABLED=true`.
-- Live orders also require `TRADOVATE_LIVE_TRADING_ACK=I_UNDERSTAND_REAL_MONEY_RISK`.
-- The included Pine strategy is designed for paper testing on a Nasdaq 100 chart such as `NDX`, `NQ1!`, or `MNQ1!` using the 1-hour timeframe.
+- TradingView is the live signal source for the NDX paper bot.
+- Polygon powers the NDX quote display in the app.
+- Databento can still power research/backtesting.
+- Pine strategies cannot directly auto-fill TradingView's built-in Paper Trading panel; use TradingView Strategy Tester or webhook alerts into this app for paper-signal tracking.
+- The included Pine strategy is designed for paper testing on a Nasdaq 100 chart such as `NDX` using the 1-hour timeframe.
 - If `python` does not work in PowerShell, try `py` instead.

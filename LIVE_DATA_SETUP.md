@@ -1,10 +1,11 @@
-# Futures Bot Setup
+# NDX Paper Bot Setup
 
 The bot now uses this split:
 
-- TradingView Premium: live futures candles and alerts.
-- Databento: historical futures context for verification and backtesting.
-- Tradeify/Tradovate: execution using the Tradovate credentials from your Tradeify account.
+- TradingView Premium: live NDX strategy candles and alerts.
+- Polygon: NDX index quote display in the app using `I:NDX`.
+- Databento: optional historical research/backtesting.
+- App paper signal log: alerts show in the app so you can watch the bot decisions live.
 
 ## Render Environment
 
@@ -14,7 +15,13 @@ Required for TradingView alerts:
 TRADINGVIEW_WEBHOOK_SECRET=make_a_private_secret
 ```
 
-Required for Databento verification:
+Required for Polygon NDX quotes:
+
+```text
+POLYGON_API_KEY=your_polygon_key
+```
+
+Optional for Databento research:
 
 ```text
 DATABENTO_API_KEY=your_databento_key
@@ -28,7 +35,7 @@ DATABENTO_MIN_RECORDS=40
 DATABENTO_MAX_ALERT_DEVIATION_PCT=1.25
 ```
 
-Required for Tradeify/Tradovate demo routing:
+Optional for Tradeify/Tradovate demo routing if you later switch back to NQ futures:
 
 ```text
 TRADOVATE_ENV=demo
@@ -50,9 +57,9 @@ ALGO_DEFAULT_TARGET_PCT=0.02
 ALGO_DEFAULT_STOP_PCT=0.01
 ```
 
-Update the `M6` contract codes when the active futures month rolls.
+If you later switch back to futures, update the `M6` contract codes when the active futures month rolls.
 
-Only after demo orders work, live routing also needs:
+Only after futures demo orders work, live routing also needs:
 
 ```text
 TRADOVATE_ENV=live
@@ -67,7 +74,7 @@ Open this file in TradingView Pine Editor:
 tradingview/ai_algorithm_strategy.pine
 ```
 
-Run it on a Nasdaq 100 chart like `NDX` for TradingView paper testing, or `NQ1!` / `MNQ1!` if you want futures-style alerts. Keep the chart set to `1H`. The strategy is intentionally single-timeframe and only fires confirmed bar-close alerts, so it does not use multi-timeframe lookups or repainting live-bar signals.
+Run it on a Nasdaq 100 chart like `NDX`. Keep the chart set to `1H`. The strategy is intentionally single-timeframe and only fires confirmed bar-close alerts, so it does not use multi-timeframe lookups or repainting live-bar signals.
 
 The Pine strategy has guardrails built in:
 
@@ -86,11 +93,11 @@ https://trading-app-kb38.onrender.com/tradingview-webhook?secret=make_a_private_
 
 The Pine alert sends `BUY` or `SELL` plus live price, targets, stop, contracts, edge, score, timeframe, reason, and bar time.
 
-Important: Pine strategies simulate fills inside TradingView's broker emulator and can trigger alerts. Pine does not directly take over the TradingView Paper Trading panel by itself. For actual automated paper execution, use TradingView alerts with a webhook bridge to a paper/demo broker endpoint. This app's execution bridge is still locked to NQ futures and rejects non-futures/non-NQ alerts before routing through Tradeify/Tradovate.
+Important: Pine strategies simulate fills inside TradingView's broker emulator and can trigger alerts. Pine does not directly take over the TradingView Paper Trading panel by itself. For automated paper execution outside the Strategy Tester, use TradingView alerts with a webhook bridge to a paper/demo broker endpoint. This app is now locked to NDX alerts and logs them as app paper signals.
 
 ## Databento Backtesting
 
-Run futures backtests locally:
+Run futures-style Databento backtests locally:
 
 ```powershell
 pip install -r requirements-research.txt

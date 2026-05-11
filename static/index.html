@@ -2304,23 +2304,23 @@ body {
     <div class="algo-hero-grid">
       <div>
         <div class="hero-eyebrow">AI Algorithm Terminal</div>
-        <h1 class="algo-title">Futures bot. Verified signals.</h1>
-        <div class="algo-copy">TradingView sends live futures alerts, Databento checks the historical setup, and verified trades route to your Tradeify account through Tradovate.</div>
+        <h1 class="algo-title">NDX bot. Paper-first signals.</h1>
+        <div class="algo-copy">TradingView runs the NDX strategy, this app logs the alerts, and Polygon powers the live Nasdaq 100 price card.</div>
         <div class="hero-chip-row">
-          <div class="hero-chip live" id="providerChip">TradingView -> Databento -> Tradeify</div>
+          <div class="hero-chip live" id="providerChip">TradingView -> App Paper Signals</div>
           <div class="hero-chip" id="alertsChip">Alerts idle</div>
         </div>
         <div class="algo-actions">
           <button class="algo-primary" onclick="loadAlgorithmDashboard(true)">Run Algorithm</button>
-          <button class="algo-secondary" onclick="manualRefresh()">Refresh NQ</button>
+          <button class="algo-secondary" onclick="manualRefresh()">Refresh NDX</button>
           <button class="algo-secondary" onclick="window.open('/pine-script','_blank')">Export Pine Script</button>
         </div>
       </div>
       <div id="algoLivePanel" class="algo-live-card">
         <div class="algo-live-orb"></div>
         <div class="algo-live-label">Execution Status</div>
-        <div class="algo-live-title">Live trading locked</div>
-        <div class="algo-live-copy">Futures-only routing stays locked until Databento verification and Tradeify/Tradovate credentials are configured.</div>
+        <div class="algo-live-title">NDX paper signals armed</div>
+        <div class="algo-live-copy">TradingView can fire strategy alerts into this app. Pine cannot directly auto-fill TradingView Paper Trading by itself.</div>
       </div>
     </div>
   </section>
@@ -2330,23 +2330,23 @@ body {
       <div class="section-head">
         <div>
           <div class="section-kicker">Armed Market</div>
-          <div class="section-title">NQ futures only</div>
+          <div class="section-title">NDX only</div>
         </div>
         <div class="helper-pill">Auto-routed from TradingView</div>
       </div>
       <div class="locked-market-card">
-        <div class="locked-market-symbol">NQ</div>
+        <div class="locked-market-symbol">NDX</div>
         <div>
-          <div class="locked-market-title">Nasdaq futures bot</div>
-          <div class="locked-market-copy">TradingView alerts must be NQ or NQ1!. All other markets are ignored before Databento and Tradeify/Tradovate routing.</div>
+          <div class="locked-market-title">Nasdaq 100 index bot</div>
+          <div class="locked-market-copy">TradingView alerts must come from an NDX chart. Other markets are ignored before the app logs the paper signal.</div>
         </div>
-        <div id="armedFuture" class="armed-future active">Armed: NQ</div>
+        <div id="armedFuture" class="armed-future active">Armed: NDX</div>
       </div>
     </div>
     <div class="algo-live-card">
       <div class="algo-live-label">Last Updated</div>
       <div class="algo-live-title" id="lastUpdated">Waiting for data...</div>
-      <div class="algo-live-copy">TradingView handles live candles and alert triggers. Databento verifies historical context. Tradeify/Tradovate handles execution.</div>
+      <div class="algo-live-copy">TradingView handles the strategy and alerts. The app shows the NDX quote and logs paper signals live.</div>
       <div class="algo-actions">
         <button id="refreshBtn" class="algo-secondary" onclick="manualRefresh()">Refresh Now</button>
       </div>
@@ -2504,7 +2504,8 @@ body {
 <script>
 let strategy = "momentum";
 let timeframe = "5m";
-let lastTicker = "NQ";
+const LOCKED_SYMBOL = "NDX";
+let lastTicker = LOCKED_SYMBOL;
 let watchlist = [];
 let watchlistData = [];
 let isLoading = false;
@@ -2539,7 +2540,7 @@ const PAPER_HISTORY_STORAGE_KEY = "trading-app-paper-history";
 const ALERTS_STORAGE_KEY = "trading-app-alerts";
 const LAYOUT_PREFS_STORAGE_KEY = "trading-app-layout-prefs";
 const STARTING_EQUITY = 10000;
-const TOP_MOVERS_UNIVERSE = ["NQ"];
+const TOP_MOVERS_UNIVERSE = [LOCKED_SYMBOL];
 let paperPositions = [];
 let paperHistory = [];
 let alerts = [];
@@ -2557,18 +2558,9 @@ let portfolioStreakState = null;
 let communityState = { leaderboard: [], journals: [], heatmap: [], following: [] };
 let scannerCache = {};
 let scannerCacheTime = 0;
-const DEFAULT_SCANNER_UNIVERSE = ["NQ"];
+const DEFAULT_SCANNER_UNIVERSE = [LOCKED_SYMBOL];
 const FUTURES_SUGGESTIONS = [
-  { symbol: "ES", name: "E-mini S&P 500", exchange: "CME" },
-  { symbol: "MES", name: "Micro E-mini S&P 500", exchange: "CME" },
-  { symbol: "NQ", name: "E-mini Nasdaq 100", exchange: "CME" },
-  { symbol: "MNQ", name: "Micro E-mini Nasdaq 100", exchange: "CME" },
-  { symbol: "YM", name: "E-mini Dow", exchange: "CBOT" },
-  { symbol: "RTY", name: "E-mini Russell 2000", exchange: "CME" },
-  { symbol: "CL", name: "Crude Oil", exchange: "NYMEX" },
-  { symbol: "GC", name: "Gold", exchange: "COMEX" },
-  { symbol: "SI", name: "Silver", exchange: "COMEX" },
-  { symbol: "ZN", name: "10-Year Treasury Note", exchange: "CBOT" }
+  { symbol: "NDX", name: "Nasdaq 100 Index", exchange: "NASDAQ" }
 ];
 const CANDLE_REFRESH_INTERVAL_MS = 15000;
 const SEARCH_DEBOUNCE_MS = 400;
@@ -2619,7 +2611,7 @@ function updateArmedFuture(active){
   }
   if(active && active.root){
     const routeSymbol = active.tradovate_symbol || active.searched_symbol || active.root;
-    badge.innerText = `Armed: ${active.root} -> ${routeSymbol}`;
+    badge.innerText = routeSymbol && routeSymbol !== active.root ? `Armed: ${active.root} -> ${routeSymbol}` : `Armed: ${active.root}`;
     badge.classList.add("active");
   }else{
     badge.innerText = "No market armed";
@@ -2631,7 +2623,7 @@ function setOnboardingVisible(visible){
   return;
 }
 
-function renderMarketEmptyState(title="NQ futures bot is armed.", copy="TradingView NQ alerts can be verified by Databento and routed through Tradeify/Tradovate when auto-trading is enabled."){
+function renderMarketEmptyState(title="NDX paper bot is armed.", copy="TradingView NDX alerts can be logged by the app while the strategy runs in TradingView."){
     const result = document.getElementById("result");
     const insights = document.getElementById("marketInsights");
     result.innerHTML = `
@@ -2639,9 +2631,9 @@ function renderMarketEmptyState(title="NQ futures bot is armed.", copy="TradingV
         <div class="empty-title">${title}</div>
       <div class="empty-copy">${copy}</div>
       <div class="empty-grid">
-        <div class="empty-tip">Only <strong>NQ</strong> and <strong>NQ1!</strong> TradingView alerts are accepted.</div>
-        <div class="empty-tip">The algorithm still requires Databento confirmation before routing an entry.</div>
-        <div class="empty-tip">Real-money routing stays locked until Tradeify/Tradovate demo mode is tested and live-trading acknowledgment is set.</div>
+        <div class="empty-tip">Only <strong>NDX</strong> TradingView alerts are accepted.</div>
+        <div class="empty-tip">Use TradingView Strategy Tester or alerts to watch the paper logic fire live.</div>
+        <div class="empty-tip">Direct TradingView Paper Trading auto-fills are not available from Pine alone.</div>
         </div>
       </div>
     `;
@@ -2910,13 +2902,13 @@ function updateQuoteDisplay(price){
   const priceEl = document.getElementById("livePrice");
   const changeEl = document.getElementById("liveChange");
   if(priceEl){
-    priceEl.innerText = `$${latestAnalyzedSnapshot.price.toFixed(2)}`;
+    priceEl.innerText = formatMarketPrice(latestAnalyzedSnapshot.price, latestAnalyzedSnapshot.ticker);
   }
   if(changeEl){
     changeEl.className = `change-pill ${pctChange >= 0 ? "up" : "down"}`;
     changeEl.innerHTML = `
       <span class="trend-arrow">${getTrendArrow(pctChange)}</span>
-      <span>${dollarChange >= 0 ? "+" : ""}$${Math.abs(dollarChange).toFixed(2)} | ${pctChange >= 0 ? "+" : ""}${pctChange}%</span>
+      <span>${formatMarketMove(dollarChange, latestAnalyzedSnapshot.ticker)} | ${pctChange >= 0 ? "+" : ""}${pctChange}%</span>
     `;
   }
 
@@ -3757,6 +3749,30 @@ function formatPercent(value){
   return `${amount >= 0 ? "+" : ""}${amount.toFixed(2)}%`;
 }
 
+function isIndexTicker(ticker){
+  return String(ticker || lastTicker || "").toUpperCase() === "NDX";
+}
+
+function formatMarketPrice(value, ticker=lastTicker){
+  const amount = Number(value || 0);
+  const formatted = amount.toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  });
+  return isIndexTicker(ticker) ? formatted : `$${formatted}`;
+}
+
+function formatMarketMove(value, ticker=lastTicker){
+  const amount = Number(value || 0);
+  const formatted = Math.abs(amount).toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  });
+  return isIndexTicker(ticker)
+    ? `${amount >= 0 ? "+" : "-"}${formatted} pts`
+    : `${amount >= 0 ? "+" : "-"}$${formatted}`;
+}
+
 function getAlgoPillClass(action){
   if(action === "BUY") return "buy";
   if(action === "SELL") return "sell";
@@ -3774,11 +3790,11 @@ function renderAlgoLivePanel(payload){
     <div class="algo-live-orb"></div>
     <div class="algo-live-label">Execution Status</div>
     <div class="algo-live-title">${live.label || "Live execution locked"}</div>
-    <div class="algo-live-copy">${live.summary || "TradingView can generate live futures alerts now. Databento and Tradeify/Tradovate env vars control execution."}</div>
+    <div class="algo-live-copy">${live.summary || "TradingView can generate NDX strategy alerts now. The app logs those paper signals live."}</div>
     <div class="confirmation-list" style="margin-top:14px;">
-      <div class="confirmation-pill">${live.tradovate_configured ? "Tradeify/Tradovate ready" : "Tradeify/Tradovate not configured"}</div>
+      <div class="confirmation-pill">${live.tradovate_configured ? "Broker bridge configured" : "TradingView paper panel not directly automatable"}</div>
       <div class="confirmation-pill">${live.tradingview_webhook_configured ? "TradingView webhook ready" : "Webhook not configured"}</div>
-      <div class="confirmation-pill">${live.databento_verification_enabled ? "Databento gate on" : "Databento gate off"}</div>
+      <div class="confirmation-pill">${live.tradingview_webhook_configured ? "Webhook ready" : "Webhook not configured"}</div>
       <div class="confirmation-pill">${live.enabled ? "Auto trading enabled" : "Manual approval only"}</div>
     </div>
   `;
@@ -3798,7 +3814,7 @@ function renderAlgorithmDashboard(payload){
   renderAlgoLivePanel(payload);
 
   if(!rows.length){
-    container.innerHTML = '<div class="algo-empty">No NQ algorithm row loaded yet. Refresh again in a moment.</div>';
+    container.innerHTML = '<div class="algo-empty">No NDX algorithm row loaded yet. Refresh again in a moment.</div>';
     return;
   }
 
@@ -3806,7 +3822,7 @@ function renderAlgorithmDashboard(payload){
     <div class="algo-board-head">
       <div>
         <div class="section-kicker">Algorithm Results</div>
-        <div class="section-title">NQ results for ${payload.date || "today"}</div>
+        <div class="section-title">NDX results for ${payload.date || "today"}</div>
         <div class="compact-copy">Model P/L is a signal-performance estimate using a $1,000 reference size per active decision, not a real filled order.</div>
       </div>
       <button class="algo-secondary" onclick="loadAlgorithmDashboard(true)">Refresh Board</button>
@@ -4013,7 +4029,7 @@ async function runScanner(){
             <div class="mover-summary-card">
               <div class="pulse-title">Top Rank</div>
               <div class="pulse-value">${best ? best.ticker : "--"}</div>
-              <div class="pulse-meta">${best ? `${formatPercent(best.change || 0)} | $${Number(best.price || 0).toFixed(2)}` : "Top mover shows here."}</div>
+              <div class="pulse-meta">${best ? `${formatPercent(best.change || 0)} | ${formatMarketPrice(best.price, best.ticker)}` : "Top mover shows here."}</div>
             </div>
             <div class="mover-summary-card">
               <div class="pulse-title">Best Setup</div>
@@ -4045,7 +4061,7 @@ async function runScanner(){
               <div class="pulse-grid">
                 <div class="pulse-item">
                   <div class="pulse-title">Price</div>
-                  <div class="pulse-value">$${Number(item.price || 0).toFixed(2)}</div>
+                  <div class="pulse-value">${formatMarketPrice(item.price, item.ticker)}</div>
                   <div class="pulse-meta">${formatPercent(item.change || 0)} on the day</div>
                 </div>
                 <div class="pulse-item">
@@ -4276,11 +4292,11 @@ function renderPortfolioContext(){
     <div class="portfolio-context-grid">
       <div>
         <div class="ticker-label">${latestAnalyzedSnapshot.ticker}</div>
-        <div class="price">$${latestAnalyzedSnapshot.price}</div>
+        <div class="price">${formatMarketPrice(latestAnalyzedSnapshot.price, latestAnalyzedSnapshot.ticker)}</div>
       </div>
       <div class="change-pill ${latestAnalyzedSnapshot.change >= 0 ? "up" : "down"}">
         <span class="trend-arrow">${getTrendArrow(latestAnalyzedSnapshot.change)}</span>
-        <span>${latestAnalyzedSnapshot.dollarChange >= 0 ? "+" : ""}$${Math.abs(latestAnalyzedSnapshot.dollarChange).toFixed(2)} | ${latestAnalyzedSnapshot.change >= 0 ? "+" : ""}${latestAnalyzedSnapshot.change}%</span>
+        <span>${formatMarketMove(latestAnalyzedSnapshot.dollarChange, latestAnalyzedSnapshot.ticker)} | ${latestAnalyzedSnapshot.change >= 0 ? "+" : ""}${latestAnalyzedSnapshot.change}%</span>
       </div>
     </div>
   `;
@@ -4296,7 +4312,7 @@ function chooseSuggestion(symbol, label){
     tickerInput.value = symbol;
   }
   hideSuggestions();
-  analyze("NQ");
+  analyze(LOCKED_SYMBOL);
 }
 
 async function loadActiveFuture(){
@@ -4348,7 +4364,7 @@ async function fetchSuggestions(query){
 }
 
 function manualRefresh(){
-  analyze("NQ");
+  analyze(LOCKED_SYMBOL);
 }
 
 function setLoadingState(loading){
@@ -5080,7 +5096,7 @@ function addAlertForCurrentTicker(){
       ticker: lastTicker,
       type,
       target: type.startsWith("price_") ? target : null,
-      label: type === "price_above" ? `BUY alert above $${target.toFixed(2)}` : `SELL alert below $${target.toFixed(2)}`,
+      label: type === "price_above" ? `BUY alert above ${formatMarketPrice(target, lastTicker)}` : `SELL alert below ${formatMarketPrice(target, lastTicker)}`,
       side: type === "price_above" ? "BUY" : "SELL",
       contextMessage: latestAnalyzedSignal?.reason || latestMarketMode?.summary || "Alert triggered from your saved market setup.",
       status: "active",
@@ -5131,7 +5147,7 @@ function armSuggestedAlert(encodedSuggestion){
   saveAlerts();
   saveRemoteState();
   renderAlerts();
-  setStatus(`${suggestion.side || "Signal"} alert armed for ${lastTicker} at $${target.toFixed(2)}.`, "ok");
+  setStatus(`${suggestion.side || "Signal"} alert armed for ${lastTicker} at ${formatMarketPrice(target, lastTicker)}.`, "ok");
 }
 
 function removeAlert(id){
@@ -5153,7 +5169,7 @@ function maybeNotifyAlert(alert, markPrice){
 
   if(Notification.permission === "granted"){
     new Notification(`${alert.ticker} alert triggered`, {
-      body: `${getAlertLabel(alert)} | Latest price: $${markPrice.toFixed(2)}`
+      body: `${getAlertLabel(alert)} | Latest price: ${formatMarketPrice(markPrice, alert.ticker)}`
     });
   }
 }
@@ -5163,8 +5179,8 @@ function getAlertLabel(alert){
     return alert.label;
   }
   const type = alert.type || (alert.direction ? `price_${alert.direction}` : "price_above");
-  if(type === "price_above") return `BUY alert above $${Number(alert.target).toFixed(2)}`;
-  if(type === "price_below") return `SELL alert below $${Number(alert.target).toFixed(2)}`;
+  if(type === "price_above") return `BUY alert above ${formatMarketPrice(alert.target, alert.ticker)}`;
+  if(type === "price_below") return `SELL alert below ${formatMarketPrice(alert.target, alert.ticker)}`;
   if(type === "ema9_above") return "Price crossed above EMA 9";
   if(type === "ema9_below") return "Price crossed below EMA 9";
   if(type === "vwap_above") return "Price reclaimed VWAP";
@@ -5505,7 +5521,7 @@ async function loadCandles(ticker, options={}){
 async function analyze(sym){
   if(isLoading) return;
 
-  let t = "NQ";
+  let t = LOCKED_SYMBOL;
   lastTicker=t;
   riskProfile = "balanced";
   hideSuggestions();
@@ -5517,7 +5533,7 @@ async function analyze(sym){
 
     if(!d || d.error){
       setOnboardingVisible(true);
-      renderMarketEmptyState("NQ data is temporarily unavailable.", "The bot is still armed to NQ, but the app could not build the NQ card yet. Try Refresh Now in a moment.");
+      renderMarketEmptyState("NDX data is temporarily unavailable.", "The bot is still armed to NDX, but the app could not build the NDX card yet. Try Refresh Now in a moment.");
       showChartMessage("No chart data is available yet. Try Refresh Now after a moment.");
       setLastUpdated("No recent market data available");
       setStatus("Live provider data is temporarily unavailable.", "warning");
@@ -5542,7 +5558,7 @@ async function analyze(sym){
       statusMessage = `Showing recent cached quote data from ${Math.round(d.cache_age_seconds)}s ago.`;
       setLastUpdated(`Cached quote ${formatAge(d.cache_age_seconds)}`);
     }else{
-      const sourceLabel = d.data_source === "tradovate" ? "Tradovate live data" : d.data_source === "polygon" ? "Fallback market data" : "Live market data";
+      const sourceLabel = d.data_source === "polygon_index_snapshot" ? "Polygon NDX snapshot" : d.data_source === "tradovate" ? "Tradovate live data" : d.data_source === "polygon" ? "Polygon market data" : "Live market data";
       updateProviderChip(sourceLabel);
       setLastUpdated(`${sourceLabel} updated at ${liveEtTimeFormatter.format(new Date())} ET`);
     }
@@ -5573,10 +5589,10 @@ async function analyze(sym){
       <div class="algo-decision-grid">
         <div>
           <div class="ticker-label">${d.ticker}</div>
-          <div class="algo-decision-price" id="livePrice">$${Number(d.price || 0).toFixed(2)}</div>
+          <div class="algo-decision-price" id="livePrice">${formatMarketPrice(d.price, d.ticker)}</div>
           <div id="liveChange" class="change-pill ${d.change>=0?'up':'down'}" style="margin:12px 0 16px;">
             <span class="trend-arrow">${getTrendArrow(d.change)}</span>
-            <span>${d.dollar_change>=0?'+':''}$${Math.abs(d.dollar_change).toFixed(2)} | ${d.change>=0?'+':''}${d.change}%</span>
+            <span>${formatMarketMove(d.dollar_change, d.ticker)} | ${d.change>=0?'+':''}${d.change}%</span>
           </div>
           <div class="analytics-grid">
             ${renderAnalyticsCard("Decision", d.indicators?.trade_signal?.action || "WAIT", d.indicators?.trade_signal?.action === "BUY" ? "up" : d.indicators?.trade_signal?.action === "SELL" ? "down" : "", `${d.indicators?.trade_signal?.grade || "C"} grade`)}
@@ -5590,7 +5606,7 @@ async function analyze(sym){
                 <div>Algorithm Trade Plan</div>
                 <div class="helper-pill">Momentum AI</div>
               </div>
-              <div class="indicator-meta">Entry: $${Number(d.plan.entry || 0).toFixed(2)} | Stop: $${Number(d.plan.stop || 0).toFixed(2)} | Targets: ${(d.plan.targets || []).map(value => `$${Number(value).toFixed(2)}`).join(", ")}</div>
+              <div class="indicator-meta">Entry: ${formatMarketPrice(d.plan.entry, d.ticker)} | Stop: ${formatMarketPrice(d.plan.stop, d.ticker)} | Targets: ${(d.plan.targets || []).map(value => formatMarketPrice(value, d.ticker)).join(", ")}</div>
               <div class="indicator-meta">${d.indicators?.trade_signal?.reason || d.summary || ""}</div>
             </div>
             ${renderSmartAlerts(d.smart_alerts)}
@@ -5622,7 +5638,7 @@ async function analyze(sym){
   }catch(err){
     console.log(err);
     setOnboardingVisible(true);
-    renderMarketEmptyState("Something went wrong while loading NQ.", "The bot remains armed to NQ. Try again in a moment.");
+    renderMarketEmptyState("Something went wrong while loading NDX.", "The bot remains armed to NDX. Try again in a moment.");
     setLastUpdated("Update failed");
     setStatus("Something went wrong while loading market data.", "warning");
   }finally{
@@ -5634,7 +5650,7 @@ const tickerInput = document.getElementById("ticker");
 if(tickerInput){
   tickerInput.addEventListener("keydown", (e)=>{
     if(e.key === "Enter"){
-      analyze("NQ");
+      analyze(LOCKED_SYMBOL);
     }
   });
 
@@ -5674,7 +5690,7 @@ function getWatchButtonMarkup(ticker){
 
 function formatBotTradePrice(value){
   const number = Number(value);
-  return Number.isFinite(number) ? `$${number.toFixed(2)}` : "--";
+  return Number.isFinite(number) ? formatMarketPrice(number, LOCKED_SYMBOL) : "--";
 }
 
 function renderBotTrades(){
@@ -5688,7 +5704,7 @@ function renderBotTrades(){
 
   if(!botTrades.length){
     summary.innerText = "No algorithm trades yet.";
-    list.innerHTML = '<div class="paper-empty">TradingView bot alerts will show here as simulated demo trades or Tradovate demo orders.</div>';
+    list.innerHTML = '<div class="paper-empty">TradingView NDX bot alerts will show here as app paper signals.</div>';
     return;
   }
 
@@ -5754,7 +5770,7 @@ function renderAlerts(){
     summary.innerText = activeAlerts.length
       ? `${activeAlerts.length} active alert${activeAlerts.length === 1 ? "" : "s"} | No triggered messages yet.`
       : "No alert messages yet.";
-    list.innerHTML = '<div class="paper-empty">Search a ticker, create an alert from that ticker card, and the triggered message will appear here when price hits your level.</div>';
+    list.innerHTML = '<div class="paper-empty">Create an NDX alert from the market card and the triggered message will appear here when price hits your level.</div>';
     return;
   }
 
@@ -5775,7 +5791,7 @@ function renderAlerts(){
           <div class="paper-symbol">${alert.ticker} | ${getAlertLabel(alert)}</div>
           <div class="alert-status-pill">Triggered</div>
         </div>
-        <div class="alert-meta">Triggered at $${Number(alert.triggeredPrice).toFixed(2)}</div>
+        <div class="alert-meta">Triggered at ${formatMarketPrice(alert.triggeredPrice, alert.ticker)}</div>
         <div class="alert-meta">${alert.triggerMessage || alert.contextMessage || "Saved alert condition hit."}</div>
       </div>
       <div>

@@ -74,7 +74,9 @@ STATIC_US_MACRO_EVENTS = [
     ("2026-07-14T08:30:00-04:00", "Consumer Price Index", "June 2026"),
     ("2026-07-15T08:30:00-04:00", "Producer Price Index", "June 2026"),
 ]
-ALGORITHM_DEFAULT_UNIVERSE = ["NQ"]
+ALGORITHM_LOCKED_SYMBOL = "NDX"
+ALGORITHM_POLYGON_SYMBOL = "I:NDX"
+ALGORITHM_DEFAULT_UNIVERSE = [ALGORITHM_LOCKED_SYMBOL]
 ALGORITHM_SIGNAL_CAPITAL = 1000
 FUTURES_ROOTS = {
     "ES", "MES", "NQ", "MNQ", "YM", "MYM", "RTY", "M2K",
@@ -93,6 +95,21 @@ active_futures_market = None
 database_enabled = False
 news_cache = {}
 events_cache = {}
+
+
+def is_ndx_symbol(symbol):
+    clean = str(symbol or "").upper().strip().replace(" ", "")
+    if ":" in clean and not clean.startswith("I:"):
+        clean = clean.split(":", 1)[1]
+    return clean in {"NDX", "I:NDX", "NAS100", "US100"}
+
+
+def display_market_symbol(symbol):
+    return ALGORITHM_LOCKED_SYMBOL if is_ndx_symbol(symbol) else str(symbol or "").upper().strip()
+
+
+def polygon_market_symbol(symbol):
+    return ALGORITHM_POLYGON_SYMBOL if is_ndx_symbol(symbol) else str(symbol or "").upper().strip()
 
 
 # =========================
@@ -976,6 +993,7 @@ def fetch_market_events(symbol):
 
 
 def get_quote_from_candles(symbol, preferred_source="cache"):
+    symbol = display_market_symbol(symbol)
     cached = get_cache_entry(candle_cache, f"{symbol}:5m", CANDLE_CACHE_TTL)
     if not cached or not cached["data"]:
         return None
@@ -1154,6 +1172,17 @@ def normalize_databento_symbol(symbol):
 def set_active_futures_market(symbol):
     global active_futures_market
 
+    if is_ndx_symbol(symbol):
+        active_futures_market = {
+            "root": ALGORITHM_LOCKED_SYMBOL,
+            "searched_symbol": ALGORITHM_LOCKED_SYMBOL,
+            "tradovate_symbol": None,
+            "databento_symbol": ALGORITHM_POLYGON_SYMBOL,
+            "routable": False,
+            "updated_at": datetime.now(DEMO_TIMEZONE).isoformat()
+        }
+        return active_futures_market
+
     root = get_futures_root(symbol)
     if not root:
         return None
@@ -1169,13 +1198,13 @@ def set_active_futures_market(symbol):
 
 
 def get_active_futures_market():
-    if not active_futures_market or active_futures_market.get("root") != "NQ":
-        return set_active_futures_market("NQ")
+    if not active_futures_market or active_futures_market.get("root") != ALGORITHM_LOCKED_SYMBOL:
+        return set_active_futures_market(ALGORITHM_LOCKED_SYMBOL)
     return active_futures_market
 
 
 def active_market_matches_signal(signal):
-    return get_futures_root(signal.get("symbol")) == "NQ"
+    return is_ndx_symbol(signal.get("symbol"))
 
 
 def get_tradovate_chart_config(tf):
@@ -1396,7 +1425,8 @@ def first_payload_float(payload, keys, default=None):
 def build_tradingview_execution_signal(payload):
     payload = payload if isinstance(payload, dict) else {}
     action = normalize_tradingview_action(first_payload_value(payload, ["action", "side", "signal"], ""))
-    symbol = str(first_payload_value(payload, ["ticker", "symbol", "contract"], "")).upper().strip()
+    raw_symbol = str(first_payload_value(payload, ["ticker", "symbol", "contract"], "")).upper().strip()
+    symbol = display_market_symbol(raw_symbol)
     price = first_payload_float(payload, ["price", "close", "mark", "entry"], None)
     edge = first_payload_float(payload, ["edge", "score"], 0)
     qty = env_int(TRADOVATE_DEFAULT_ORDER_QTY_ENV, 1)
@@ -1423,7 +1453,7 @@ def build_tradingview_execution_signal(payload):
     return {
         "action": action,
         "symbol": symbol,
-        "tradovate_symbol": normalize_tradovate_symbol(symbol),
+        "tradovate_symbol": None if is_ndx_symbol(symbol) else normalize_tradovate_symbol(symbol),
         "price": round(price, 4) if price else None,
         "edge": round(edge, 2),
         "qty": qty,
@@ -1676,7 +1706,7 @@ def route_tradingview_signal_to_tradovate(payload):
         "enabled": tradovate_auto_trade_enabled(),
         "ready": tradovate_execution_ready(),
         "routed": False,
-        "destination": "tradeify_tradovate",
+        "destination": "tradingview_paper_signal",
         "signal": signal,
         "verification": None,
         "reason": ""
@@ -1688,20 +1718,36 @@ def route_tradingview_signal_to_tradovate(payload):
     if not signal["symbol"]:
         result["reason"] = "TradingView alert was stored but no ticker/contract was supplied."
         return result
-    if not is_futures_symbol(signal["symbol"]):
-        result["reason"] = "Rejected: this bot only trades futures symbols from TradingView."
+    if not is_ndx_symbol(signal["symbol"]):
+        result["reason"] = "Rejected: this bot is locked to NDX only."
         return result
     active_market = get_active_futures_market()
     result["active_future"] = active_market
     if not active_market:
-        result["reason"] = "Rejected: the bot is waiting for the default NQ market lock."
+        result["reason"] = "Rejected: the bot is waiting for the default NDX market lock."
         return result
     if not active_market_matches_signal(signal):
-        result["reason"] = f"Rejected: {active_market.get('root')} is armed, but this alert was for {get_futures_root(signal['symbol']) or signal['symbol']}."
+        result["reason"] = f"Rejected: {active_market.get('root')} is armed, but this alert was for {signal['symbol']}."
         return result
     if duplicate_tradingview_signal(signal):
-        result["reason"] = "Duplicate TradingView futures signal ignored."
+        result["reason"] = "Duplicate TradingView NDX signal ignored."
         return result
+
+    if is_ndx_symbol(signal["symbol"]):
+        result["verification"] = {
+            "enabled": False,
+            "passed": True,
+            "source": "tradingview",
+            "reason": "NDX paper signal accepted. TradingView Pine can alert, but it cannot directly auto-fill TradingView's built-in Paper Trading panel.",
+            "candles": 0,
+            "symbol": ALGORITHM_LOCKED_SYMBOL,
+            "model_action": signal["action"],
+            "model_edge": signal.get("edge") or 0,
+            "price_deviation_pct": None
+        }
+        result["reason"] = "NDX signal logged for app paper mode. To auto-execute somewhere, connect this webhook to a paper/demo broker bridge."
+        return result
+
     verification = verify_tradingview_signal_with_databento(signal)
     result["verification"] = verification
     if not verification.get("passed"):
@@ -1811,12 +1857,13 @@ def fetch_polygon_candles(symbol, tf):
     if not api_key:
         return None
 
+    polygon_symbol = polygon_market_symbol(symbol)
     config = get_polygon_range_config(tf)
     end_date = datetime.now(tz=DEMO_TIMEZONE).date()
     start_date = end_date.fromordinal(end_date.toordinal() - config["days"])
 
     response = requests.get(
-        f"{POLYGON_BASE_URL}/v2/aggs/ticker/{symbol}/range/{config['multiplier']}/{config['timespan']}/{start_date.isoformat()}/{end_date.isoformat()}",
+        f"{POLYGON_BASE_URL}/v2/aggs/ticker/{polygon_symbol}/range/{config['multiplier']}/{config['timespan']}/{start_date.isoformat()}/{end_date.isoformat()}",
         params={
             "adjusted": "true",
             "sort": "asc",
@@ -1850,13 +1897,57 @@ def fetch_polygon_candles(symbol, tf):
     return candles
 
 
+def fetch_polygon_index_snapshot_quote(symbol):
+    api_key = get_polygon_api_key()
+    if not api_key:
+        return None
+
+    polygon_symbol = polygon_market_symbol(symbol)
+    response = requests.get(
+        f"{POLYGON_BASE_URL}/v3/snapshot/indices",
+        params={
+            "ticker": polygon_symbol,
+            "limit": 1,
+            "apiKey": api_key
+        },
+        timeout=10,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    results = payload.get("results") or []
+    if not results:
+        return None
+
+    row = results[0]
+    session_data = row.get("session") or {}
+    price = row.get("value") or session_data.get("close") or session_data.get("previous_close")
+    if price is None:
+        return None
+
+    open_price = session_data.get("open") or session_data.get("previous_close") or price
+    high_price = session_data.get("high") or max(float(open_price), float(price))
+    low_price = session_data.get("low") or min(float(open_price), float(price))
+    return {
+        "price": round(float(price), 2),
+        "open": round(float(open_price), 2),
+        "high": round(float(high_price), 2),
+        "low": round(float(low_price), 2),
+        "timeframe": row.get("timeframe"),
+        "market_status": row.get("market_status")
+    }
+
+
 def fetch_polygon_price(symbol):
     api_key = get_polygon_api_key()
     if not api_key:
         return None
 
+    if is_ndx_symbol(symbol):
+        snapshot = fetch_polygon_index_snapshot_quote(symbol)
+        return snapshot["price"] if snapshot else None
+
     response = requests.get(
-        f"{POLYGON_BASE_URL}/v2/last/trade/{symbol}",
+        f"{POLYGON_BASE_URL}/v2/last/trade/{polygon_market_symbol(symbol)}",
         params={"apiKey": api_key},
         timeout=10,
     )
@@ -1874,8 +1965,10 @@ def fetch_polygon_previous_close_quote(symbol):
     if not api_key:
         return None
 
+    polygon_symbol = polygon_market_symbol(symbol)
+
     response = requests.get(
-        f"{POLYGON_BASE_URL}/v2/aggs/ticker/{symbol}/prev",
+        f"{POLYGON_BASE_URL}/v2/aggs/ticker/{polygon_symbol}/prev",
         params={
             "adjusted": "true",
             "apiKey": api_key
@@ -1902,6 +1995,7 @@ def fetch_polygon_previous_close_quote(symbol):
 
 
 def get_previous_close_quote(symbol):
+    symbol = display_market_symbol(symbol)
     cache_key = f"prev_close:{symbol}"
     cached = get_cache_entry(quote_cache, cache_key, PREVIOUS_CLOSE_CACHE_TTL)
     if cached and not cached["stale"]:
@@ -1932,6 +2026,48 @@ def get_previous_close_quote(symbol):
         return {
             "data": cached["data"],
             "source": "cache",
+            "cached": True,
+            "stale": True,
+            "age_seconds": cached["age_seconds"]
+        }
+
+    return None
+
+
+def get_index_snapshot_quote(symbol):
+    if not is_ndx_symbol(symbol):
+        return None
+
+    cache_key = f"index_snapshot:{display_market_symbol(symbol)}"
+    cached = get_cache_entry(quote_cache, cache_key, LIVE_PRICE_CACHE_TTL)
+    if cached and not cached["stale"]:
+        return {
+            "data": cached["data"],
+            "source": "polygon_index_snapshot",
+            "cached": True,
+            "stale": False,
+            "age_seconds": cached["age_seconds"]
+        }
+
+    try:
+        quote_data = fetch_polygon_index_snapshot_quote(symbol)
+        if quote_data:
+            set_cache_entry(quote_cache, cache_key, quote_data)
+            set_cache_entry(quote_cache, display_market_symbol(symbol), quote_data)
+            return {
+                "data": quote_data,
+                "source": "polygon_index_snapshot",
+                "cached": False,
+                "stale": False,
+                "age_seconds": 0
+            }
+    except requests.RequestException:
+        pass
+
+    if cached:
+        return {
+            "data": cached["data"],
+            "source": "polygon_index_snapshot",
             "cached": True,
             "stale": True,
             "age_seconds": cached["age_seconds"]
@@ -2015,6 +2151,7 @@ def search_symbols(query):
 
 
 def fetch_and_cache_candles(symbol, tf):
+    symbol = display_market_symbol(symbol)
     cache_key = f"{symbol}:{tf}"
     cached_candles = get_cache_entry(candle_cache, cache_key, CANDLE_CACHE_TTL)
     if cached_candles and not cached_candles["stale"]:
@@ -2027,7 +2164,7 @@ def fetch_and_cache_candles(symbol, tf):
         }
 
     try:
-        candle_rows = fetch_tradovate_candles(symbol, tf) if tradovate_configured() else None
+        candle_rows = fetch_tradovate_candles(symbol, tf) if tradovate_configured() and not is_ndx_symbol(symbol) else None
         source = "tradovate" if candle_rows else None
         if not candle_rows:
             candle_rows = fetch_polygon_candles(symbol, tf) if get_polygon_api_key() else None
@@ -2142,6 +2279,11 @@ def get_demo_market(symbol, tf):
 
 
 def get_data(symbol):
+    if is_ndx_symbol(symbol):
+        index_quote = get_index_snapshot_quote(symbol)
+        if index_quote and not index_quote["stale"]:
+            return index_quote
+
     cached = get_cache_entry(quote_cache, symbol, QUOTE_CACHE_TTL)
     if cached and not cached["stale"]:
         return {
@@ -2710,13 +2852,15 @@ def build_ai_trade_setup(symbol, strategy, risk_profile, trade_signal, plan, why
 def build_smart_alert_ideas(symbol, trade_signal, momentum_score, levels, market_mode):
     buy_level = round(float(levels.get("resistance") or 0), 2)
     sell_level = round(float(levels.get("support") or 0), 2)
+    price_suffix = " pts" if is_ndx_symbol(symbol) else ""
+    price_prefix = "" if is_ndx_symbol(symbol) else "$"
     action = trade_signal.get("action")
     grade = trade_signal.get("grade", "C")
     market_label = market_mode.get("label", "current")
     momentum_trigger = min(95, max(60, momentum_score["value"] + 8))
 
     buy_alert = {
-        "label": f"BUY alert if {symbol} breaks above ${buy_level}",
+        "label": f"BUY alert if {symbol} breaks above {price_prefix}{buy_level}{price_suffix}",
         "detail": f"Use this only if the breakout holds with the current {grade} setup and {market_label} tape.",
         "priority": "High" if action == "BUY" else "Watch",
         "type": "price_above",
@@ -2725,7 +2869,7 @@ def build_smart_alert_ideas(symbol, trade_signal, momentum_score, levels, market
         "why_now": trade_signal.get("reason")
     }
     sell_alert = {
-        "label": f"SELL alert if {symbol} loses ${sell_level}",
+        "label": f"SELL alert if {symbol} loses {price_prefix}{sell_level}{price_suffix}",
         "detail": f"Use this as a breakdown or protection alert if buyers fail at support.",
         "priority": "High" if action == "SELL" else "Risk",
         "type": "price_below",
@@ -2804,7 +2948,7 @@ def build_scanner_row(symbol):
 
 def build_algorithm_dashboard(tickers):
     rows = []
-    clean_tickers = ["NQ"]
+    clean_tickers = [ALGORITHM_LOCKED_SYMBOL]
 
     for ticker in clean_tickers[:10]:
         scanner_row = build_scanner_row(ticker)
@@ -2864,22 +3008,18 @@ def build_algorithm_dashboard(tickers):
     return {
         "date": datetime.now(DEMO_TIMEZONE).strftime("%Y-%m-%d"),
         "generated_at": datetime.now(DEMO_TIMEZONE).isoformat(),
-        "mode": "tradingview-databento-tradeify-futures" if tradovate_configured() else "signal-only",
+        "mode": "tradingview-ndx-paper-signals",
         "live_trading": {
-            "enabled": tradovate_execution_ready(),
-            "broker_connected": tradovate_configured(),
+            "enabled": False,
+            "broker_connected": False,
             "tradovate_configured": tradovate_configured(),
             "tradovate_auto_trade_enabled": tradovate_auto_trade_enabled(),
             "tradovate_environment": get_tradovate_env(),
             "tradingview_webhook_configured": bool(tradingview_webhook_secret()),
             "databento_verification_enabled": databento_alert_verification_enabled(),
-            "futures_only": True,
-            "label": "TradingView -> Databento -> Tradeify" if tradovate_configured() else "Live execution locked",
-            "summary": (
-                "Futures alerts come from TradingView, Databento verifies the setup, then verified orders route to your Tradeify account through Tradovate."
-                if tradovate_execution_ready()
-                else "TradingView futures alerts can be received now. Databento verification and Tradeify/Tradovate routing stay locked until the env vars are set."
-            )
+            "futures_only": False,
+            "label": "NDX paper signals armed",
+            "summary": "TradingView can fire NDX strategy alerts into this app. Direct auto-fills inside TradingView Paper Trading are not available from Pine alone."
         },
         "totals": {
             "total_pnl": total_pnl,
@@ -3322,21 +3462,23 @@ def build_public_leaderboard():
 # =========================
 
 def analyze_strategy(symbol, strategy, risk_profile="balanced"):
+    symbol = display_market_symbol(symbol)
     market_status = get_current_market_status()
     quote_tf = "1d" if market_status == "Closed" else "5m"
-    previous_close_quote = get_previous_close_quote(symbol) if market_status == "Closed" else None
+    index_snapshot_quote = get_index_snapshot_quote(symbol) if is_ndx_symbol(symbol) else None
+    previous_close_quote = get_previous_close_quote(symbol) if market_status == "Closed" and not index_snapshot_quote else None
     candle_result = fetch_and_cache_candles(symbol, quote_tf)
-    using_demo = not (candle_result and candle_result["candles"])
+    using_demo = not (candle_result and candle_result["candles"]) and not index_snapshot_quote and not previous_close_quote
     signal_candles = candle_result["candles"] if candle_result and candle_result["candles"] else build_demo_candles(symbol, quote_tf)
-    quote_data = previous_close_quote["data"] if previous_close_quote else (
+    quote_data = index_snapshot_quote["data"] if index_snapshot_quote else previous_close_quote["data"] if previous_close_quote else (
         build_quote_from_candles(signal_candles) if quote_tf == "1d" else build_latest_session_quote(signal_candles)
     )
     price = quote_data["price"]
     open_price = quote_data["open"]
-    market_source = previous_close_quote["source"] if previous_close_quote else (candle_result["source"] if candle_result else "demo")
-    market_cached = previous_close_quote["cached"] if previous_close_quote else (candle_result["cached"] if candle_result else True)
-    market_stale = previous_close_quote["stale"] if previous_close_quote else (candle_result["stale"] if candle_result else False)
-    market_age = previous_close_quote["age_seconds"] if previous_close_quote else (candle_result["age_seconds"] if candle_result else 0)
+    market_source = index_snapshot_quote["source"] if index_snapshot_quote else previous_close_quote["source"] if previous_close_quote else (candle_result["source"] if candle_result else "demo")
+    market_cached = index_snapshot_quote["cached"] if index_snapshot_quote else previous_close_quote["cached"] if previous_close_quote else (candle_result["cached"] if candle_result else True)
+    market_stale = index_snapshot_quote["stale"] if index_snapshot_quote else previous_close_quote["stale"] if previous_close_quote else (candle_result["stale"] if candle_result else False)
+    market_age = index_snapshot_quote["age_seconds"] if index_snapshot_quote else previous_close_quote["age_seconds"] if previous_close_quote else (candle_result["age_seconds"] if candle_result else 0)
 
     dollar_change = round(price - open_price, 2)
     change = round(((price - open_price) / open_price) * 100, 2) if open_price else 0
@@ -3551,7 +3693,7 @@ def auth_logout():
 
 @app.route("/analyze")
 def analyze():
-    symbol = "NQ"
+    symbol = ALGORITHM_LOCKED_SYMBOL
     strategy = request.args.get("strategy", "day")
     risk_profile = request.args.get("risk", "balanced").strip().lower() or "balanced"
 
@@ -3709,9 +3851,9 @@ def pine_script_route():
 @app.route("/live-data-status")
 def live_data_status_route():
     return jsonify({
-        "live_data": "tradingview_webhooks",
-        "futures_only": True,
-        "execution_destination": "tradeify_tradovate",
+        "live_data": "polygon_ndx_snapshot",
+        "futures_only": False,
+        "execution_destination": "tradingview_paper_signal",
         "active_future": get_active_futures_market(),
         "tradovate_configured": tradovate_configured(),
         "tradovate_environment": get_tradovate_env(),
@@ -3729,7 +3871,7 @@ def live_data_status_route():
 def active_future_route():
     return jsonify({
         "active_future": get_active_futures_market(),
-        "futures_only": True
+        "futures_only": False
     })
 
 

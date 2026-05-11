@@ -4,12 +4,12 @@
 def build_pine_script() -> str:
     return """//@version=5
 //@strategy_alert_message {{strategy.order.alert_message}}
-strategy("AI NDX/NQ Smart Paper Bot v2", overlay=true, initial_capital=100000, default_qty_type=strategy.fixed, default_qty_value=1, pyramiding=0, process_orders_on_close=true, calc_on_every_tick=false)
+strategy("AI NDX Smart Paper Bot v3", overlay=true, initial_capital=100000, default_qty_type=strategy.fixed, default_qty_value=1, pyramiding=0, process_orders_on_close=true, calc_on_every_tick=false)
 
 contractQty = input.int(1, "Contracts / Paper Size", minval=1, maxval=10)
 maxTradesPerDay = input.int(5, "Max Trades Per Day", minval=1, maxval=5)
 requireOneHour = input.bool(true, "Only Fire On 1H Chart")
-restrictNasdaq = input.bool(true, "Only Nasdaq 100 Symbols")
+restrictNdx = input.bool(true, "Only NDX")
 useSessionFilter = input.bool(true, "Use Regular Session Filter")
 tradeSession = input.session("0930-1600", "Trading Session")
 
@@ -31,8 +31,8 @@ maxVwapAtrDistance = input.float(1.8, "Max Chase Distance From VWAP", minval=0.2
 webhookTag = input.string("ndx-smart-paper", "Webhook Tag")
 
 tickerUpper = str.upper(syminfo.ticker)
-isNasdaqSymbol = str.contains(tickerUpper, "NDX") or str.contains(tickerUpper, "NQ") or str.contains(tickerUpper, "NAS100")
-symbolOk = not restrictNasdaq or isNasdaqSymbol
+isNdxSymbol = str.contains(tickerUpper, "NDX")
+symbolOk = not restrictNdx or isNdxSymbol
 timeframeOk = not requireOneHour or timeframe.period == "60"
 sessionOk = not useSessionFilter or not na(time(timeframe.period, tradeSession))
 

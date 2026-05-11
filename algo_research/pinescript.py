@@ -1,123 +1,198 @@
-"""TradingView Pine Script exporter for the NQ futures paper strategy."""
+"""TradingView Pine Script exporter for the Nasdaq paper strategy."""
 
 
 def build_pine_script() -> str:
-    return """//@version=6
+    return """//@version=5
 //@strategy_alert_message {{strategy.order.alert_message}}
-strategy("AI NQ 1H Paper Bot - Trend Breakout", overlay=true, initial_capital=100000, default_qty_type=strategy.fixed, default_qty_value=1, commission_type=strategy.commission.cash_per_contract, commission_value=2.5, slippage=1, pyramiding=0, process_orders_on_close=true, calc_on_every_tick=false)
+strategy("AI NDX/NQ Smart Paper Bot v2", overlay=true, initial_capital=100000, default_qty_type=strategy.fixed, default_qty_value=1, pyramiding=0, process_orders_on_close=true, calc_on_every_tick=false)
 
-contractQty = input.int(1, "Contracts", minval=1, maxval=10)
+contractQty = input.int(1, "Contracts / Paper Size", minval=1, maxval=10)
+maxTradesPerDay = input.int(5, "Max Trades Per Day", minval=1, maxval=5)
 requireOneHour = input.bool(true, "Only Fire On 1H Chart")
-emaTrendLen = input.int(200, "Trend EMA", minval=20)
-emaSignalLen = input.int(34, "Signal EMA", minval=5)
+restrictNasdaq = input.bool(true, "Only Nasdaq 100 Symbols")
+useSessionFilter = input.bool(true, "Use Regular Session Filter")
+tradeSession = input.session("0930-1600", "Trading Session")
+
+emaFastLen = input.int(21, "Fast EMA", minval=5)
+emaTrendLen = input.int(100, "Trend EMA", minval=20)
+emaMacroLen = input.int(200, "Macro EMA", minval=50)
 rsiLen = input.int(14, "RSI Length", minval=2)
 adxLen = input.int(14, "ADX Length", minval=2)
 adxSmoothing = input.int(14, "ADX Smoothing", minval=2)
-breakoutLen = input.int(8, "Breakout Lookback", minval=2)
-atrLen = input.int(14, "ATR Stop Length", minval=2)
-atrStopMult = input.float(1.6, "ATR Stop Multiplier", minval=0.25, step=0.05)
-rewardToRisk = input.float(2.0, "Reward/Risk Target", minval=0.5, step=0.1)
-minAdx = input.float(18.0, "Minimum Trend Strength", minval=1.0, step=0.5)
-minScore = input.float(75.0, "Minimum Setup Score", minval=50.0, maxval=100.0, step=1.0)
-useSessionFilter = input.bool(false, "Use Regular Session Filter")
-tradeSession = input.session("0930-1600", "Trading Session")
-webhookTag = input.string("nq-1h-paper", "Webhook Tag")
+structureLen = input.int(10, "Structure Lookback", minval=3)
+atrLen = input.int(14, "ATR Length", minval=2)
+atrStopMult = input.float(1.35, "ATR Stop Multiplier", minval=0.25, step=0.05)
+trailAtrMult = input.float(1.15, "Trail ATR After TP1", minval=0.25, step=0.05)
+targetOneR = input.float(1.25, "First Target R", minval=0.5, step=0.05)
+targetTwoR = input.float(2.25, "Runner Target R", minval=0.75, step=0.05)
+minAdx = input.float(18.0, "Minimum ADX", minval=1.0, step=0.5)
+minSetupScore = input.float(78.0, "Minimum Setup Score", minval=50.0, maxval=100.0, step=1.0)
+maxVwapAtrDistance = input.float(1.8, "Max Chase Distance From VWAP", minval=0.25, step=0.05)
+webhookTag = input.string("ndx-smart-paper", "Webhook Tag")
 
-timeframeOk = not requireOneHour or (timeframe.isminutes and timeframe.multiplier == 60)
-inSession = not useSessionFilter or not na(time(timeframe.period, tradeSession))
+tickerUpper = str.upper(syminfo.ticker)
+isNasdaqSymbol = str.contains(tickerUpper, "NDX") or str.contains(tickerUpper, "NQ") or str.contains(tickerUpper, "NAS100")
+symbolOk = not restrictNasdaq or isNasdaqSymbol
+timeframeOk = not requireOneHour or timeframe.period == "60"
+sessionOk = not useSessionFilter or not na(time(timeframe.period, tradeSession))
+
+emaFast = ta.ema(close, emaFastLen)
 emaTrend = ta.ema(close, emaTrendLen)
-emaSignal = ta.ema(close, emaSignalLen)
+emaMacro = ta.ema(close, emaMacroLen)
+vwapRaw = ta.vwap(hlc3)
+vwapValue = na(vwapRaw) ? emaFast : vwapRaw
 rsiValue = ta.rsi(close, rsiLen)
 [plusDi, minusDi, adxValue] = ta.dmi(adxLen, adxSmoothing)
 atrValue = ta.atr(atrLen)
-priorHigh = ta.highest(high, breakoutLen)[1]
-priorLow = ta.lowest(low, breakoutLen)[1]
+priorHigh = ta.highest(high, structureLen)[1]
+priorLow = ta.lowest(low, structureLen)[1]
+priorSwingHigh = ta.highest(high, structureLen)[1]
+priorSwingLow = ta.lowest(low, structureLen)[1]
 
-trendUp = close > emaTrend and emaSignal > emaTrend and emaTrend > emaTrend[1]
-trendDown = close < emaTrend and emaSignal < emaTrend and emaTrend < emaTrend[1]
-longMomentum = rsiValue >= 52 and plusDi > minusDi
-shortMomentum = rsiValue <= 48 and minusDi > plusDi
-longBreakout = close > priorHigh
-shortBreakout = close < priorLow
-healthyRange = atrValue > syminfo.mintick * 10
+newDay = ta.change(time("D")) != 0
+var int tradesToday = 0
+if newDay
+    tradesToday := 0
+
+distanceFromVwap = math.abs(close - vwapValue)
+atrPct = atrValue / close * 100
+healthyVolatility = atrPct >= 0.08 and atrPct <= 3.0
+notChasing = distanceFromVwap <= atrValue * maxVwapAtrDistance
+
+bullRegime = close > emaMacro and emaTrend > emaMacro and close > vwapValue
+bearRegime = close < emaMacro and emaTrend < emaMacro and close < vwapValue
+bullPullbackReclaim = low <= emaFast and close > emaFast and close > open
+bearPullbackReject = high >= emaFast and close < emaFast and close < open
+bullMomentum = rsiValue >= 53 and plusDi > minusDi and adxValue >= minAdx
+bearMomentum = rsiValue <= 47 and minusDi > plusDi and adxValue >= minAdx
+bullStructureBreak = close > priorHigh
+bearStructureBreak = close < priorLow
 
 float buyScore = 0.0
 float sellScore = 0.0
 
-if trendUp
-    buyScore += 35
-if trendDown
-    sellScore += 35
-if longMomentum
+if bullRegime
+    buyScore += 30
+if bearRegime
+    sellScore += 30
+if bullMomentum
     buyScore += 25
-if shortMomentum
+if bearMomentum
     sellScore += 25
-if adxValue >= minAdx and plusDi > minusDi
-    buyScore += 15
-if adxValue >= minAdx and minusDi > plusDi
-    sellScore += 15
-if longBreakout
+if bullStructureBreak
     buyScore += 20
-if shortBreakout
+if bearStructureBreak
     sellScore += 20
-if close > emaSignal and close > open
-    buyScore += 5
-if close < emaSignal and close < open
-    sellScore += 5
+if bullPullbackReclaim
+    buyScore += 15
+if bearPullbackReject
+    sellScore += 15
+if notChasing
+    buyScore += 10
+    sellScore += 10
 
 buyScore := math.min(math.max(buyScore, 0), 100)
 sellScore := math.min(math.max(sellScore, 0), 100)
 edge = buyScore - sellScore
-ready = barstate.isconfirmed and timeframeOk and inSession and healthyRange and not na(priorHigh) and not na(priorLow)
 
-longStopPrice = close - atrValue * atrStopMult
-longTargetPrice = close + (close - longStopPrice) * rewardToRisk
-shortStopPrice = close + atrValue * atrStopMult
-shortTargetPrice = close - (shortStopPrice - close) * rewardToRisk
+longStructureStop = priorSwingLow - syminfo.mintick * 2
+shortStructureStop = priorSwingHigh + syminfo.mintick * 2
+longAtrStop = close - atrValue * atrStopMult
+shortAtrStop = close + atrValue * atrStopMult
+longStopPrice = math.max(longStructureStop, longAtrStop)
+shortStopPrice = math.min(shortStructureStop, shortAtrStop)
+longRisk = close - longStopPrice
+shortRisk = shortStopPrice - close
+validLongRisk = longRisk > syminfo.mintick * 4
+validShortRisk = shortRisk > syminfo.mintick * 4
+longTargetOne = close + longRisk * targetOneR
+longTargetTwo = close + longRisk * targetTwoR
+shortTargetOne = close - shortRisk * targetOneR
+shortTargetTwo = close - shortRisk * targetTwoR
 
-longSignal = ready and buyScore >= minScore and edge > 0 and strategy.position_size <= 0
-shortSignal = ready and sellScore >= minScore and edge < 0 and strategy.position_size >= 0
-longMessage = '{"source":"tradingview","action":"BUY","ticker":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","price":' + str.tostring(close, format.mintick) + ',"target":' + str.tostring(longTargetPrice, format.mintick) + ',"stop":' + str.tostring(longStopPrice, format.mintick) + ',"qty":' + str.tostring(contractQty) + ',"edge":' + str.tostring(edge, "#.##") + ',"score":' + str.tostring(buyScore, "#.##") + ',"bar_time":"' + str.tostring(time) + '","tag":"' + webhookTag + '"}'
-shortMessage = '{"source":"tradingview","action":"SELL","ticker":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","price":' + str.tostring(close, format.mintick) + ',"target":' + str.tostring(shortTargetPrice, format.mintick) + ',"stop":' + str.tostring(shortStopPrice, format.mintick) + ',"qty":' + str.tostring(contractQty) + ',"edge":' + str.tostring(edge, "#.##") + ',"score":' + str.tostring(sellScore, "#.##") + ',"bar_time":"' + str.tostring(time) + '","tag":"' + webhookTag + '"}'
+ready = barstate.isconfirmed and symbolOk and timeframeOk and sessionOk and healthyVolatility and not na(priorHigh) and not na(priorLow)
+canEnter = tradesToday < maxTradesPerDay and strategy.position_size == 0
+longSignal = ready and canEnter and validLongRisk and buyScore >= minSetupScore and edge > 0
+shortSignal = ready and canEnter and validShortRisk and sellScore >= minSetupScore and edge < 0
+
+longReason = "Bull regime, VWAP control, momentum, structure break, protected ATR stop"
+shortReason = "Bear regime, VWAP rejection, momentum, structure break, protected ATR stop"
+longMessage = '{"source":"tradingview","action":"BUY","ticker":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","price":' + str.tostring(close, format.mintick) + ',"target":' + str.tostring(longTargetTwo, format.mintick) + ',"target_1":' + str.tostring(longTargetOne, format.mintick) + ',"stop":' + str.tostring(longStopPrice, format.mintick) + ',"qty":' + str.tostring(contractQty) + ',"edge":' + str.tostring(edge, "#.##") + ',"score":' + str.tostring(buyScore, "#.##") + ',"reason":"' + longReason + '","bar_time":"' + str.tostring(time) + '","tag":"' + webhookTag + '"}'
+shortMessage = '{"source":"tradingview","action":"SELL","ticker":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","price":' + str.tostring(close, format.mintick) + ',"target":' + str.tostring(shortTargetTwo, format.mintick) + ',"target_1":' + str.tostring(shortTargetOne, format.mintick) + ',"stop":' + str.tostring(shortStopPrice, format.mintick) + ',"qty":' + str.tostring(contractQty) + ',"edge":' + str.tostring(edge, "#.##") + ',"score":' + str.tostring(sellScore, "#.##") + ',"reason":"' + shortReason + '","bar_time":"' + str.tostring(time) + '","tag":"' + webhookTag + '"}'
 
 var float activeLongStop = na
-var float activeLongTarget = na
+var float activeLongTargetOne = na
+var float activeLongTargetTwo = na
 var float activeShortStop = na
-var float activeShortTarget = na
+var float activeShortTargetOne = na
+var float activeShortTargetTwo = na
+var bool longTargetOneHit = false
+var bool shortTargetOneHit = false
 
 if strategy.position_size == 0 and not longSignal and not shortSignal
     activeLongStop := na
-    activeLongTarget := na
+    activeLongTargetOne := na
+    activeLongTargetTwo := na
     activeShortStop := na
-    activeShortTarget := na
+    activeShortTargetOne := na
+    activeShortTargetTwo := na
+    longTargetOneHit := false
+    shortTargetOneHit := false
 
 if longSignal
+    tradesToday += 1
     activeLongStop := longStopPrice
-    activeLongTarget := longTargetPrice
+    activeLongTargetOne := longTargetOne
+    activeLongTargetTwo := longTargetTwo
     activeShortStop := na
-    activeShortTarget := na
-    strategy.entry("NQ Long", strategy.long, qty=contractQty, alert_message=longMessage)
+    activeShortTargetOne := na
+    activeShortTargetTwo := na
+    longTargetOneHit := false
+    shortTargetOneHit := false
+    strategy.entry("Long", strategy.long, qty=contractQty, alert_message=longMessage)
     alert(longMessage, alert.freq_once_per_bar_close)
 
 if shortSignal
+    tradesToday += 1
     activeShortStop := shortStopPrice
-    activeShortTarget := shortTargetPrice
+    activeShortTargetOne := shortTargetOne
+    activeShortTargetTwo := shortTargetTwo
     activeLongStop := na
-    activeLongTarget := na
-    strategy.entry("NQ Short", strategy.short, qty=contractQty, alert_message=shortMessage)
+    activeLongTargetOne := na
+    activeLongTargetTwo := na
+    longTargetOneHit := false
+    shortTargetOneHit := false
+    strategy.entry("Short", strategy.short, qty=contractQty, alert_message=shortMessage)
     alert(shortMessage, alert.freq_once_per_bar_close)
 
-if not na(activeLongStop) and not na(activeLongTarget)
-    strategy.exit("NQ Long Exit", "NQ Long", stop=activeLongStop, limit=activeLongTarget)
+if strategy.position_size > 0 and not na(activeLongTargetOne) and high >= activeLongTargetOne
+    longTargetOneHit := true
+if strategy.position_size < 0 and not na(activeShortTargetOne) and low <= activeShortTargetOne
+    shortTargetOneHit := true
 
-if not na(activeShortStop) and not na(activeShortTarget)
-    strategy.exit("NQ Short Exit", "NQ Short", stop=activeShortStop, limit=activeShortTarget)
+if strategy.position_size > 0 and longTargetOneHit
+    activeLongStop := math.max(activeLongStop, strategy.position_avg_price)
+    activeLongStop := math.max(activeLongStop, close - atrValue * trailAtrMult)
 
+if strategy.position_size < 0 and shortTargetOneHit
+    activeShortStop := math.min(activeShortStop, strategy.position_avg_price)
+    activeShortStop := math.min(activeShortStop, close + atrValue * trailAtrMult)
+
+if strategy.position_size > 0 and not na(activeLongStop)
+    strategy.exit("Long TP1", "Long", qty_percent=50, stop=activeLongStop, limit=activeLongTargetOne)
+    strategy.exit("Long TP2", "Long", qty_percent=50, stop=activeLongStop, limit=activeLongTargetTwo)
+
+if strategy.position_size < 0 and not na(activeShortStop)
+    strategy.exit("Short TP1", "Short", qty_percent=50, stop=activeShortStop, limit=activeShortTargetOne)
+    strategy.exit("Short TP2", "Short", qty_percent=50, stop=activeShortStop, limit=activeShortTargetTwo)
+
+plot(emaFast, "Fast EMA", color=color.new(color.orange, 0), linewidth=1)
 plot(emaTrend, "Trend EMA", color=color.new(color.blue, 0), linewidth=2)
-plot(emaSignal, "Signal EMA", color=color.new(color.orange, 0), linewidth=1)
-plotshape(longSignal, "BUY", shape.labelup, location.belowbar, color=color.new(color.lime, 0), text="BUY", textcolor=color.black, size=size.tiny)
-plotshape(shortSignal, "SELL", shape.labeldown, location.abovebar, color=color.new(color.red, 0), text="SELL", textcolor=color.white, size=size.tiny)
-bgcolor(timeframeOk ? na : color.new(color.red, 88), title="Wrong Timeframe Warning")
+plot(emaMacro, "Macro EMA", color=color.new(color.purple, 0), linewidth=2)
+plot(vwapValue, "VWAP", color=color.new(color.white, 0), linewidth=1)
+plotshape(longSignal, title="BUY", style=shape.labelup, location=location.belowbar, color=color.new(color.lime, 0), text="BUY", textcolor=color.black, size=size.small)
+plotshape(shortSignal, title="SELL", style=shape.labeldown, location=location.abovebar, color=color.new(color.red, 0), text="SELL", textcolor=color.white, size=size.small)
+bgcolor(not timeframeOk or not symbolOk ? color.new(color.red, 88) : na, title="Guardrail Warning")
 """
 
 

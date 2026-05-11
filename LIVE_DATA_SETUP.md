@@ -67,7 +67,16 @@ Open this file in TradingView Pine Editor:
 tradingview/ai_algorithm_strategy.pine
 ```
 
-Run it on an NQ futures chart like `NQ1!` with the chart set to `1H`. The strategy is intentionally single-timeframe and only fires confirmed bar-close alerts, so it does not use multi-timeframe lookups or repainting live-bar signals.
+Run it on a Nasdaq 100 chart like `NDX` for TradingView paper testing, or `NQ1!` / `MNQ1!` if you want futures-style alerts. Keep the chart set to `1H`. The strategy is intentionally single-timeframe and only fires confirmed bar-close alerts, so it does not use multi-timeframe lookups or repainting live-bar signals.
+
+The Pine strategy has guardrails built in:
+
+- Maximum of 5 entries per day
+- Hard stop-loss on every trade
+- ATR-based stop sizing
+- First target plus runner target
+- Break-even/trailing protection after the first target is reached
+- Symbol guard for Nasdaq 100-style charts
 
 Create an alert using `Any alert() function call` and this webhook URL:
 
@@ -75,7 +84,9 @@ Create an alert using `Any alert() function call` and this webhook URL:
 https://trading-app-kb38.onrender.com/tradingview-webhook?secret=make_a_private_secret
 ```
 
-The Pine alert sends `BUY` or `SELL` plus live price, target, stop, contracts, edge, score, timeframe, and bar time. The app is permanently armed to NQ, rejects non-futures symbols, rejects all non-NQ futures alerts, checks Databento, then sends verified bracket orders through Tradeify/Tradovate.
+The Pine alert sends `BUY` or `SELL` plus live price, targets, stop, contracts, edge, score, timeframe, reason, and bar time.
+
+Important: Pine strategies simulate fills inside TradingView's broker emulator and can trigger alerts. Pine does not directly take over the TradingView Paper Trading panel by itself. For actual automated paper execution, use TradingView alerts with a webhook bridge to a paper/demo broker endpoint. This app's execution bridge is still locked to NQ futures and rejects non-futures/non-NQ alerts before routing through Tradeify/Tradovate.
 
 ## Databento Backtesting
 

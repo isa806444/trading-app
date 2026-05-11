@@ -2305,7 +2305,7 @@ body {
       <div>
         <div class="hero-eyebrow">AI Algorithm Terminal</div>
         <h1 class="algo-title">NDX bot. Paper-first signals.</h1>
-        <div class="algo-copy">TradingView runs the NDX strategy, this app logs the alerts, and Polygon powers the live Nasdaq 100 price card.</div>
+        <div class="algo-copy">TradingView runs the NDX strategy, this app receives the alerts, and the guarded bridge can map them to MNQ/NQ through Tradeify/Tradovate.</div>
         <div class="hero-chip-row">
           <div class="hero-chip live" id="providerChip">TradingView -> App Paper Signals</div>
           <div class="hero-chip" id="alertsChip">Alerts idle</div>
@@ -2320,7 +2320,7 @@ body {
         <div class="algo-live-orb"></div>
         <div class="algo-live-label">Execution Status</div>
         <div class="algo-live-title">NDX paper signals armed</div>
-        <div class="algo-live-copy">TradingView can fire strategy alerts into this app. Pine cannot directly auto-fill TradingView Paper Trading by itself.</div>
+        <div class="algo-live-copy">TradingView can fire strategy alerts into this app. The app can route them to Tradovate only when the demo bridge env vars are enabled.</div>
       </div>
     </div>
   </section>
@@ -3794,8 +3794,9 @@ function renderAlgoLivePanel(payload){
     <div class="confirmation-list" style="margin-top:14px;">
       <div class="confirmation-pill">${live.tradovate_configured ? "Broker bridge configured" : "TradingView paper panel not directly automatable"}</div>
       <div class="confirmation-pill">${live.tradingview_webhook_configured ? "TradingView webhook ready" : "Webhook not configured"}</div>
-      <div class="confirmation-pill">${live.tradingview_webhook_configured ? "Webhook ready" : "Webhook not configured"}</div>
-      <div class="confirmation-pill">${live.enabled ? "Auto trading enabled" : "Manual approval only"}</div>
+      <div class="confirmation-pill">${live.ndx_bridge_enabled ? "NDX bridge on" : "NDX bridge off"}</div>
+      <div class="confirmation-pill">${live.ndx_execution_symbol ? `Executes ${live.ndx_execution_symbol}` : "Execution contract not set"}</div>
+      <div class="confirmation-pill">${live.enabled ? "Tradovate routing enabled" : "Paper signal log only"}</div>
     </div>
   `;
 }

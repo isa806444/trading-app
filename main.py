@@ -47,6 +47,9 @@ TRADOVATE_LIVE_TRADING_ACK_ENV = "TRADOVATE_LIVE_TRADING_ACK"
 TRADOVATE_DEFAULT_ORDER_QTY_ENV = "TRADOVATE_DEFAULT_ORDER_QTY"
 TRADOVATE_MAX_ORDER_QTY_ENV = "TRADOVATE_MAX_ORDER_QTY"
 TRADOVATE_MAX_DAILY_ORDERS_ENV = "TRADOVATE_MAX_DAILY_ORDERS"
+TRADOVATE_NDX_BRIDGE_ENABLED_ENV = "TRADOVATE_NDX_BRIDGE_ENABLED"
+TRADOVATE_NDX_EXECUTION_SYMBOL_ENV = "TRADOVATE_NDX_EXECUTION_SYMBOL"
+TRADOVATE_TICK_SIZE_ENV = "TRADOVATE_TICK_SIZE"
 ALGO_MIN_EDGE_FOR_AUTO_TRADE_ENV = "ALGO_MIN_EDGE_FOR_AUTO_TRADE"
 ALGO_DEFAULT_TARGET_PCT_ENV = "ALGO_DEFAULT_TARGET_PCT"
 ALGO_DEFAULT_STOP_PCT_ENV = "ALGO_DEFAULT_STOP_PCT"
@@ -227,6 +230,26 @@ def live_trading_acknowledged():
 
 def tradovate_execution_ready():
     return tradovate_configured() and tradovate_auto_trade_enabled() and live_trading_acknowledged()
+
+
+def ndx_tradovate_bridge_enabled():
+    return env_bool(TRADOVATE_NDX_BRIDGE_ENABLED_ENV, False)
+
+
+def get_ndx_execution_symbol():
+    return os.environ.get(TRADOVATE_NDX_EXECUTION_SYMBOL_ENV, "").strip().upper()
+
+
+def get_tradovate_tick_size():
+    return env_float(TRADOVATE_TICK_SIZE_ENV, 0.25)
+
+
+def ndx_tradovate_bridge_ready():
+    return (
+        ndx_tradovate_bridge_enabled()
+        and bool(get_ndx_execution_symbol())
+        and tradovate_execution_ready()
+    )
 
 
 def databento_alert_verification_enabled():
@@ -1631,6 +1654,61 @@ def count_today_tradovate_routes():
     return count
 
 
+def round_to_tick(price, tick_size=None):
+    tick = tick_size or get_tradovate_tick_size()
+    if not price or tick <= 0:
+        return round(float(price or 0), 4)
+    return round(round(float(price) / tick) * tick, 4)
+
+
+def get_tradovate_reference_price(symbol):
+    try:
+        candles = fetch_tradovate_candles(symbol, "1m")
+    except Exception as exc:
+        print("Tradovate reference price fetch error:", exc)
+        return None
+    if not candles:
+        return None
+    return float(candles[-1]["close"])
+
+
+def translate_ndx_signal_to_tradovate(signal):
+    execution_symbol = get_ndx_execution_symbol()
+    if not execution_symbol:
+        raise RuntimeError(f"Set {TRADOVATE_NDX_EXECUTION_SYMBOL_ENV}=MNQM6 or NQM6 before routing NDX alerts.")
+
+    tradovate_symbol = normalize_tradovate_symbol(execution_symbol)
+    reference_price = get_tradovate_reference_price(tradovate_symbol)
+    if not reference_price:
+        raise RuntimeError(f"Could not fetch a Tradovate reference price for {tradovate_symbol}.")
+
+    translated = dict(signal)
+    translated["source_symbol"] = signal.get("symbol") or ALGORITHM_LOCKED_SYMBOL
+    translated["tradovate_symbol"] = tradovate_symbol
+    translated["execution_reference_price"] = round_to_tick(reference_price)
+
+    action = signal.get("action")
+    alert_price = signal.get("price")
+    if action in {"BUY", "SELL"}:
+        if not alert_price or not signal.get("target") or not signal.get("stop"):
+            raise RuntimeError("NDX entry alerts need price, target, and stop before routing to Tradovate.")
+
+        target_distance = abs(float(signal["target"]) - float(alert_price))
+        stop_distance = abs(float(alert_price) - float(signal["stop"]))
+        if target_distance <= 0 or stop_distance <= 0:
+            raise RuntimeError("NDX alert target/stop distances must be greater than zero.")
+
+        if action == "BUY":
+            translated["target"] = round_to_tick(reference_price + target_distance)
+            translated["stop"] = round_to_tick(reference_price - stop_distance)
+        else:
+            translated["target"] = round_to_tick(reference_price - target_distance)
+            translated["stop"] = round_to_tick(reference_price + stop_distance)
+        translated["price"] = round_to_tick(reference_price)
+
+    return translated
+
+
 def post_tradovate_order(endpoint, body):
     response = requests.post(
         f"{get_tradovate_rest_url()}/order/{endpoint}",
@@ -1703,11 +1781,12 @@ def place_tradovate_bracket_order(signal, account):
 def route_tradingview_signal_to_tradovate(payload):
     signal = build_tradingview_execution_signal(payload)
     result = {
-        "enabled": tradovate_auto_trade_enabled(),
-        "ready": tradovate_execution_ready(),
+        "enabled": ndx_tradovate_bridge_enabled() and tradovate_auto_trade_enabled(),
+        "ready": ndx_tradovate_bridge_ready(),
         "routed": False,
-        "destination": "tradingview_paper_signal",
+        "destination": "tradeify_tradovate" if ndx_tradovate_bridge_enabled() else "tradingview_paper_signal",
         "signal": signal,
+        "source_signal": signal,
         "verification": None,
         "reason": ""
     }
@@ -1733,31 +1812,29 @@ def route_tradingview_signal_to_tradovate(payload):
         result["reason"] = "Duplicate TradingView NDX signal ignored."
         return result
 
-    if is_ndx_symbol(signal["symbol"]):
-        result["verification"] = {
-            "enabled": False,
-            "passed": True,
-            "source": "tradingview",
-            "reason": "NDX paper signal accepted. TradingView Pine can alert, but it cannot directly auto-fill TradingView's built-in Paper Trading panel.",
-            "candles": 0,
-            "symbol": ALGORITHM_LOCKED_SYMBOL,
-            "model_action": signal["action"],
-            "model_edge": signal.get("edge") or 0,
-            "price_deviation_pct": None
-        }
-        result["reason"] = "NDX signal logged for app paper mode. To auto-execute somewhere, connect this webhook to a paper/demo broker bridge."
-        return result
+    result["verification"] = {
+        "enabled": ndx_tradovate_bridge_enabled(),
+        "passed": True,
+        "source": "tradingview_ndx",
+        "reason": "NDX alert accepted. If the Tradovate bridge is enabled, the app maps this to the configured NQ/MNQ contract.",
+        "candles": 0,
+        "symbol": ALGORITHM_LOCKED_SYMBOL,
+        "model_action": signal["action"],
+        "model_edge": signal.get("edge") or 0,
+        "price_deviation_pct": None
+    }
 
-    verification = verify_tradingview_signal_with_databento(signal)
-    result["verification"] = verification
-    if not verification.get("passed"):
-        result["reason"] = verification.get("reason") or "Databento did not verify this alert."
+    if not ndx_tradovate_bridge_enabled():
+        result["reason"] = f"NDX signal logged only. Set {TRADOVATE_NDX_BRIDGE_ENABLED_ENV}=true to route to Tradeify/Tradovate."
+        return result
+    if not get_ndx_execution_symbol():
+        result["reason"] = f"NDX bridge is on, but {TRADOVATE_NDX_EXECUTION_SYMBOL_ENV} is not set. Use a tradable contract like MNQM6 or NQM6."
         return result
     if not tradovate_configured():
         result["reason"] = "Tradeify/Tradovate credentials are not configured."
         return result
     if not tradovate_auto_trade_enabled():
-        result["reason"] = "Auto-trading is off. Set TRADOVATE_AUTO_TRADE_ENABLED=true after demo testing."
+        result["reason"] = "Auto-trading is off. Set TRADOVATE_AUTO_TRADE_ENABLED=true only after demo testing."
         return result
     if not live_trading_acknowledged():
         result["reason"] = "Live Tradovate orders require TRADOVATE_LIVE_TRADING_ACK=I_UNDERSTAND_REAL_MONEY_RISK."
@@ -1778,11 +1855,13 @@ def route_tradingview_signal_to_tradovate(payload):
             return result
 
     try:
+        execution_signal = translate_ndx_signal_to_tradovate(signal)
+        result["signal"] = execution_signal
         account = resolve_tradovate_account()
         order_result = (
-            place_tradovate_bracket_order(signal, account)
-            if signal["action"] in {"BUY", "SELL"}
-            else place_tradovate_market_order(signal, account)
+            place_tradovate_bracket_order(execution_signal, account)
+            if execution_signal["action"] in {"BUY", "SELL"}
+            else place_tradovate_market_order(execution_signal, account)
         )
         result.update({
             "routed": bool(order_result.get("ok")),
@@ -1792,7 +1871,10 @@ def route_tradingview_signal_to_tradovate(payload):
             },
             "order": order_result.get("response"),
             "failure": order_result.get("failure"),
-            "reason": order_result.get("failure_text") or ("Tradeify/Tradovate order routed." if order_result.get("ok") else "Tradeify/Tradovate rejected the order.")
+            "reason": order_result.get("failure_text") or (
+                f"NDX alert routed to Tradeify/Tradovate as {execution_signal.get('tradovate_symbol')}."
+                if order_result.get("ok") else "Tradeify/Tradovate rejected the order."
+            )
         })
     except Exception as exc:
         result["reason"] = str(exc)
@@ -3010,16 +3092,22 @@ def build_algorithm_dashboard(tickers):
         "generated_at": datetime.now(DEMO_TIMEZONE).isoformat(),
         "mode": "tradingview-ndx-paper-signals",
         "live_trading": {
-            "enabled": False,
-            "broker_connected": False,
+            "enabled": ndx_tradovate_bridge_ready(),
+            "broker_connected": tradovate_configured(),
             "tradovate_configured": tradovate_configured(),
             "tradovate_auto_trade_enabled": tradovate_auto_trade_enabled(),
             "tradovate_environment": get_tradovate_env(),
+            "ndx_bridge_enabled": ndx_tradovate_bridge_enabled(),
+            "ndx_execution_symbol": get_ndx_execution_symbol(),
             "tradingview_webhook_configured": bool(tradingview_webhook_secret()),
             "databento_verification_enabled": databento_alert_verification_enabled(),
             "futures_only": False,
-            "label": "NDX paper signals armed",
-            "summary": "TradingView can fire NDX strategy alerts into this app. Direct auto-fills inside TradingView Paper Trading are not available from Pine alone."
+            "label": "NDX -> Tradovate bridge ready" if ndx_tradovate_bridge_ready() else "NDX paper signals armed",
+            "summary": (
+                f"TradingView NDX alerts are mapped to {get_ndx_execution_symbol()} and routed through Tradeify/Tradovate."
+                if ndx_tradovate_bridge_ready()
+                else "TradingView can fire NDX strategy alerts into this app. Turn on the NDX Tradovate bridge only after demo testing."
+            )
         },
         "totals": {
             "total_pnl": total_pnl,
@@ -3853,12 +3941,15 @@ def live_data_status_route():
     return jsonify({
         "live_data": "polygon_ndx_snapshot",
         "futures_only": False,
-        "execution_destination": "tradingview_paper_signal",
+        "execution_destination": "tradeify_tradovate" if ndx_tradovate_bridge_enabled() else "tradingview_paper_signal",
         "active_future": get_active_futures_market(),
         "tradovate_configured": tradovate_configured(),
         "tradovate_environment": get_tradovate_env(),
         "tradovate_auto_trade_enabled": tradovate_auto_trade_enabled(),
         "tradovate_execution_ready": tradovate_execution_ready(),
+        "ndx_bridge_enabled": ndx_tradovate_bridge_enabled(),
+        "ndx_bridge_ready": ndx_tradovate_bridge_ready(),
+        "ndx_execution_symbol": get_ndx_execution_symbol(),
         "live_trading_acknowledged": live_trading_acknowledged(),
         "tradingview_webhook_configured": bool(tradingview_webhook_secret()),
         "databento_verification_enabled": databento_alert_verification_enabled(),

@@ -10,6 +10,7 @@ This project is an NDX-focused AI algorithm paper-signal dashboard built with Fl
 - Keep the bot permanently armed to NDX so all other alerts are ignored
 - Show real NDX index quotes through Polygon using `I:NDX`
 - Log NDX TradingView alerts as app paper signals
+- Optionally route NDX alerts to Tradeify/Tradovate by mapping them to an active MNQ/NQ futures contract
 - Save and remove watchlist tickers with persistence in `watchlist.json`
 - Backtest with Databento in Python, VS Code, and Jupyter
 
@@ -59,6 +60,17 @@ TRADINGVIEW_WEBHOOK_SECRET=make_a_private_secret
 POLYGON_API_KEY=your_polygon_key
 ```
 
+For Tradeify/Tradovate demo routing, add your Tradovate credentials and keep the bridge guarded:
+
+```text
+TRADOVATE_ENV=demo
+TRADOVATE_NDX_BRIDGE_ENABLED=true
+TRADOVATE_NDX_EXECUTION_SYMBOL=MNQM6
+TRADOVATE_AUTO_TRADE_ENABLED=true
+TRADOVATE_MAX_ORDER_QTY=1
+TRADOVATE_MAX_DAILY_ORDERS=5
+```
+
 ## Run
 
 Start the Flask app:
@@ -106,6 +118,7 @@ gunicorn main:app
 - TradingView is the live signal source for the NDX paper bot.
 - Polygon powers the NDX quote display in the app.
 - Databento can still power research/backtesting.
-- Pine strategies cannot directly auto-fill TradingView's built-in Paper Trading panel; use TradingView Strategy Tester or webhook alerts into this app for paper-signal tracking.
+- Pine strategies cannot directly auto-fill TradingView's built-in Paper Trading panel; use TradingView Strategy Tester, app paper-signal tracking, or the guarded Tradeify/Tradovate webhook bridge.
+- `NDX` itself is not the Tradovate order symbol. The app converts NDX alert distances into target/stop prices for the configured `TRADOVATE_NDX_EXECUTION_SYMBOL`.
 - The included Pine strategy is designed for paper testing on a Nasdaq 100 chart such as `NDX` using the 1-hour timeframe.
 - If `python` does not work in PowerShell, try `py` instead.

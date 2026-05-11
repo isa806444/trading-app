@@ -5,7 +5,7 @@ The bot now uses this split:
 - TradingView Premium: live NDX strategy candles and alerts.
 - Polygon: NDX index quote display in the app using `I:NDX`.
 - Databento: optional historical research/backtesting.
-- App paper signal log: alerts show in the app so you can watch the bot decisions live.
+- Optional Tradeify/Tradovate bridge: NDX alerts can map to a tradable NQ/MNQ futures contract.
 
 ## Render Environment
 
@@ -35,7 +35,7 @@ DATABENTO_MIN_RECORDS=40
 DATABENTO_MAX_ALERT_DEVIATION_PCT=1.25
 ```
 
-Optional for Tradeify/Tradovate demo routing if you later switch back to NQ futures:
+Optional for Tradeify/Tradovate demo routing:
 
 ```text
 TRADOVATE_ENV=demo
@@ -49,6 +49,9 @@ TRADOVATE_ACCOUNT_SPEC=your_tradeify_account_name
 TRADOVATE_ACCOUNT_ID=your_tradeify_account_id
 TRADOVATE_SYMBOL_MAP=ES=ESM6,NQ=NQM6,MES=MESM6,MNQ=MNQM6,YM=YMM6,RTY=RTYM6,CL=CLM6,GC=GCM6
 TRADOVATE_AUTO_TRADE_ENABLED=false
+TRADOVATE_NDX_BRIDGE_ENABLED=false
+TRADOVATE_NDX_EXECUTION_SYMBOL=MNQM6
+TRADOVATE_TICK_SIZE=0.25
 TRADOVATE_DEFAULT_ORDER_QTY=1
 TRADOVATE_MAX_ORDER_QTY=1
 TRADOVATE_MAX_DAILY_ORDERS=5
@@ -57,7 +60,7 @@ ALGO_DEFAULT_TARGET_PCT=0.02
 ALGO_DEFAULT_STOP_PCT=0.01
 ```
 
-If you later switch back to futures, update the `M6` contract codes when the active futures month rolls.
+`NDX` is not directly tradable. The bridge maps NDX alerts to the contract in `TRADOVATE_NDX_EXECUTION_SYMBOL`, usually `MNQ`/`NQ` with the active month code such as `MNQM6` or `NQM6`. Update the `M6` contract codes when the active futures month rolls.
 
 Only after futures demo orders work, live routing also needs:
 
@@ -93,7 +96,15 @@ https://trading-app-kb38.onrender.com/tradingview-webhook?secret=make_a_private_
 
 The Pine alert sends `BUY` or `SELL` plus live price, targets, stop, contracts, edge, score, timeframe, reason, and bar time.
 
-Important: Pine strategies simulate fills inside TradingView's broker emulator and can trigger alerts. Pine does not directly take over the TradingView Paper Trading panel by itself. For automated paper execution outside the Strategy Tester, use TradingView alerts with a webhook bridge to a paper/demo broker endpoint. This app is now locked to NDX alerts and logs them as app paper signals.
+Important: Pine strategies simulate fills inside TradingView's broker emulator and can trigger alerts. Pine does not directly take over the TradingView Paper Trading panel by itself. For automated paper execution outside the Strategy Tester, this app receives TradingView webhooks and can route them to Tradeify/Tradovate when all bridge env vars are enabled.
+
+Safe demo sequence:
+
+1. Keep `TRADOVATE_ENV=demo`.
+2. Set `TRADOVATE_NDX_EXECUTION_SYMBOL=MNQM6` or the active MNQ contract.
+3. Set `TRADOVATE_NDX_BRIDGE_ENABLED=true`.
+4. Set `TRADOVATE_AUTO_TRADE_ENABLED=true`.
+5. Keep `TRADOVATE_MAX_ORDER_QTY=1` and `TRADOVATE_MAX_DAILY_ORDERS=5`.
 
 ## Databento Backtesting
 

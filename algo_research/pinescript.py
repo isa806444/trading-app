@@ -4,7 +4,7 @@
 def build_pine_script() -> str:
     return """//@version=5
 //@strategy_alert_message {{strategy.order.alert_message}}
-strategy("AI MNQ Smart Paper Bot v7", overlay=true, initial_capital=100000, default_qty_type=strategy.fixed, default_qty_value=1, pyramiding=0, process_orders_on_close=true, calc_on_every_tick=false)
+strategy("AI MNQ Smart Paper Bot v8", overlay=true, initial_capital=100000, default_qty_type=strategy.fixed, default_qty_value=1, pyramiding=0, process_orders_on_close=true, calc_on_every_tick=true, calc_on_order_fills=true)
 
 contractQty = input.int(1, "Contracts / Paper Size", minval=1, maxval=10)
 maxTradesPerDay = input.int(5, "Max Trades Per Day", minval=1, maxval=5)
@@ -17,7 +17,7 @@ useSessionFilter = input.bool(true, "Use Regular Session Filter")
 usePrimeHours = input.bool(false, "Trade Prime NY Hours Only")
 forceDailyMinimum = input.bool(true, "Force One Daily Setup If No Trade")
 tradeSession = input.session("0930-1600", "Trading Session")
-webhookTag = input.string("mnq-smart-paper-v7", "Webhook Tag")
+webhookTag = input.string("mnq-smart-paper-v8", "Webhook Tag")
 
 emaFastLen = input.int(21, "Fast EMA", minval=5)
 emaTrendLen = input.int(55, "Trade Trend EMA", minval=10)
@@ -30,9 +30,12 @@ volumeLen = input.int(30, "Volume Baseline", minval=5)
 atrLen = input.int(14, "ATR Length", minval=2)
 atrStopMult = input.float(1.45, "ATR Stop Multiplier", minval=0.25, step=0.05)
 takeProfitR = input.float(2.40, "Take Profit R", minval=0.75, step=0.05)
-breakEvenAtR = input.float(1.05, "Move Stop To Breakeven At R", minval=0.25, step=0.05)
-trailAtR = input.float(1.65, "Start Smart Trail At R", minval=0.5, step=0.05)
-trailAtrMult = input.float(1.15, "Trail ATR Multiplier", minval=0.25, step=0.05)
+breakEvenAtR = input.float(0.50, "Move Stop To Breakeven At R", minval=0.10, step=0.05)
+profitLockAtR = input.float(0.90, "Start Locking Profit At R", minval=0.25, step=0.05)
+profitLockR = input.float(0.25, "Minimum Profit Lock R", minval=0.0, step=0.05)
+trailAtR = input.float(1.15, "Start Smart Trail At R", minval=0.5, step=0.05)
+trailAtrMult = input.float(0.80, "Trail ATR Multiplier", minval=0.25, step=0.05)
+maxProfitGivebackPct = input.float(0.38, "Max Profit Giveback %", minval=0.05, maxval=0.85, step=0.01)
 minAdx = input.float(18.0, "Minimum ADX", minval=1.0, step=0.5)
 minSetupScore = input.float(80.0, "A+ Minimum Setup Score", minval=50.0, maxval=100.0, step=1.0)
 minEdge = input.float(20.0, "A+ Minimum Directional Edge", minval=1.0, step=1.0)
@@ -220,8 +223,11 @@ var float activeLongRisk = na
 var float activeShortStop = na
 var float activeShortTarget = na
 var float activeShortRisk = na
+var float activeLongBest = na
+var float activeShortBest = na
 var int activeEntryBar = na
 var int lastRiskExitBar = na
+var int lastProtectExitBar = na
 
 if strategy.position_size == 0 and not longSignal and not shortSignal
     activeLongStop := na
@@ -230,7 +236,10 @@ if strategy.position_size == 0 and not longSignal and not shortSignal
     activeShortStop := na
     activeShortTarget := na
     activeShortRisk := na
+    activeLongBest := na
+    activeShortBest := na
     activeEntryBar := na
+    lastProtectExitBar := na
 
 if longSignal
     tradesToday += 1
@@ -239,9 +248,11 @@ if longSignal
     activeLongStop := longStopPrice
     activeLongTarget := longTakeProfit
     activeLongRisk := longRisk
+    activeLongBest := close
     activeShortStop := na
     activeShortTarget := na
     activeShortRisk := na
+    activeShortBest := na
     strategy.entry("Long", strategy.long, qty=contractQty, alert_message=longMessage)
     alert(longMessage, alert.freq_once_per_bar_close)
 
@@ -252,26 +263,46 @@ if shortSignal
     activeShortStop := shortStopPrice
     activeShortTarget := shortTakeProfit
     activeShortRisk := shortRisk
+    activeShortBest := close
     activeLongStop := na
     activeLongTarget := na
     activeLongRisk := na
+    activeLongBest := na
     strategy.entry("Short", strategy.short, qty=contractQty, alert_message=shortMessage)
     alert(shortMessage, alert.freq_once_per_bar_close)
 
-longProgressR = strategy.position_size > 0 and not na(activeLongRisk) and activeLongRisk > 0 ? (close - strategy.position_avg_price) / activeLongRisk : 0.0
-shortProgressR = strategy.position_size < 0 and not na(activeShortRisk) and activeShortRisk > 0 ? (strategy.position_avg_price - close) / activeShortRisk : 0.0
+if strategy.position_size > 0 and not na(activeLongRisk) and activeLongRisk > 0
+    activeLongBest := na(activeLongBest) ? math.max(high, strategy.position_avg_price) : math.max(activeLongBest, high)
+
+if strategy.position_size < 0 and not na(activeShortRisk) and activeShortRisk > 0
+    activeShortBest := na(activeShortBest) ? math.min(low, strategy.position_avg_price) : math.min(activeShortBest, low)
+
+longProgressR = strategy.position_size > 0 and not na(activeLongRisk) and activeLongRisk > 0 and not na(activeLongBest) ? (activeLongBest - strategy.position_avg_price) / activeLongRisk : 0.0
+shortProgressR = strategy.position_size < 0 and not na(activeShortRisk) and activeShortRisk > 0 and not na(activeShortBest) ? (strategy.position_avg_price - activeShortBest) / activeShortRisk : 0.0
 
 if strategy.position_size > 0 and not na(activeLongStop)
+    float longStopCandidate = activeLongStop
     if longProgressR >= breakEvenAtR
-        activeLongStop := math.max(activeLongStop, strategy.position_avg_price)
+        longStopCandidate := math.max(longStopCandidate, strategy.position_avg_price + syminfo.mintick)
+    if longProgressR >= profitLockAtR
+        longStopCandidate := math.max(longStopCandidate, strategy.position_avg_price + activeLongRisk * profitLockR)
     if longProgressR >= trailAtR
-        activeLongStop := math.max(activeLongStop, close - atrValue * trailAtrMult)
+        longGivebackStop = strategy.position_avg_price + activeLongRisk * math.max(0.0, longProgressR * (1.0 - maxProfitGivebackPct))
+        longAtrStop = activeLongBest - atrValue * trailAtrMult
+        longStopCandidate := math.max(longStopCandidate, math.max(longGivebackStop, longAtrStop))
+    activeLongStop := math.max(activeLongStop, math.min(longStopCandidate, close - syminfo.mintick))
 
 if strategy.position_size < 0 and not na(activeShortStop)
+    float shortStopCandidate = activeShortStop
     if shortProgressR >= breakEvenAtR
-        activeShortStop := math.min(activeShortStop, strategy.position_avg_price)
+        shortStopCandidate := math.min(shortStopCandidate, strategy.position_avg_price - syminfo.mintick)
+    if shortProgressR >= profitLockAtR
+        shortStopCandidate := math.min(shortStopCandidate, strategy.position_avg_price - activeShortRisk * profitLockR)
     if shortProgressR >= trailAtR
-        activeShortStop := math.min(activeShortStop, close + atrValue * trailAtrMult)
+        shortGivebackStop = strategy.position_avg_price - activeShortRisk * math.max(0.0, shortProgressR * (1.0 - maxProfitGivebackPct))
+        shortAtrStop = activeShortBest + atrValue * trailAtrMult
+        shortStopCandidate := math.min(shortStopCandidate, math.min(shortGivebackStop, shortAtrStop))
+    activeShortStop := math.min(activeShortStop, math.max(shortStopCandidate, close + syminfo.mintick))
 
 longSetupBroken = close < emaTrend and rsiValue < 48
 shortSetupBroken = close > emaTrend and rsiValue > 52
@@ -289,12 +320,24 @@ exitLongReason = longScoreFlip ? "Score flipped against long before target" : lo
 exitShortReason = shortScoreFlip ? "Score flipped against short before target" : shortSetupBroken ? "Trend and RSI failed before target" : shortMomentumFlip ? "DI/VWAP momentum flipped against short" : "Volatility shock against short"
 exitLongMessage = '{"source":"tradingview","action":"EXIT_LONG","ticker":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","price":' + str.tostring(close, format.mintick) + ',"qty":' + str.tostring(contractQty) + ',"edge":' + str.tostring(edge, "#.##") + ',"score":' + str.tostring(buyScore, "#.##") + ',"reason":"' + exitLongReason + '","bar_time":"' + str.tostring(time) + '","tag":"' + webhookTag + '"}'
 exitShortMessage = '{"source":"tradingview","action":"EXIT_SHORT","ticker":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","price":' + str.tostring(close, format.mintick) + ',"qty":' + str.tostring(contractQty) + ',"edge":' + str.tostring(edge, "#.##") + ',"score":' + str.tostring(sellScore, "#.##") + ',"reason":"' + exitShortReason + '","bar_time":"' + str.tostring(time) + '","tag":"' + webhookTag + '"}'
+protectLongMessage = '{"source":"tradingview","action":"EXIT_LONG","ticker":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","price":' + str.tostring(close, format.mintick) + ',"qty":' + str.tostring(contractQty) + ',"edge":' + str.tostring(edge, "#.##") + ',"score":' + str.tostring(buyScore, "#.##") + ',"reason":"Protective trailing stop or take profit closed the long","bar_time":"' + str.tostring(time) + '","tag":"' + webhookTag + '"}'
+protectShortMessage = '{"source":"tradingview","action":"EXIT_SHORT","ticker":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","price":' + str.tostring(close, format.mintick) + ',"qty":' + str.tostring(contractQty) + ',"edge":' + str.tostring(edge, "#.##") + ',"score":' + str.tostring(sellScore, "#.##") + ',"reason":"Protective trailing stop or take profit closed the short","bar_time":"' + str.tostring(time) + '","tag":"' + webhookTag + '"}'
+protectiveExitLong = strategy.position_size > 0 and not na(activeLongStop) and not na(activeLongTarget) and (close <= activeLongStop or close >= activeLongTarget)
+protectiveExitShort = strategy.position_size < 0 and not na(activeShortStop) and not na(activeShortTarget) and (close >= activeShortStop or close <= activeShortTarget)
 
 if strategy.position_size > 0 and not na(activeLongStop) and not na(activeLongTarget)
-    strategy.exit("Long Bracket", "Long", stop=activeLongStop, limit=activeLongTarget)
+    strategy.exit("Long Bracket", "Long", stop=activeLongStop, limit=activeLongTarget, alert_message=protectLongMessage)
 
 if strategy.position_size < 0 and not na(activeShortStop) and not na(activeShortTarget)
-    strategy.exit("Short Bracket", "Short", stop=activeShortStop, limit=activeShortTarget)
+    strategy.exit("Short Bracket", "Short", stop=activeShortStop, limit=activeShortTarget, alert_message=protectShortMessage)
+
+if protectiveExitLong and (na(lastProtectExitBar) or lastProtectExitBar != bar_index)
+    lastProtectExitBar := bar_index
+    alert(protectLongMessage, alert.freq_once_per_bar)
+
+if protectiveExitShort and (na(lastProtectExitBar) or lastProtectExitBar != bar_index)
+    lastProtectExitBar := bar_index
+    alert(protectShortMessage, alert.freq_once_per_bar)
 
 if riskExitLong
     lastRiskExitBar := bar_index
@@ -328,7 +371,7 @@ winRate = totalClosedTrades > 0 ? strategy.wintrades / totalClosedTrades * 100 :
 activeMode = minimumSafeWindow ? "Minimum daily search" : dailyMode ? "Daily quality search" : "A+ only"
 var table statsTable = table.new(position.top_right, 2, 7, bgcolor=color.new(color.black, 18), border_color=color.new(color.white, 70), border_width=1)
 if barstate.islast
-    table.cell(statsTable, 0, 0, "MNQ Bot v7", text_color=color.white, bgcolor=color.new(color.blue, 72))
+    table.cell(statsTable, 0, 0, "MNQ Bot v8", text_color=color.white, bgcolor=color.new(color.blue, 72))
     table.cell(statsTable, 1, 0, activeMode, text_color=color.white, bgcolor=color.new(color.blue, 72))
     table.cell(statsTable, 0, 1, "Window", text_color=color.silver)
     table.cell(statsTable, 1, 1, str.tostring(backtestDays) + " days", text_color=color.white)

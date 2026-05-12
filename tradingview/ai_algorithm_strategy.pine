@@ -1,8 +1,11 @@
 //@version=5
 //@strategy_alert_message {{strategy.order.alert_message}}
-strategy("AI MNQ Smart Paper Bot v8", overlay=true, initial_capital=100000, default_qty_type=strategy.fixed, default_qty_value=1, pyramiding=0, process_orders_on_close=true, calc_on_every_tick=true, calc_on_order_fills=true)
+strategy("AI MNQ Smart Paper Bot v9", overlay=true, initial_capital=100000, default_qty_type=strategy.fixed, default_qty_value=1, pyramiding=0, process_orders_on_close=true, calc_on_every_tick=true)
 
 contractQty = input.int(1, "Contracts / Paper Size", minval=1, maxval=10)
+mnqDollarsPerPoint = input.float(2.0, "MNQ Dollars Per Point", minval=0.01, step=0.25)
+maxLossDollars = input.float(150.0, "Max Loss Per Trade ($)", minval=1.0, step=5.0)
+minimumProfitTargetDollars = input.float(25.0, "Minimum Profit Target ($)", minval=0.0, step=5.0)
 maxTradesPerDay = input.int(5, "Max Trades Per Day", minval=1, maxval=5)
 minTradesPerDay = input.int(1, "Minimum Quality Trades Per Day", minval=0, maxval=5)
 requireOneHour = input.bool(true, "Only Fire On 1H Chart")
@@ -13,7 +16,7 @@ useSessionFilter = input.bool(true, "Use Regular Session Filter")
 usePrimeHours = input.bool(false, "Trade Prime NY Hours Only")
 forceDailyMinimum = input.bool(true, "Force One Daily Setup If No Trade")
 tradeSession = input.session("0930-1600", "Trading Session")
-webhookTag = input.string("mnq-smart-paper-v8", "Webhook Tag")
+webhookTag = input.string("mnq-smart-paper-v9", "Webhook Tag")
 
 emaFastLen = input.int(21, "Fast EMA", minval=5)
 emaTrendLen = input.int(55, "Trade Trend EMA", minval=10)
@@ -26,7 +29,8 @@ volumeLen = input.int(30, "Volume Baseline", minval=5)
 atrLen = input.int(14, "ATR Length", minval=2)
 atrStopMult = input.float(1.45, "ATR Stop Multiplier", minval=0.25, step=0.05)
 takeProfitR = input.float(2.40, "Take Profit R", minval=0.75, step=0.05)
-breakEvenAtR = input.float(0.50, "Move Stop To Breakeven At R", minval=0.10, step=0.05)
+breakEvenAtR = input.float(0.55, "Move Stop To Breakeven At R", minval=0.10, step=0.05)
+breakEvenBufferDollars = input.float(10.0, "Breakeven Buffer ($)", minval=0.0, step=1.0)
 profitLockAtR = input.float(0.90, "Start Locking Profit At R", minval=0.25, step=0.05)
 profitLockR = input.float(0.25, "Minimum Profit Lock R", minval=0.0, step=0.05)
 trailAtR = input.float(1.15, "Start Smart Trail At R", minval=0.5, step=0.05)
@@ -96,6 +100,7 @@ emaSpread = math.abs(emaFast - emaTrend) / math.max(atrValue, syminfo.mintick)
 trendSeparation = math.abs(emaTrend - emaMacro) / math.max(atrValue, syminfo.mintick)
 cleanTrend = trendEfficiency >= 0.20 and emaSpread >= 0.04 and trendSeparation >= 0.08
 basicTrend = cleanTrend or adxValue >= minAdx or trendEfficiency >= 0.18
+tradeableTape = not (adxValue < 10 and trendEfficiency < 0.10)
 healthyVolatility = atrPct >= 0.06 and atrPct <= 4.00
 notChasing = distanceFromVwap <= atrValue * maxVwapAtrDistance and distanceFromFast <= atrValue * 1.45
 notExtremeChase = distanceFromVwap <= atrValue * 2.35 and distanceFromFast <= atrValue * 2.10
@@ -159,33 +164,35 @@ buyScore := math.min(math.max(buyScore, 0), 100)
 sellScore := math.min(math.max(sellScore, 0), 100)
 edge = buyScore - sellScore
 
+riskCapPoints = math.max(maxLossDollars / math.max(contractQty * mnqDollarsPerPoint, 0.01), syminfo.mintick * 4)
 minimumStopDistance = math.max(atrValue * minRiskAtr, syminfo.mintick * 4)
+minimumTargetDistance = minimumProfitTargetDollars / math.max(contractQty * mnqDollarsPerPoint, 0.01)
 longStructureStop = priorSwingLow - syminfo.mintick * 2
 shortStructureStop = priorSwingHigh + syminfo.mintick * 2
 longAtrStop = close - atrValue * atrStopMult
 shortAtrStop = close + atrValue * atrStopMult
 longRawStop = math.max(longStructureStop, longAtrStop)
 shortRawStop = math.min(shortStructureStop, shortAtrStop)
-longStopPrice = math.min(longRawStop, close - minimumStopDistance)
-shortStopPrice = math.max(shortRawStop, close + minimumStopDistance)
+longStopPrice = math.max(math.min(longRawStop, close - minimumStopDistance), close - riskCapPoints)
+shortStopPrice = math.min(math.max(shortRawStop, close + minimumStopDistance), close + riskCapPoints)
 longRisk = close - longStopPrice
 shortRisk = shortStopPrice - close
-validLongRisk = longRisk >= minimumStopDistance and longRisk <= atrValue * maxRiskAtr
-validShortRisk = shortRisk >= minimumStopDistance and shortRisk <= atrValue * maxRiskAtr
-longTakeProfit = close + longRisk * takeProfitR
-shortTakeProfit = close - shortRisk * takeProfitR
+validLongRisk = longRisk >= syminfo.mintick * 4 and longRisk <= riskCapPoints and longRisk <= atrValue * maxRiskAtr
+validShortRisk = shortRisk >= syminfo.mintick * 4 and shortRisk <= riskCapPoints and shortRisk <= atrValue * maxRiskAtr
+longTakeProfit = close + math.max(longRisk * takeProfitR, minimumTargetDistance)
+shortTakeProfit = close - math.max(shortRisk * takeProfitR, minimumTargetDistance)
 
 longConfirmations = (bullMacro ? 1 : 0) + (bullTape ? 1 : 0) + (bullMomentum ? 1 : 0) + ((bullStructureBreak or bullPullbackReclaim) ? 1 : 0) + (candleConfirmLong ? 1 : 0) + (volumeConfirmLong ? 1 : 0) + (cleanTrend ? 1 : 0) + (notChasing ? 1 : 0) + (primeWindowOk ? 1 : 0)
 shortConfirmations = (bearMacro ? 1 : 0) + (bearTape ? 1 : 0) + (bearMomentum ? 1 : 0) + ((bearStructureBreak or bearPullbackReject) ? 1 : 0) + (candleConfirmShort ? 1 : 0) + (volumeConfirmShort ? 1 : 0) + (cleanTrend ? 1 : 0) + (notChasing ? 1 : 0) + (primeWindowOk ? 1 : 0)
 
-ready = barstate.isconfirmed and symbolOk and timeframeOk and sessionOk and withinBacktestWindow and healthyVolatility and basicTrend and notExtremeChase and not na(priorHigh) and not na(priorLow)
+ready = barstate.isconfirmed and symbolOk and timeframeOk and sessionOk and withinBacktestWindow and healthyVolatility and basicTrend and tradeableTape and notExtremeChase and not na(priorHigh) and not na(priorLow)
 canEnter = tradesToday < maxTradesPerDay and strategy.position_size == 0 and cooldownOk
 effectiveMinTrades = math.min(minTradesPerDay, maxTradesPerDay)
 needsDailyTrade = tradesToday < effectiveMinTrades
 dailyMode = needsDailyTrade and dailyQualityWindow
 minimumSafeWindow = forceDailyMinimum and needsDailyTrade and nyHour >= minimumFallbackStartHour and nyHour <= 15
 
-minimumReady = barstate.isconfirmed and symbolOk and timeframeOk and sessionOk and withinBacktestWindow and atrValue > syminfo.mintick * 4 and not na(priorHigh) and not na(priorLow)
+minimumReady = barstate.isconfirmed and symbolOk and timeframeOk and sessionOk and withinBacktestWindow and tradeableTape and atrValue > syminfo.mintick * 4 and not na(priorHigh) and not na(priorLow)
 fallbackLongBias = buyScore >= sellScore
 fallbackShortBias = sellScore > buyScore
 dailyLongSafety = validLongRisk and notExtremeChase and (close >= emaFast or close >= vwapValue or plusDi >= minusDi or fallbackLongBias)
@@ -275,11 +282,12 @@ if strategy.position_size < 0 and not na(activeShortRisk) and activeShortRisk > 
 
 longProgressR = strategy.position_size > 0 and not na(activeLongRisk) and activeLongRisk > 0 and not na(activeLongBest) ? (activeLongBest - strategy.position_avg_price) / activeLongRisk : 0.0
 shortProgressR = strategy.position_size < 0 and not na(activeShortRisk) and activeShortRisk > 0 and not na(activeShortBest) ? (strategy.position_avg_price - activeShortBest) / activeShortRisk : 0.0
+breakEvenBufferPoints = breakEvenBufferDollars / math.max(contractQty * mnqDollarsPerPoint, 0.01)
 
 if strategy.position_size > 0 and not na(activeLongStop)
     float longStopCandidate = activeLongStop
     if longProgressR >= breakEvenAtR
-        longStopCandidate := math.max(longStopCandidate, strategy.position_avg_price + syminfo.mintick)
+        longStopCandidate := math.max(longStopCandidate, strategy.position_avg_price + math.max(breakEvenBufferPoints, syminfo.mintick))
     if longProgressR >= profitLockAtR
         longStopCandidate := math.max(longStopCandidate, strategy.position_avg_price + activeLongRisk * profitLockR)
     if longProgressR >= trailAtR
@@ -291,7 +299,7 @@ if strategy.position_size > 0 and not na(activeLongStop)
 if strategy.position_size < 0 and not na(activeShortStop)
     float shortStopCandidate = activeShortStop
     if shortProgressR >= breakEvenAtR
-        shortStopCandidate := math.min(shortStopCandidate, strategy.position_avg_price - syminfo.mintick)
+        shortStopCandidate := math.min(shortStopCandidate, strategy.position_avg_price - math.max(breakEvenBufferPoints, syminfo.mintick))
     if shortProgressR >= profitLockAtR
         shortStopCandidate := math.min(shortStopCandidate, strategy.position_avg_price - activeShortRisk * profitLockR)
     if shortProgressR >= trailAtR
@@ -367,7 +375,7 @@ winRate = totalClosedTrades > 0 ? strategy.wintrades / totalClosedTrades * 100 :
 activeMode = minimumSafeWindow ? "Minimum daily search" : dailyMode ? "Daily quality search" : "A+ only"
 var table statsTable = table.new(position.top_right, 2, 7, bgcolor=color.new(color.black, 18), border_color=color.new(color.white, 70), border_width=1)
 if barstate.islast
-    table.cell(statsTable, 0, 0, "MNQ Bot v8", text_color=color.white, bgcolor=color.new(color.blue, 72))
+    table.cell(statsTable, 0, 0, "MNQ Bot v9", text_color=color.white, bgcolor=color.new(color.blue, 72))
     table.cell(statsTable, 1, 0, activeMode, text_color=color.white, bgcolor=color.new(color.blue, 72))
     table.cell(statsTable, 0, 1, "Window", text_color=color.silver)
     table.cell(statsTable, 1, 1, str.tostring(backtestDays) + " days", text_color=color.white)

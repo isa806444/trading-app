@@ -4,7 +4,7 @@
 def build_pine_script() -> str:
     return """//@version=5
 //@strategy_alert_message {{strategy.order.alert_message}}
-strategy("AI MNQ Smart Paper Bot v6", overlay=true, initial_capital=100000, default_qty_type=strategy.fixed, default_qty_value=1, pyramiding=0, process_orders_on_close=true, calc_on_every_tick=false)
+strategy("AI MNQ Smart Paper Bot v7", overlay=true, initial_capital=100000, default_qty_type=strategy.fixed, default_qty_value=1, pyramiding=0, process_orders_on_close=true, calc_on_every_tick=false)
 
 contractQty = input.int(1, "Contracts / Paper Size", minval=1, maxval=10)
 maxTradesPerDay = input.int(5, "Max Trades Per Day", minval=1, maxval=5)
@@ -15,8 +15,9 @@ useBacktestWindow = input.bool(true, "Limit Backtest To Recent Window")
 backtestDays = input.int(92, "Backtest Window Days", minval=10, maxval=370)
 useSessionFilter = input.bool(true, "Use Regular Session Filter")
 usePrimeHours = input.bool(false, "Trade Prime NY Hours Only")
+forceDailyMinimum = input.bool(true, "Force One Daily Setup If No Trade")
 tradeSession = input.session("0930-1600", "Trading Session")
-webhookTag = input.string("mnq-smart-paper-v6", "Webhook Tag")
+webhookTag = input.string("mnq-smart-paper-v7", "Webhook Tag")
 
 emaFastLen = input.int(21, "Fast EMA", minval=5)
 emaTrendLen = input.int(55, "Trade Trend EMA", minval=10)
@@ -33,14 +34,15 @@ breakEvenAtR = input.float(1.05, "Move Stop To Breakeven At R", minval=0.25, ste
 trailAtR = input.float(1.65, "Start Smart Trail At R", minval=0.5, step=0.05)
 trailAtrMult = input.float(1.15, "Trail ATR Multiplier", minval=0.25, step=0.05)
 minAdx = input.float(18.0, "Minimum ADX", minval=1.0, step=0.5)
-minSetupScore = input.float(82.0, "A+ Minimum Setup Score", minval=50.0, maxval=100.0, step=1.0)
-minEdge = input.float(24.0, "A+ Minimum Directional Edge", minval=1.0, step=1.0)
-dailyFallbackScore = input.float(68.0, "Daily Quality Minimum Score", minval=50.0, maxval=100.0, step=1.0)
-dailyFallbackEdge = input.float(10.0, "Daily Quality Minimum Edge", minval=1.0, step=1.0)
-dailyFallbackStartHour = input.int(11, "Daily Quality Search Starts NY Hour", minval=10, maxval=15)
+minSetupScore = input.float(80.0, "A+ Minimum Setup Score", minval=50.0, maxval=100.0, step=1.0)
+minEdge = input.float(20.0, "A+ Minimum Directional Edge", minval=1.0, step=1.0)
+dailyFallbackScore = input.float(58.0, "Daily Quality Minimum Score", minval=45.0, maxval=100.0, step=1.0)
+dailyFallbackEdge = input.float(3.0, "Daily Quality Minimum Edge", minval=0.0, step=1.0)
+dailyFallbackStartHour = input.int(10, "Daily Quality Search Starts NY Hour", minval=9, maxval=15)
+minimumFallbackStartHour = input.int(12, "Minimum Trade Search Starts NY Hour", minval=10, maxval=15)
 maxVwapAtrDistance = input.float(1.70, "Max Chase Distance From VWAP", minval=0.25, step=0.05)
 minRiskAtr = input.float(0.35, "Minimum Stop Distance ATR", minval=0.05, step=0.05)
-maxRiskAtr = input.float(2.25, "Maximum Stop Distance ATR", minval=0.5, step=0.05)
+maxRiskAtr = input.float(3.25, "Maximum Stop Distance ATR", minval=0.5, step=0.05)
 cooldownBars = input.int(1, "Cooldown Bars After Entry", minval=0, maxval=20)
 minHoldBarsBeforeRiskExit = input.int(1, "Minimum Bars Before Smart Exit", minval=0, maxval=10)
 useSmartRiskExit = input.bool(true, "Smart Exit If Setup Breaks")
@@ -182,16 +184,19 @@ canEnter = tradesToday < maxTradesPerDay and strategy.position_size == 0 and coo
 effectiveMinTrades = math.min(minTradesPerDay, maxTradesPerDay)
 needsDailyTrade = tradesToday < effectiveMinTrades
 dailyMode = needsDailyTrade and dailyQualityWindow
-minimumSafeWindow = needsDailyTrade and nyHour >= 15 and nyHour <= 15
+minimumSafeWindow = forceDailyMinimum and needsDailyTrade and nyHour >= minimumFallbackStartHour and nyHour <= 15
 
-dailyLongSafety = bullMacro and close > vwapValue and plusDi >= minusDi and validLongRisk
-dailyShortSafety = bearMacro and close < vwapValue and minusDi >= plusDi and validShortRisk
+minimumReady = barstate.isconfirmed and symbolOk and timeframeOk and sessionOk and withinBacktestWindow and atrValue > syminfo.mintick * 4 and not na(priorHigh) and not na(priorLow)
+fallbackLongBias = buyScore >= sellScore
+fallbackShortBias = sellScore > buyScore
+dailyLongSafety = validLongRisk and notExtremeChase and (close >= emaFast or close >= vwapValue or plusDi >= minusDi or fallbackLongBias)
+dailyShortSafety = validShortRisk and notExtremeChase and (close <= emaFast or close <= vwapValue or minusDi >= plusDi or fallbackShortBias)
 longAPlusCandidate = ready and canEnter and primeWindowOk and notChasing and validLongRisk and longConfirmations >= 7 and buyScore >= minSetupScore and edge >= minEdge
 shortAPlusCandidate = ready and canEnter and primeWindowOk and notChasing and validShortRisk and shortConfirmations >= 7 and sellScore >= minSetupScore and edge <= -minEdge
-longDailyCandidate = ready and canEnter and dailyMode and validLongRisk and dailyLongSafety and longConfirmations >= 4 and buyScore >= dailyFallbackScore and edge >= dailyFallbackEdge
-shortDailyCandidate = ready and canEnter and dailyMode and validShortRisk and dailyShortSafety and shortConfirmations >= 4 and sellScore >= dailyFallbackScore and edge <= -dailyFallbackEdge
-longMinimumCandidate = ready and canEnter and minimumSafeWindow and dailyLongSafety and buyScore > sellScore
-shortMinimumCandidate = ready and canEnter and minimumSafeWindow and dailyShortSafety and sellScore > buyScore
+longDailyCandidate = minimumReady and canEnter and dailyMode and dailyLongSafety and longConfirmations >= 2 and buyScore >= dailyFallbackScore and edge >= dailyFallbackEdge
+shortDailyCandidate = minimumReady and canEnter and dailyMode and dailyShortSafety and shortConfirmations >= 2 and sellScore >= dailyFallbackScore and edge <= -dailyFallbackEdge
+longMinimumCandidate = minimumReady and canEnter and minimumSafeWindow and dailyLongSafety and fallbackLongBias
+shortMinimumCandidate = minimumReady and canEnter and minimumSafeWindow and dailyShortSafety and fallbackShortBias
 
 longSignalAPlus = longAPlusCandidate and buyScore > sellScore
 shortSignalAPlus = shortAPlusCandidate and sellScore > buyScore and not longSignalAPlus
@@ -320,10 +325,10 @@ totalClosedTrades = strategy.closedtrades
 totalOpenTrades = strategy.opentrades
 totalTrades = totalClosedTrades + totalOpenTrades
 winRate = totalClosedTrades > 0 ? strategy.wintrades / totalClosedTrades * 100 : 0.0
-activeMode = dailyMode ? "Daily quality search" : "A+ only"
+activeMode = minimumSafeWindow ? "Minimum daily search" : dailyMode ? "Daily quality search" : "A+ only"
 var table statsTable = table.new(position.top_right, 2, 7, bgcolor=color.new(color.black, 18), border_color=color.new(color.white, 70), border_width=1)
 if barstate.islast
-    table.cell(statsTable, 0, 0, "MNQ Bot v6", text_color=color.white, bgcolor=color.new(color.blue, 72))
+    table.cell(statsTable, 0, 0, "MNQ Bot v7", text_color=color.white, bgcolor=color.new(color.blue, 72))
     table.cell(statsTable, 1, 0, activeMode, text_color=color.white, bgcolor=color.new(color.blue, 72))
     table.cell(statsTable, 0, 1, "Window", text_color=color.silver)
     table.cell(statsTable, 1, 1, str.tostring(backtestDays) + " days", text_color=color.white)

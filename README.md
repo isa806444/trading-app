@@ -5,7 +5,7 @@ This project is an NDX-focused AI algorithm paper-signal dashboard built with Fl
 ## Current Features
 
 - Run the NDX AI algorithm board
-- Export the TradingView Pine Script strategy for the Nasdaq 100 1-hour paper bot
+- Keep the TradingView Pine Script strategy private in the repo for the Nasdaq 100 1-hour bot
 - Receive TradingView webhook alerts from the live NDX strategy chart
 - Keep the bot permanently armed to NDX so all other alerts are ignored
 - Show real NDX index quotes through Polygon using `I:NDX`

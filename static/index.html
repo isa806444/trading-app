@@ -2311,9 +2311,8 @@ body {
           <div class="hero-chip" id="alertsChip">Alerts idle</div>
         </div>
         <div class="algo-actions">
-          <button class="algo-primary" onclick="loadAlgorithmDashboard(true)">Run Algorithm</button>
+          <button class="algo-primary" onclick="loadAlgorithmDashboard(true)">Check Orders</button>
           <button class="algo-secondary" onclick="manualRefresh()">Refresh NDX</button>
-          <button class="algo-secondary" onclick="window.open('/pine-script','_blank')">Export Pine Script</button>
         </div>
       </div>
       <div id="algoLivePanel" class="algo-live-card">
@@ -2354,7 +2353,7 @@ body {
   </div>
 
   <div id="algoDashboard" class="algo-board">
-    <div class="algo-empty">Run the algorithm to load daily results, per-algo breakdown, and performance bars.</div>
+    <div class="algo-empty">No routed algorithm orders yet. Real trades will appear here only after TradingView alerts route through Render and Tradeify/Tradovate.</div>
   </div>
 
   <div id="result" class="algo-result-card"></div>
@@ -2364,7 +2363,7 @@ body {
 
   <details id="messagesPanel" class="messages-panel details-panel">
     <summary>Messages</summary>
-    <div class="paper-subtitle">Triggered alerts and algorithm demo trades will appear here</div>
+    <div class="paper-subtitle">Triggered alerts and routed algorithm orders will appear here</div>
     <div class="details-body">
       <div class="paper-summary" id="botTradeSummary">No algorithm trades yet.</div>
       <div class="alert-list" id="botTradeList"></div>
@@ -3809,13 +3808,21 @@ function renderAlgorithmDashboard(payload){
 
   const totals = payload?.totals || {};
   const rows = Array.isArray(payload?.rows) ? payload.rows : [];
-  const maxAbsPnl = Math.max(1, ...rows.map(row => Math.abs(Number(row.net_pnl || 0))));
   const generated = payload?.generated_at ? new Date(payload.generated_at) : new Date();
 
   renderAlgoLivePanel(payload);
 
   if(!rows.length){
-    container.innerHTML = '<div class="algo-empty">No NDX algorithm row loaded yet. Refresh again in a moment.</div>';
+    container.innerHTML = `
+      <div class="algo-board-head">
+        <div>
+          <div class="section-kicker">Algorithm Results</div>
+          <div class="section-title">No routed orders yet</div>
+          <div class="compact-copy">This board only shows real bot orders that were sent from TradingView to Render and successfully routed to Tradeify/Tradovate. No model trades or fake P/L are shown here.</div>
+        </div>
+        <button class="algo-secondary" onclick="loadAlgorithmDashboard(true)">Refresh Orders</button>
+      </div>
+    `;
     return;
   }
 
@@ -3823,32 +3830,32 @@ function renderAlgorithmDashboard(payload){
     <div class="algo-board-head">
       <div>
         <div class="section-kicker">Algorithm Results</div>
-        <div class="section-title">NDX results for ${payload.date || "today"}</div>
-        <div class="compact-copy">Model P/L is a signal-performance estimate using a $1,000 reference size per active decision, not a real filled order.</div>
+        <div class="section-title">Routed bot orders for ${payload.date || "today"}</div>
+        <div class="compact-copy">Only real routed orders appear here: TradingView alert -> Render webhook -> app -> Tradeify/Tradovate. No simulated trades or fake P/L.</div>
       </div>
-      <button class="algo-secondary" onclick="loadAlgorithmDashboard(true)">Refresh Board</button>
+      <button class="algo-secondary" onclick="loadAlgorithmDashboard(true)">Refresh Orders</button>
     </div>
 
     <div class="algo-stat-grid">
       <div class="algo-stat">
-        <div class="algo-stat-label">Total P/L</div>
-        <div class="algo-stat-value ${Number(totals.total_pnl || 0) >= 0 ? "up" : "down"}">${formatMoney(totals.total_pnl || 0)}</div>
+        <div class="algo-stat-label">Routed Orders</div>
+        <div class="algo-stat-value">${totals.routed_orders || rows.length}</div>
       </div>
       <div class="algo-stat">
-        <div class="algo-stat-label">Trades</div>
-        <div class="algo-stat-value">${totals.trades || 0}</div>
+        <div class="algo-stat-label">Entries</div>
+        <div class="algo-stat-value">${totals.entries || 0}</div>
       </div>
       <div class="algo-stat">
-        <div class="algo-stat-label">Win Rate</div>
-        <div class="algo-stat-value">${Number(totals.win_rate || 0).toFixed(1)}%</div>
+        <div class="algo-stat-label">Exits</div>
+        <div class="algo-stat-value">${totals.exits || 0}</div>
       </div>
       <div class="algo-stat">
-        <div class="algo-stat-label">Best Trade</div>
-        <div class="algo-stat-value up">${formatMoney(totals.best_trade || 0)}</div>
+        <div class="algo-stat-label">Buy Orders</div>
+        <div class="algo-stat-value up">${totals.buys || 0}</div>
       </div>
       <div class="algo-stat">
-        <div class="algo-stat-label">Worst Trade</div>
-        <div class="algo-stat-value down">${formatMoney(totals.worst_trade || 0)}</div>
+        <div class="algo-stat-label">Sell Orders</div>
+        <div class="algo-stat-value down">${totals.sells || 0}</div>
       </div>
     </div>
 
@@ -3856,14 +3863,13 @@ function renderAlgorithmDashboard(payload){
       <table class="algo-table">
         <thead>
           <tr>
-            <th>Algo</th>
-            <th>Decision</th>
-            <th>Confidence</th>
-            <th>Win Rate</th>
-            <th>Total P/L</th>
-            <th>Best</th>
-            <th>Worst</th>
-            <th></th>
+            <th>Order</th>
+            <th>Action</th>
+            <th>Qty</th>
+            <th>Entry</th>
+            <th>Target</th>
+            <th>Stop</th>
+            <th>Status</th>
           </tr>
         </thead>
         <tbody>
@@ -3871,36 +3877,23 @@ function renderAlgorithmDashboard(payload){
             <tr>
               <td>
                 <div class="algo-name">${row.algo}</div>
-                <div class="algo-sub">${row.ticker} | ${row.market_mode || "Balanced"} | Vol ${Number(row.relative_volume || 1).toFixed(2)}x</div>
+                <div class="algo-sub">${row.ticker || "NDX"} -> ${row.tradovate_symbol || "Tradovate"} | ${row.received_at ? formatLongDate(row.received_at) : "Just now"}</div>
               </td>
-              <td><span class="algo-pill ${getAlgoPillClass(row.action)}">${row.action || "WAIT"} ${row.grade || "C"}</span></td>
-              <td>${row.confidence || 0}%</td>
-              <td>${Number(row.win_rate || 0).toFixed(1)}%</td>
-              <td class="${Number(row.net_pnl || 0) >= 0 ? "up" : "down"}">${formatMoney(row.net_pnl || 0)}</td>
-              <td class="up">${formatMoney(row.best_trade || 0)}</td>
-              <td class="down">${formatMoney(row.worst_trade || 0)}</td>
-              <td><button class="ghost-btn" onclick="analyze('${row.ticker}')">Open</button></td>
+              <td><span class="algo-pill ${getAlgoPillClass(row.action)}">${row.action || "SIGNAL"}</span></td>
+              <td>${row.qty || 1}</td>
+              <td>${formatMarketPrice(row.price, "NDX")}</td>
+              <td>${row.target ? formatMarketPrice(row.target, "NDX") : "--"}</td>
+              <td>${row.stop ? formatMarketPrice(row.stop, "NDX") : "--"}</td>
+              <td>
+                <div>${row.status || "Placed"}</div>
+                <div class="algo-sub">${row.reason || row.mode || "Order routed."}</div>
+              </td>
             </tr>
           `).join("")}
         </tbody>
       </table>
     </div>
 
-    <div class="algo-bars">
-      ${rows.map(row => {
-        const pnl = Number(row.net_pnl || 0);
-        const width = Math.max(2, Math.min(50, (Math.abs(pnl) / maxAbsPnl) * 50));
-        return `
-          <div class="algo-bar-row">
-            <div class="algo-sub">${row.ticker}</div>
-            <div class="algo-bar-track">
-              <div class="algo-bar-fill ${pnl < 0 ? "negative" : ""}" style="width:${width}%;"></div>
-            </div>
-            <div class="${pnl >= 0 ? "up" : "down"}">${formatMoney(pnl)}</div>
-          </div>
-        `;
-      }).join("")}
-    </div>
     <div class="algo-sub" style="margin-top:12px;">Updated ${liveEtTimeFormatter.format(generated)} ET</div>
   `;
 }
@@ -3908,7 +3901,7 @@ function renderAlgorithmDashboard(payload){
 async function loadAlgorithmDashboard(force=false){
   const container = document.getElementById("algoDashboard");
   if(container){
-    container.innerHTML = '<div class="algo-empty">Running the algorithm across the board...</div>';
+    container.innerHTML = '<div class="algo-empty">Checking for routed Tradeify/Tradovate bot orders...</div>';
   }
 
   try{
@@ -5710,8 +5703,8 @@ function renderBotTrades(){
   }
 
   const routed = botTrades.filter(trade => trade.routed).length;
-  const simulated = botTrades.filter(trade => trade.simulated).length;
-  summary.innerText = `${botTrades.length} bot trade${botTrades.length === 1 ? "" : "s"} | ${routed} routed | ${simulated} demo logged`;
+  const loggedSignals = botTrades.length - routed;
+  summary.innerText = `${routed} routed order${routed === 1 ? "" : "s"} | ${loggedSignals} signal${loggedSignals === 1 ? "" : "s"} logged`;
   if(panel){
     panel.open = true;
   }

@@ -1,6 +1,6 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from flask import Flask, Response, jsonify, request, send_from_directory, session, has_request_context
+from flask import Flask, jsonify, request, send_from_directory, session, has_request_context
 from flask_cors import CORS
 import hashlib
 import json
@@ -1894,8 +1894,8 @@ def build_bot_trade_message(payload, execution):
     routed = bool(execution.get("routed"))
     env = get_tradovate_env()
     simulated = not routed
-    mode = f"Tradovate {env}" if routed else "Simulated demo"
-    status = "Placed" if routed else "Logged"
+    mode = f"Tradovate {env}" if routed else "Signal log"
+    status = "Placed" if routed else "Alert logged"
     if routed and env == "live":
         status = "Live order placed"
 
@@ -3029,68 +3029,43 @@ def build_scanner_row(symbol):
 
 
 def build_algorithm_dashboard(tickers):
+    today = datetime.now(DEMO_TIMEZONE).date().isoformat()
+    routed_trades = [
+        trade for trade in bot_trade_messages
+        if trade.get("routed") and str(trade.get("received_at", "")).startswith(today)
+    ]
     rows = []
-    clean_tickers = [ALGORITHM_LOCKED_SYMBOL]
-
-    for ticker in clean_tickers[:10]:
-        scanner_row = build_scanner_row(ticker)
-        if not scanner_row:
-            continue
-
-        signal = scanner_row.get("trade_signal") or {}
-        algorithm = signal.get("algorithm") or {}
-        action = signal.get("action") or "WAIT"
-        direction = 1 if action == "BUY" else -1 if action == "SELL" else 0
-        trades = 1 if direction else 0
-        signal_move = float(scanner_row.get("change") or 0)
-        model_pnl = round((signal_move / 100) * ALGORITHM_SIGNAL_CAPITAL * direction, 2) if trades else 0
-        wins = 1 if model_pnl > 0 else 0
-        losses = 1 if model_pnl < 0 else 0
-        confidence = int(signal.get("confidence") or scanner_row.get("continuation_probability") or 0)
-        win_rate = 100 if wins else 0 if trades else 0
-        algo_name = f"{ticker} Momentum AI"
-        risk_flags = algorithm.get("risk_flags") or []
-
+    for trade in routed_trades[:25]:
+        action = trade.get("action") or "SIGNAL"
+        edge = float(trade.get("edge") or 0)
         rows.append({
-            "algo": algo_name,
-            "ticker": ticker,
+            "id": trade.get("id"),
+            "algo": "NDX TradingView Bot",
+            "ticker": trade.get("symbol") or ALGORITHM_LOCKED_SYMBOL,
+            "tradovate_symbol": trade.get("tradovate_symbol"),
             "action": action,
-            "grade": signal.get("grade", "C"),
-            "confidence": confidence,
-            "trades": trades,
-            "wins": wins,
-            "losses": losses,
-            "win_rate": win_rate,
-            "total_pnl": model_pnl,
-            "gross_pnl": model_pnl,
-            "net_pnl": model_pnl,
-            "best_trade": model_pnl if model_pnl > 0 else 0,
-            "worst_trade": model_pnl if model_pnl < 0 else 0,
-            "momentum_score": scanner_row.get("momentum_score", {}).get("value", 0),
-            "continuation_probability": scanner_row.get("continuation_probability", 0),
-            "price": scanner_row.get("price", 0),
-            "change": scanner_row.get("change", 0),
-            "market_mode": scanner_row.get("market_mode", {}).get("label", "Balanced"),
-            "relative_volume": scanner_row.get("relative_volume", 1),
-            "reason": signal.get("reason", "Algorithm reason unavailable."),
-            "risk_flags": risk_flags,
-            "long_score": algorithm.get("long_score", 0),
-            "short_score": algorithm.get("short_score", 0),
-            "edge": algorithm.get("edge", 0)
+            "status": trade.get("status") or "Placed",
+            "mode": trade.get("mode") or f"Tradovate {get_tradovate_env()}",
+            "environment": trade.get("environment") or get_tradovate_env(),
+            "received_at": trade.get("received_at"),
+            "qty": trade.get("qty") or 1,
+            "price": trade.get("price"),
+            "target": trade.get("target"),
+            "stop": trade.get("stop"),
+            "edge": round(edge, 2),
+            "confidence": int(min(100, max(0, abs(edge)))),
+            "reason": trade.get("reason") or "Order routed from TradingView alert.",
+            "order": trade.get("order")
         })
 
-    rows.sort(key=lambda item: (item["trades"], item["net_pnl"], item["confidence"], item["momentum_score"]), reverse=True)
-    active_rows = [row for row in rows if row["trades"]]
-    total_pnl = round(sum(row["net_pnl"] for row in rows), 2)
-    total_trades = sum(row["trades"] for row in rows)
-    wins = sum(row["wins"] for row in rows)
-    best_trade = round(max([row["best_trade"] for row in rows] or [0]), 2)
-    worst_trade = round(min([row["worst_trade"] for row in rows] or [0]), 2)
-    win_rate = round((wins / total_trades) * 100, 1) if total_trades else 0
+    buys = sum(1 for row in rows if row["action"] == "BUY")
+    sells = sum(1 for row in rows if row["action"] == "SELL")
+    exits = sum(1 for row in rows if row["action"] in {"EXIT_LONG", "EXIT_SHORT"})
     return {
         "date": datetime.now(DEMO_TIMEZONE).strftime("%Y-%m-%d"),
         "generated_at": datetime.now(DEMO_TIMEZONE).isoformat(),
-        "mode": "tradingview-ndx-paper-signals",
+        "mode": "routed-tradovate-orders-only",
+        "real_orders_only": True,
         "live_trading": {
             "enabled": ndx_tradovate_bridge_ready(),
             "broker_connected": tradovate_configured(),
@@ -3110,15 +3085,14 @@ def build_algorithm_dashboard(tickers):
             )
         },
         "totals": {
-            "total_pnl": total_pnl,
-            "trades": total_trades,
-            "win_rate": win_rate,
-            "best_trade": best_trade,
-            "worst_trade": worst_trade,
-            "active_algos": len(active_rows),
-            "tracked_algos": len(rows)
+            "routed_orders": len(rows),
+            "entries": buys + sells,
+            "exits": exits,
+            "buys": buys,
+            "sells": sells,
+            "tracked_algos": 1 if rows else 0
         },
-        "rows": rows[:10]
+        "rows": rows
     }
 
 
@@ -3923,17 +3897,6 @@ def algorithm_dashboard_route():
             tickers.append(clean)
 
     return jsonify(build_algorithm_dashboard(tickers))
-
-
-@app.route("/pine-script")
-def pine_script_route():
-    from algo_research.pinescript import build_pine_script
-
-    return Response(
-        build_pine_script(),
-        mimetype="text/plain",
-        headers={"Content-Disposition": "inline; filename=ai_algorithm_strategy.pine"}
-    )
 
 
 @app.route("/live-data-status")

@@ -47,8 +47,8 @@ TRADOVATE_LIVE_TRADING_ACK_ENV = "TRADOVATE_LIVE_TRADING_ACK"
 TRADOVATE_DEFAULT_ORDER_QTY_ENV = "TRADOVATE_DEFAULT_ORDER_QTY"
 TRADOVATE_MAX_ORDER_QTY_ENV = "TRADOVATE_MAX_ORDER_QTY"
 TRADOVATE_MAX_DAILY_ORDERS_ENV = "TRADOVATE_MAX_DAILY_ORDERS"
-TRADOVATE_NDX_BRIDGE_ENABLED_ENV = "TRADOVATE_NDX_BRIDGE_ENABLED"
-TRADOVATE_NDX_EXECUTION_SYMBOL_ENV = "TRADOVATE_NDX_EXECUTION_SYMBOL"
+TRADOVATE_MNQ_BRIDGE_ENABLED_ENV = "TRADOVATE_MNQ_BRIDGE_ENABLED"
+TRADOVATE_MNQ_EXECUTION_SYMBOL_ENV = "TRADOVATE_MNQ_EXECUTION_SYMBOL"
 TRADOVATE_TICK_SIZE_ENV = "TRADOVATE_TICK_SIZE"
 ALGO_MIN_EDGE_FOR_AUTO_TRADE_ENV = "ALGO_MIN_EDGE_FOR_AUTO_TRADE"
 ALGO_DEFAULT_TARGET_PCT_ENV = "ALGO_DEFAULT_TARGET_PCT"
@@ -77,8 +77,8 @@ STATIC_US_MACRO_EVENTS = [
     ("2026-07-14T08:30:00-04:00", "Consumer Price Index", "June 2026"),
     ("2026-07-15T08:30:00-04:00", "Producer Price Index", "June 2026"),
 ]
-ALGORITHM_LOCKED_SYMBOL = "NDX"
-ALGORITHM_POLYGON_SYMBOL = "I:NDX"
+ALGORITHM_LOCKED_SYMBOL = "MNQ"
+ALGORITHM_POLYGON_SYMBOL = "MNQ"
 ALGORITHM_DEFAULT_UNIVERSE = [ALGORITHM_LOCKED_SYMBOL]
 ALGORITHM_SIGNAL_CAPITAL = 1000
 FUTURES_ROOTS = {
@@ -100,19 +100,21 @@ news_cache = {}
 events_cache = {}
 
 
-def is_ndx_symbol(symbol):
+def is_mnq_symbol(symbol):
     clean = str(symbol or "").upper().strip().replace(" ", "")
-    if ":" in clean and not clean.startswith("I:"):
+    if ":" in clean:
         clean = clean.split(":", 1)[1]
-    return clean in {"NDX", "I:NDX", "NAS100", "US100"}
+    clean = clean.replace("!", "")
+    alnum = "".join(ch for ch in clean if ch.isalnum())
+    return alnum == "MNQ" or alnum.startswith("MNQ")
 
 
 def display_market_symbol(symbol):
-    return ALGORITHM_LOCKED_SYMBOL if is_ndx_symbol(symbol) else str(symbol or "").upper().strip()
+    return ALGORITHM_LOCKED_SYMBOL if is_mnq_symbol(symbol) else str(symbol or "").upper().strip()
 
 
 def polygon_market_symbol(symbol):
-    return ALGORITHM_POLYGON_SYMBOL if is_ndx_symbol(symbol) else str(symbol or "").upper().strip()
+    return ALGORITHM_POLYGON_SYMBOL if is_mnq_symbol(symbol) else str(symbol or "").upper().strip()
 
 
 # =========================
@@ -232,22 +234,21 @@ def tradovate_execution_ready():
     return tradovate_configured() and tradovate_auto_trade_enabled() and live_trading_acknowledged()
 
 
-def ndx_tradovate_bridge_enabled():
-    return env_bool(TRADOVATE_NDX_BRIDGE_ENABLED_ENV, False)
+def mnq_tradovate_bridge_enabled():
+    return env_bool(TRADOVATE_MNQ_BRIDGE_ENABLED_ENV, False)
 
 
-def get_ndx_execution_symbol():
-    return os.environ.get(TRADOVATE_NDX_EXECUTION_SYMBOL_ENV, "").strip().upper()
+def get_mnq_execution_symbol():
+    return os.environ.get(TRADOVATE_MNQ_EXECUTION_SYMBOL_ENV, "").strip().upper()
 
 
 def get_tradovate_tick_size():
     return env_float(TRADOVATE_TICK_SIZE_ENV, 0.25)
 
 
-def ndx_tradovate_bridge_ready():
+def mnq_tradovate_bridge_ready():
     return (
-        ndx_tradovate_bridge_enabled()
-        and bool(get_ndx_execution_symbol())
+        mnq_tradovate_bridge_enabled()
         and tradovate_execution_ready()
     )
 
@@ -1195,17 +1196,6 @@ def normalize_databento_symbol(symbol):
 def set_active_futures_market(symbol):
     global active_futures_market
 
-    if is_ndx_symbol(symbol):
-        active_futures_market = {
-            "root": ALGORITHM_LOCKED_SYMBOL,
-            "searched_symbol": ALGORITHM_LOCKED_SYMBOL,
-            "tradovate_symbol": None,
-            "databento_symbol": ALGORITHM_POLYGON_SYMBOL,
-            "routable": False,
-            "updated_at": datetime.now(DEMO_TIMEZONE).isoformat()
-        }
-        return active_futures_market
-
     root = get_futures_root(symbol)
     if not root:
         return None
@@ -1227,7 +1217,7 @@ def get_active_futures_market():
 
 
 def active_market_matches_signal(signal):
-    return is_ndx_symbol(signal.get("symbol"))
+    return is_mnq_symbol(signal.get("symbol"))
 
 
 def get_tradovate_chart_config(tf):
@@ -1476,7 +1466,7 @@ def build_tradingview_execution_signal(payload):
     return {
         "action": action,
         "symbol": symbol,
-        "tradovate_symbol": None if is_ndx_symbol(symbol) else normalize_tradovate_symbol(symbol),
+        "tradovate_symbol": normalize_tradovate_symbol(get_mnq_execution_symbol() or symbol),
         "price": round(price, 4) if price else None,
         "edge": round(edge, 2),
         "qty": qty,
@@ -1661,50 +1651,25 @@ def round_to_tick(price, tick_size=None):
     return round(round(float(price) / tick) * tick, 4)
 
 
-def get_tradovate_reference_price(symbol):
-    try:
-        candles = fetch_tradovate_candles(symbol, "1m")
-    except Exception as exc:
-        print("Tradovate reference price fetch error:", exc)
-        return None
-    if not candles:
-        return None
-    return float(candles[-1]["close"])
-
-
-def translate_ndx_signal_to_tradovate(signal):
-    execution_symbol = get_ndx_execution_symbol()
-    if not execution_symbol:
-        raise RuntimeError(f"Set {TRADOVATE_NDX_EXECUTION_SYMBOL_ENV}=MNQM6 or NQM6 before routing NDX alerts.")
-
+def translate_mnq_signal_to_tradovate(signal):
+    execution_symbol = get_mnq_execution_symbol() or signal.get("tradovate_symbol") or signal.get("symbol")
     tradovate_symbol = normalize_tradovate_symbol(execution_symbol)
-    reference_price = get_tradovate_reference_price(tradovate_symbol)
-    if not reference_price:
-        raise RuntimeError(f"Could not fetch a Tradovate reference price for {tradovate_symbol}.")
+    if not tradovate_symbol:
+        raise RuntimeError(f"Set {TRADOVATE_MNQ_EXECUTION_SYMBOL_ENV}=MNQM6 or map MNQ in {TRADOVATE_SYMBOL_MAP_ENV}.")
 
     translated = dict(signal)
     translated["source_symbol"] = signal.get("symbol") or ALGORITHM_LOCKED_SYMBOL
     translated["tradovate_symbol"] = tradovate_symbol
-    translated["execution_reference_price"] = round_to_tick(reference_price)
 
     action = signal.get("action")
-    alert_price = signal.get("price")
     if action in {"BUY", "SELL"}:
-        if not alert_price or not signal.get("target") or not signal.get("stop"):
-            raise RuntimeError("NDX entry alerts need price, target, and stop before routing to Tradovate.")
-
-        target_distance = abs(float(signal["target"]) - float(alert_price))
-        stop_distance = abs(float(alert_price) - float(signal["stop"]))
-        if target_distance <= 0 or stop_distance <= 0:
-            raise RuntimeError("NDX alert target/stop distances must be greater than zero.")
-
-        if action == "BUY":
-            translated["target"] = round_to_tick(reference_price + target_distance)
-            translated["stop"] = round_to_tick(reference_price - stop_distance)
-        else:
-            translated["target"] = round_to_tick(reference_price - target_distance)
-            translated["stop"] = round_to_tick(reference_price + stop_distance)
-        translated["price"] = round_to_tick(reference_price)
+        if not signal.get("price") or not signal.get("target") or not signal.get("stop"):
+            raise RuntimeError("MNQ entry alerts need price, target, and stop before routing to Tradovate.")
+        translated["price"] = round_to_tick(signal["price"])
+        translated["target"] = round_to_tick(signal["target"])
+        translated["stop"] = round_to_tick(signal["stop"])
+    elif translated.get("price"):
+        translated["price"] = round_to_tick(translated["price"])
 
     return translated
 
@@ -1781,10 +1746,10 @@ def place_tradovate_bracket_order(signal, account):
 def route_tradingview_signal_to_tradovate(payload):
     signal = build_tradingview_execution_signal(payload)
     result = {
-        "enabled": ndx_tradovate_bridge_enabled() and tradovate_auto_trade_enabled(),
-        "ready": ndx_tradovate_bridge_ready(),
+        "enabled": mnq_tradovate_bridge_enabled() and tradovate_auto_trade_enabled(),
+        "ready": mnq_tradovate_bridge_ready(),
         "routed": False,
-        "destination": "tradeify_tradovate" if ndx_tradovate_bridge_enabled() else "tradingview_paper_signal",
+        "destination": "tradeify_tradovate" if mnq_tradovate_bridge_enabled() else "tradingview_paper_signal",
         "signal": signal,
         "source_signal": signal,
         "verification": None,
@@ -1797,26 +1762,26 @@ def route_tradingview_signal_to_tradovate(payload):
     if not signal["symbol"]:
         result["reason"] = "TradingView alert was stored but no ticker/contract was supplied."
         return result
-    if not is_ndx_symbol(signal["symbol"]):
-        result["reason"] = "Rejected: this bot is locked to NDX only."
+    if not is_mnq_symbol(signal["symbol"]):
+        result["reason"] = "Rejected: this bot is locked to MNQ only."
         return result
     active_market = get_active_futures_market()
     result["active_future"] = active_market
     if not active_market:
-        result["reason"] = "Rejected: the bot is waiting for the default NDX market lock."
+        result["reason"] = "Rejected: the bot is waiting for the default MNQ market lock."
         return result
     if not active_market_matches_signal(signal):
         result["reason"] = f"Rejected: {active_market.get('root')} is armed, but this alert was for {signal['symbol']}."
         return result
     if duplicate_tradingview_signal(signal):
-        result["reason"] = "Duplicate TradingView NDX signal ignored."
+        result["reason"] = "Duplicate TradingView MNQ signal ignored."
         return result
 
     result["verification"] = {
-        "enabled": ndx_tradovate_bridge_enabled(),
+        "enabled": mnq_tradovate_bridge_enabled(),
         "passed": True,
-        "source": "tradingview_ndx",
-        "reason": "NDX alert accepted. If the Tradovate bridge is enabled, the app maps this to the configured NQ/MNQ contract.",
+        "source": "tradingview_mnq",
+        "reason": "MNQ alert accepted. If the Tradovate bridge is enabled, the app routes this to the configured MNQ contract.",
         "candles": 0,
         "symbol": ALGORITHM_LOCKED_SYMBOL,
         "model_action": signal["action"],
@@ -1824,11 +1789,8 @@ def route_tradingview_signal_to_tradovate(payload):
         "price_deviation_pct": None
     }
 
-    if not ndx_tradovate_bridge_enabled():
-        result["reason"] = f"NDX signal logged only. Set {TRADOVATE_NDX_BRIDGE_ENABLED_ENV}=true to route to Tradeify/Tradovate."
-        return result
-    if not get_ndx_execution_symbol():
-        result["reason"] = f"NDX bridge is on, but {TRADOVATE_NDX_EXECUTION_SYMBOL_ENV} is not set. Use a tradable contract like MNQM6 or NQM6."
+    if not mnq_tradovate_bridge_enabled():
+        result["reason"] = f"MNQ signal logged only. Set {TRADOVATE_MNQ_BRIDGE_ENABLED_ENV}=true to route to Tradeify/Tradovate."
         return result
     if not tradovate_configured():
         result["reason"] = "Tradeify/Tradovate credentials are not configured."
@@ -1855,7 +1817,7 @@ def route_tradingview_signal_to_tradovate(payload):
             return result
 
     try:
-        execution_signal = translate_ndx_signal_to_tradovate(signal)
+        execution_signal = translate_mnq_signal_to_tradovate(signal)
         result["signal"] = execution_signal
         account = resolve_tradovate_account()
         order_result = (
@@ -1872,7 +1834,7 @@ def route_tradingview_signal_to_tradovate(payload):
             "order": order_result.get("response"),
             "failure": order_result.get("failure"),
             "reason": order_result.get("failure_text") or (
-                f"NDX alert routed to Tradeify/Tradovate as {execution_signal.get('tradovate_symbol')}."
+                f"MNQ alert routed to Tradeify/Tradovate as {execution_signal.get('tradovate_symbol')}."
                 if order_result.get("ok") else "Tradeify/Tradovate rejected the order."
             )
         })
@@ -2021,12 +1983,8 @@ def fetch_polygon_index_snapshot_quote(symbol):
 
 def fetch_polygon_price(symbol):
     api_key = get_polygon_api_key()
-    if not api_key:
+    if not api_key or is_mnq_symbol(symbol):
         return None
-
-    if is_ndx_symbol(symbol):
-        snapshot = fetch_polygon_index_snapshot_quote(symbol)
-        return snapshot["price"] if snapshot else None
 
     response = requests.get(
         f"{POLYGON_BASE_URL}/v2/last/trade/{polygon_market_symbol(symbol)}",
@@ -2044,7 +2002,7 @@ def fetch_polygon_price(symbol):
 
 def fetch_polygon_previous_close_quote(symbol):
     api_key = get_polygon_api_key()
-    if not api_key:
+    if not api_key or is_mnq_symbol(symbol):
         return None
 
     polygon_symbol = polygon_market_symbol(symbol)
@@ -2117,44 +2075,6 @@ def get_previous_close_quote(symbol):
 
 
 def get_index_snapshot_quote(symbol):
-    if not is_ndx_symbol(symbol):
-        return None
-
-    cache_key = f"index_snapshot:{display_market_symbol(symbol)}"
-    cached = get_cache_entry(quote_cache, cache_key, LIVE_PRICE_CACHE_TTL)
-    if cached and not cached["stale"]:
-        return {
-            "data": cached["data"],
-            "source": "polygon_index_snapshot",
-            "cached": True,
-            "stale": False,
-            "age_seconds": cached["age_seconds"]
-        }
-
-    try:
-        quote_data = fetch_polygon_index_snapshot_quote(symbol)
-        if quote_data:
-            set_cache_entry(quote_cache, cache_key, quote_data)
-            set_cache_entry(quote_cache, display_market_symbol(symbol), quote_data)
-            return {
-                "data": quote_data,
-                "source": "polygon_index_snapshot",
-                "cached": False,
-                "stale": False,
-                "age_seconds": 0
-            }
-    except requests.RequestException:
-        pass
-
-    if cached:
-        return {
-            "data": cached["data"],
-            "source": "polygon_index_snapshot",
-            "cached": True,
-            "stale": True,
-            "age_seconds": cached["age_seconds"]
-        }
-
     return None
 
 
@@ -2246,7 +2166,7 @@ def fetch_and_cache_candles(symbol, tf):
         }
 
     try:
-        candle_rows = fetch_tradovate_candles(symbol, tf) if tradovate_configured() and not is_ndx_symbol(symbol) else None
+        candle_rows = fetch_tradovate_candles(symbol, tf) if tradovate_configured() else None
         source = "tradovate" if candle_rows else None
         if not candle_rows:
             candle_rows = fetch_polygon_candles(symbol, tf) if get_polygon_api_key() else None
@@ -2361,11 +2281,6 @@ def get_demo_market(symbol, tf):
 
 
 def get_data(symbol):
-    if is_ndx_symbol(symbol):
-        index_quote = get_index_snapshot_quote(symbol)
-        if index_quote and not index_quote["stale"]:
-            return index_quote
-
     cached = get_cache_entry(quote_cache, symbol, QUOTE_CACHE_TTL)
     if cached and not cached["stale"]:
         return {
@@ -2934,8 +2849,8 @@ def build_ai_trade_setup(symbol, strategy, risk_profile, trade_signal, plan, why
 def build_smart_alert_ideas(symbol, trade_signal, momentum_score, levels, market_mode):
     buy_level = round(float(levels.get("resistance") or 0), 2)
     sell_level = round(float(levels.get("support") or 0), 2)
-    price_suffix = " pts" if is_ndx_symbol(symbol) else ""
-    price_prefix = "" if is_ndx_symbol(symbol) else "$"
+    price_suffix = " pts" if is_mnq_symbol(symbol) else ""
+    price_prefix = "" if is_mnq_symbol(symbol) else "$"
     action = trade_signal.get("action")
     grade = trade_signal.get("grade", "C")
     market_label = market_mode.get("label", "current")
@@ -3040,7 +2955,7 @@ def build_algorithm_dashboard(tickers):
         edge = float(trade.get("edge") or 0)
         rows.append({
             "id": trade.get("id"),
-            "algo": "NDX TradingView Bot",
+            "algo": "MNQ TradingView Bot",
             "ticker": trade.get("symbol") or ALGORITHM_LOCKED_SYMBOL,
             "tradovate_symbol": trade.get("tradovate_symbol"),
             "action": action,
@@ -3067,21 +2982,21 @@ def build_algorithm_dashboard(tickers):
         "mode": "routed-tradovate-orders-only",
         "real_orders_only": True,
         "live_trading": {
-            "enabled": ndx_tradovate_bridge_ready(),
+            "enabled": mnq_tradovate_bridge_ready(),
             "broker_connected": tradovate_configured(),
             "tradovate_configured": tradovate_configured(),
             "tradovate_auto_trade_enabled": tradovate_auto_trade_enabled(),
             "tradovate_environment": get_tradovate_env(),
-            "ndx_bridge_enabled": ndx_tradovate_bridge_enabled(),
-            "ndx_execution_symbol": get_ndx_execution_symbol(),
+            "mnq_bridge_enabled": mnq_tradovate_bridge_enabled(),
+            "mnq_execution_symbol": get_mnq_execution_symbol(),
             "tradingview_webhook_configured": bool(tradingview_webhook_secret()),
             "databento_verification_enabled": databento_alert_verification_enabled(),
-            "futures_only": False,
-            "label": "NDX -> Tradovate bridge ready" if ndx_tradovate_bridge_ready() else "NDX paper signals armed",
+            "futures_only": True,
+            "label": "MNQ -> Tradovate bridge ready" if mnq_tradovate_bridge_ready() else "MNQ paper signals armed",
             "summary": (
-                f"TradingView NDX alerts are mapped to {get_ndx_execution_symbol()} and routed through Tradeify/Tradovate."
-                if ndx_tradovate_bridge_ready()
-                else "TradingView can fire NDX strategy alerts into this app. Turn on the NDX Tradovate bridge only after demo testing."
+                f"TradingView MNQ alerts route to {get_mnq_execution_symbol() or 'the active MNQ contract'} through Tradeify/Tradovate."
+                if mnq_tradovate_bridge_ready()
+                else "TradingView can fire MNQ strategy alerts into this app. Turn on the MNQ Tradovate bridge only after demo testing."
             )
         },
         "totals": {
@@ -3527,7 +3442,7 @@ def analyze_strategy(symbol, strategy, risk_profile="balanced"):
     symbol = display_market_symbol(symbol)
     market_status = get_current_market_status()
     quote_tf = "1d" if market_status == "Closed" else "5m"
-    index_snapshot_quote = get_index_snapshot_quote(symbol) if is_ndx_symbol(symbol) else None
+    index_snapshot_quote = None
     previous_close_quote = get_previous_close_quote(symbol) if market_status == "Closed" and not index_snapshot_quote else None
     candle_result = fetch_and_cache_candles(symbol, quote_tf)
     using_demo = not (candle_result and candle_result["candles"]) and not index_snapshot_quote and not previous_close_quote
@@ -3902,17 +3817,17 @@ def algorithm_dashboard_route():
 @app.route("/live-data-status")
 def live_data_status_route():
     return jsonify({
-        "live_data": "polygon_ndx_snapshot",
-        "futures_only": False,
-        "execution_destination": "tradeify_tradovate" if ndx_tradovate_bridge_enabled() else "tradingview_paper_signal",
+        "live_data": "tradingview_mnq_alerts",
+        "futures_only": True,
+        "execution_destination": "tradeify_tradovate" if mnq_tradovate_bridge_enabled() else "tradingview_paper_signal",
         "active_future": get_active_futures_market(),
         "tradovate_configured": tradovate_configured(),
         "tradovate_environment": get_tradovate_env(),
         "tradovate_auto_trade_enabled": tradovate_auto_trade_enabled(),
         "tradovate_execution_ready": tradovate_execution_ready(),
-        "ndx_bridge_enabled": ndx_tradovate_bridge_enabled(),
-        "ndx_bridge_ready": ndx_tradovate_bridge_ready(),
-        "ndx_execution_symbol": get_ndx_execution_symbol(),
+        "mnq_bridge_enabled": mnq_tradovate_bridge_enabled(),
+        "mnq_bridge_ready": mnq_tradovate_bridge_ready(),
+        "mnq_execution_symbol": get_mnq_execution_symbol(),
         "live_trading_acknowledged": live_trading_acknowledged(),
         "tradingview_webhook_configured": bool(tradingview_webhook_secret()),
         "databento_verification_enabled": databento_alert_verification_enabled(),
@@ -3925,7 +3840,7 @@ def live_data_status_route():
 def active_future_route():
     return jsonify({
         "active_future": get_active_futures_market(),
-        "futures_only": False
+        "futures_only": True
     })
 
 

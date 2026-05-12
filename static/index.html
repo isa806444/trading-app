@@ -2304,21 +2304,21 @@ body {
     <div class="algo-hero-grid">
       <div>
         <div class="hero-eyebrow">AI Algorithm Terminal</div>
-        <h1 class="algo-title">NDX bot. Paper-first signals.</h1>
-        <div class="algo-copy">TradingView runs the NDX strategy, this app receives the alerts, and the guarded bridge can map them to MNQ/NQ through Tradeify/Tradovate.</div>
+        <h1 class="algo-title">MNQ bot. Paper-first signals.</h1>
+        <div class="algo-copy">TradingView runs the MNQ futures strategy, this app receives the alerts, and the guarded bridge can route them through Tradeify/Tradovate.</div>
         <div class="hero-chip-row">
           <div class="hero-chip live" id="providerChip">TradingView -> App Paper Signals</div>
           <div class="hero-chip" id="alertsChip">Alerts idle</div>
         </div>
         <div class="algo-actions">
           <button class="algo-primary" onclick="loadAlgorithmDashboard(true)">Check Orders</button>
-          <button class="algo-secondary" onclick="manualRefresh()">Refresh NDX</button>
+          <button class="algo-secondary" onclick="manualRefresh()">Refresh MNQ</button>
         </div>
       </div>
       <div id="algoLivePanel" class="algo-live-card">
         <div class="algo-live-orb"></div>
         <div class="algo-live-label">Execution Status</div>
-        <div class="algo-live-title">NDX paper signals armed</div>
+        <div class="algo-live-title">MNQ paper signals armed</div>
         <div class="algo-live-copy">TradingView can fire strategy alerts into this app. The app can route them to Tradovate only when the demo bridge env vars are enabled.</div>
       </div>
     </div>
@@ -2329,23 +2329,23 @@ body {
       <div class="section-head">
         <div>
           <div class="section-kicker">Armed Market</div>
-          <div class="section-title">NDX only</div>
+          <div class="section-title">MNQ only</div>
         </div>
         <div class="helper-pill">Auto-routed from TradingView</div>
       </div>
       <div class="locked-market-card">
-        <div class="locked-market-symbol">NDX</div>
+        <div class="locked-market-symbol">MNQ</div>
         <div>
-          <div class="locked-market-title">Nasdaq 100 index bot</div>
-          <div class="locked-market-copy">TradingView alerts must come from an NDX chart. Other markets are ignored before the app logs the paper signal.</div>
+          <div class="locked-market-title">Micro E-mini Nasdaq 100 bot</div>
+          <div class="locked-market-copy">TradingView alerts must come from an MNQ chart. Other markets are ignored before the app logs the paper signal.</div>
         </div>
-        <div id="armedFuture" class="armed-future active">Armed: NDX</div>
+        <div id="armedFuture" class="armed-future active">Armed: MNQ</div>
       </div>
     </div>
     <div class="algo-live-card">
       <div class="algo-live-label">Last Updated</div>
       <div class="algo-live-title" id="lastUpdated">Waiting for data...</div>
-      <div class="algo-live-copy">TradingView handles the strategy and alerts. The app shows the NDX quote and logs paper signals live.</div>
+      <div class="algo-live-copy">TradingView handles the strategy and alerts. The app shows the MNQ quote and logs paper signals live.</div>
       <div class="algo-actions">
         <button id="refreshBtn" class="algo-secondary" onclick="manualRefresh()">Refresh Now</button>
       </div>
@@ -2503,7 +2503,7 @@ body {
 <script>
 let strategy = "momentum";
 let timeframe = "5m";
-const LOCKED_SYMBOL = "NDX";
+const LOCKED_SYMBOL = "MNQ";
 let lastTicker = LOCKED_SYMBOL;
 let watchlist = [];
 let watchlistData = [];
@@ -2559,7 +2559,7 @@ let scannerCache = {};
 let scannerCacheTime = 0;
 const DEFAULT_SCANNER_UNIVERSE = [LOCKED_SYMBOL];
 const FUTURES_SUGGESTIONS = [
-  { symbol: "NDX", name: "Nasdaq 100 Index", exchange: "NASDAQ" }
+  { symbol: "MNQ", name: "Micro E-mini Nasdaq 100 Futures", exchange: "CME" }
 ];
 const CANDLE_REFRESH_INTERVAL_MS = 15000;
 const SEARCH_DEBOUNCE_MS = 400;
@@ -2622,7 +2622,7 @@ function setOnboardingVisible(visible){
   return;
 }
 
-function renderMarketEmptyState(title="NDX paper bot is armed.", copy="TradingView NDX alerts can be logged by the app while the strategy runs in TradingView."){
+function renderMarketEmptyState(title="MNQ paper bot is armed.", copy="TradingView MNQ alerts can be logged by the app while the strategy runs in TradingView."){
     const result = document.getElementById("result");
     const insights = document.getElementById("marketInsights");
     result.innerHTML = `
@@ -2630,7 +2630,7 @@ function renderMarketEmptyState(title="NDX paper bot is armed.", copy="TradingVi
         <div class="empty-title">${title}</div>
       <div class="empty-copy">${copy}</div>
       <div class="empty-grid">
-        <div class="empty-tip">Only <strong>NDX</strong> TradingView alerts are accepted.</div>
+        <div class="empty-tip">Only <strong>MNQ</strong> TradingView alerts are accepted.</div>
         <div class="empty-tip">Use TradingView Strategy Tester or alerts to watch the paper logic fire live.</div>
         <div class="empty-tip">Direct TradingView Paper Trading auto-fills are not available from Pine alone.</div>
         </div>
@@ -3749,7 +3749,8 @@ function formatPercent(value){
 }
 
 function isIndexTicker(ticker){
-  return String(ticker || lastTicker || "").toUpperCase() === "NDX";
+  const symbol = String(ticker || lastTicker || "").toUpperCase();
+  return symbol === "MNQ" || symbol.startsWith("MNQ");
 }
 
 function formatMarketPrice(value, ticker=lastTicker){
@@ -3789,12 +3790,12 @@ function renderAlgoLivePanel(payload){
     <div class="algo-live-orb"></div>
     <div class="algo-live-label">Execution Status</div>
     <div class="algo-live-title">${live.label || "Live execution locked"}</div>
-    <div class="algo-live-copy">${live.summary || "TradingView can generate NDX strategy alerts now. The app logs those paper signals live."}</div>
+    <div class="algo-live-copy">${live.summary || "TradingView can generate MNQ strategy alerts now. The app logs those paper signals live."}</div>
     <div class="confirmation-list" style="margin-top:14px;">
       <div class="confirmation-pill">${live.tradovate_configured ? "Broker bridge configured" : "TradingView paper panel not directly automatable"}</div>
       <div class="confirmation-pill">${live.tradingview_webhook_configured ? "TradingView webhook ready" : "Webhook not configured"}</div>
-      <div class="confirmation-pill">${live.ndx_bridge_enabled ? "NDX bridge on" : "NDX bridge off"}</div>
-      <div class="confirmation-pill">${live.ndx_execution_symbol ? `Executes ${live.ndx_execution_symbol}` : "Execution contract not set"}</div>
+      <div class="confirmation-pill">${live.mnq_bridge_enabled ? "MNQ bridge on" : "MNQ bridge off"}</div>
+      <div class="confirmation-pill">${live.mnq_execution_symbol ? `Executes ${live.mnq_execution_symbol}` : "Execution contract not set"}</div>
       <div class="confirmation-pill">${live.enabled ? "Tradovate routing enabled" : "Paper signal log only"}</div>
     </div>
   `;
@@ -3877,13 +3878,13 @@ function renderAlgorithmDashboard(payload){
             <tr>
               <td>
                 <div class="algo-name">${row.algo}</div>
-                <div class="algo-sub">${row.ticker || "NDX"} -> ${row.tradovate_symbol || "Tradovate"} | ${row.received_at ? formatLongDate(row.received_at) : "Just now"}</div>
+                <div class="algo-sub">${row.ticker || "MNQ"} -> ${row.tradovate_symbol || "Tradovate"} | ${row.received_at ? formatLongDate(row.received_at) : "Just now"}</div>
               </td>
               <td><span class="algo-pill ${getAlgoPillClass(row.action)}">${row.action || "SIGNAL"}</span></td>
               <td>${row.qty || 1}</td>
-              <td>${formatMarketPrice(row.price, "NDX")}</td>
-              <td>${row.target ? formatMarketPrice(row.target, "NDX") : "--"}</td>
-              <td>${row.stop ? formatMarketPrice(row.stop, "NDX") : "--"}</td>
+              <td>${formatMarketPrice(row.price, "MNQ")}</td>
+              <td>${row.target ? formatMarketPrice(row.target, "MNQ") : "--"}</td>
+              <td>${row.stop ? formatMarketPrice(row.stop, "MNQ") : "--"}</td>
               <td>
                 <div>${row.status || "Placed"}</div>
                 <div class="algo-sub">${row.reason || row.mode || "Order routed."}</div>
@@ -5527,7 +5528,7 @@ async function analyze(sym){
 
     if(!d || d.error){
       setOnboardingVisible(true);
-      renderMarketEmptyState("NDX data is temporarily unavailable.", "The bot is still armed to NDX, but the app could not build the NDX card yet. Try Refresh Now in a moment.");
+      renderMarketEmptyState("MNQ data is temporarily unavailable.", "The bot is still armed to MNQ, but the app could not build the MNQ card yet. Try Refresh Now in a moment.");
       showChartMessage("No chart data is available yet. Try Refresh Now after a moment.");
       setLastUpdated("No recent market data available");
       setStatus("Live provider data is temporarily unavailable.", "warning");
@@ -5552,7 +5553,7 @@ async function analyze(sym){
       statusMessage = `Showing recent cached quote data from ${Math.round(d.cache_age_seconds)}s ago.`;
       setLastUpdated(`Cached quote ${formatAge(d.cache_age_seconds)}`);
     }else{
-      const sourceLabel = d.data_source === "polygon_index_snapshot" ? "Polygon NDX snapshot" : d.data_source === "tradovate" ? "Tradovate live data" : d.data_source === "polygon" ? "Polygon market data" : "Live market data";
+      const sourceLabel = d.data_source === "tradovate" ? "Tradovate live data" : d.data_source === "polygon" ? "Polygon market data" : "Live market data";
       updateProviderChip(sourceLabel);
       setLastUpdated(`${sourceLabel} updated at ${liveEtTimeFormatter.format(new Date())} ET`);
     }
@@ -5632,7 +5633,7 @@ async function analyze(sym){
   }catch(err){
     console.log(err);
     setOnboardingVisible(true);
-    renderMarketEmptyState("Something went wrong while loading NDX.", "The bot remains armed to NDX. Try again in a moment.");
+    renderMarketEmptyState("Something went wrong while loading MNQ.", "The bot remains armed to MNQ. Try again in a moment.");
     setLastUpdated("Update failed");
     setStatus("Something went wrong while loading market data.", "warning");
   }finally{
@@ -5698,7 +5699,7 @@ function renderBotTrades(){
 
   if(!botTrades.length){
     summary.innerText = "No algorithm trades yet.";
-    list.innerHTML = '<div class="paper-empty">TradingView NDX bot alerts will show here as app paper signals.</div>';
+    list.innerHTML = '<div class="paper-empty">TradingView MNQ bot alerts will show here as app paper signals.</div>';
     return;
   }
 
@@ -5764,7 +5765,7 @@ function renderAlerts(){
     summary.innerText = activeAlerts.length
       ? `${activeAlerts.length} active alert${activeAlerts.length === 1 ? "" : "s"} | No triggered messages yet.`
       : "No alert messages yet.";
-    list.innerHTML = '<div class="paper-empty">Create an NDX alert from the market card and the triggered message will appear here when price hits your level.</div>';
+    list.innerHTML = '<div class="paper-empty">Create an MNQ alert from the market card and the triggered message will appear here when price hits your level.</div>';
     return;
   }
 

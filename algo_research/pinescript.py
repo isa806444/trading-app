@@ -1,18 +1,18 @@
-"""TradingView Pine Script exporter for the Nasdaq paper strategy."""
+"""TradingView Pine Script exporter for the MNQ futures paper strategy."""
 
 
 def build_pine_script() -> str:
     return """//@version=5
 //@strategy_alert_message {{strategy.order.alert_message}}
-strategy("AI NDX Smart Paper Bot v4", overlay=true, initial_capital=100000, default_qty_type=strategy.fixed, default_qty_value=1, pyramiding=0, process_orders_on_close=true, calc_on_every_tick=false)
+strategy("AI MNQ Smart Paper Bot v4", overlay=true, initial_capital=100000, default_qty_type=strategy.fixed, default_qty_value=1, pyramiding=0, process_orders_on_close=true, calc_on_every_tick=false)
 
 contractQty = input.int(1, "Contracts / Paper Size", minval=1, maxval=10)
 maxTradesPerDay = input.int(5, "Max Trades Per Day", minval=1, maxval=5)
 requireOneHour = input.bool(true, "Only Fire On 1H Chart")
-restrictNdx = input.bool(true, "Only NDX")
+restrictMnq = input.bool(true, "Only MNQ")
 useSessionFilter = input.bool(true, "Use Regular Session Filter")
 tradeSession = input.session("0930-1600", "Trading Session")
-webhookTag = input.string("ndx-smart-paper-v4", "Webhook Tag")
+webhookTag = input.string("mnq-smart-paper-v4", "Webhook Tag")
 
 emaFastLen = input.int(21, "Fast EMA", minval=5)
 emaTrendLen = input.int(55, "Trade Trend EMA", minval=10)
@@ -38,8 +38,8 @@ cooldownBars = input.int(2, "Cooldown Bars After Entry", minval=0, maxval=20)
 useSmartRiskExit = input.bool(true, "Smart Exit If Setup Breaks")
 
 tickerUpper = str.upper(syminfo.ticker)
-isNdxSymbol = str.contains(tickerUpper, "NDX")
-symbolOk = not restrictNdx or isNdxSymbol
+isMnqSymbol = str.contains(tickerUpper, "MNQ")
+symbolOk = not restrictMnq or isMnqSymbol
 timeframeOk = not requireOneHour or timeframe.period == "60"
 sessionOk = not useSessionFilter or not na(time(timeframe.period, tradeSession))
 

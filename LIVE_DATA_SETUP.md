@@ -83,10 +83,11 @@ The Pine strategy has guardrails built in:
 
 - Maximum of 5 entries per day
 - Hard stop-loss on every trade
-- ATR-based stop sizing
-- First target plus runner target
-- Break-even/trailing protection after the first target is reached
-- Symbol guard for Nasdaq 100-style charts
+- Full-position take-profit on every trade
+- ATR and structure-based stop sizing
+- Breakeven/trailing stop protection after the trade proves itself
+- Smart early-exit alerts when trend, VWAP, DI, RSI, or volatility conditions break
+- Symbol guard for NDX charts
 
 Create an alert using `Any alert() function call` and this webhook URL:
 

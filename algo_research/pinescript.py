@@ -4,15 +4,19 @@
 def build_pine_script() -> str:
     return """//@version=5
 //@strategy_alert_message {{strategy.order.alert_message}}
-strategy("AI MNQ Smart Paper Bot v4", overlay=true, initial_capital=100000, default_qty_type=strategy.fixed, default_qty_value=1, pyramiding=0, process_orders_on_close=true, calc_on_every_tick=false)
+strategy("AI MNQ Smart Paper Bot v5", overlay=true, initial_capital=100000, default_qty_type=strategy.fixed, default_qty_value=1, pyramiding=0, process_orders_on_close=true, calc_on_every_tick=false)
 
 contractQty = input.int(1, "Contracts / Paper Size", minval=1, maxval=10)
 maxTradesPerDay = input.int(5, "Max Trades Per Day", minval=1, maxval=5)
+minTradesPerDay = input.int(1, "Minimum Quality Trades Per Day", minval=0, maxval=5)
 requireOneHour = input.bool(true, "Only Fire On 1H Chart")
 restrictMnq = input.bool(true, "Only MNQ")
+useBacktestWindow = input.bool(true, "Limit Backtest To Recent Window")
+backtestDays = input.int(92, "Backtest Window Days", minval=10, maxval=370)
 useSessionFilter = input.bool(true, "Use Regular Session Filter")
+usePrimeHours = input.bool(true, "Trade Prime NY Hours Only")
 tradeSession = input.session("0930-1600", "Trading Session")
-webhookTag = input.string("mnq-smart-paper-v4", "Webhook Tag")
+webhookTag = input.string("mnq-smart-paper-v5", "Webhook Tag")
 
 emaFastLen = input.int(21, "Fast EMA", minval=5)
 emaTrendLen = input.int(55, "Trade Trend EMA", minval=10)
@@ -28,13 +32,17 @@ takeProfitR = input.float(2.40, "Take Profit R", minval=0.75, step=0.05)
 breakEvenAtR = input.float(1.05, "Move Stop To Breakeven At R", minval=0.25, step=0.05)
 trailAtR = input.float(1.65, "Start Smart Trail At R", minval=0.5, step=0.05)
 trailAtrMult = input.float(1.15, "Trail ATR Multiplier", minval=0.25, step=0.05)
-minAdx = input.float(19.0, "Minimum ADX", minval=1.0, step=0.5)
-minSetupScore = input.float(82.0, "Minimum Setup Score", minval=50.0, maxval=100.0, step=1.0)
-minEdge = input.float(28.0, "Minimum Directional Edge", minval=1.0, step=1.0)
-maxVwapAtrDistance = input.float(1.55, "Max Chase Distance From VWAP", minval=0.25, step=0.05)
+minAdx = input.float(22.0, "Minimum ADX", minval=1.0, step=0.5)
+minSetupScore = input.float(88.0, "A+ Minimum Setup Score", minval=50.0, maxval=100.0, step=1.0)
+minEdge = input.float(34.0, "A+ Minimum Directional Edge", minval=1.0, step=1.0)
+dailyFallbackScore = input.float(80.0, "Daily Quality Minimum Score", minval=50.0, maxval=100.0, step=1.0)
+dailyFallbackEdge = input.float(22.0, "Daily Quality Minimum Edge", minval=1.0, step=1.0)
+dailyFallbackStartHour = input.int(14, "Daily Quality Search Starts NY Hour", minval=10, maxval=15)
+maxVwapAtrDistance = input.float(1.20, "Max Chase Distance From VWAP", minval=0.25, step=0.05)
 minRiskAtr = input.float(0.35, "Minimum Stop Distance ATR", minval=0.05, step=0.05)
 maxRiskAtr = input.float(2.25, "Maximum Stop Distance ATR", minval=0.5, step=0.05)
-cooldownBars = input.int(2, "Cooldown Bars After Entry", minval=0, maxval=20)
+cooldownBars = input.int(3, "Cooldown Bars After Entry", minval=0, maxval=20)
+minHoldBarsBeforeRiskExit = input.int(1, "Minimum Bars Before Smart Exit", minval=0, maxval=10)
 useSmartRiskExit = input.bool(true, "Smart Exit If Setup Breaks")
 
 tickerUpper = str.upper(syminfo.ticker)
@@ -42,6 +50,13 @@ isMnqSymbol = str.contains(tickerUpper, "MNQ")
 symbolOk = not restrictMnq or isMnqSymbol
 timeframeOk = not requireOneHour or timeframe.period == "60"
 sessionOk = not useSessionFilter or not na(time(timeframe.period, tradeSession))
+nyHour = hour(time, "America/New_York")
+morningPowerWindow = nyHour >= 10 and nyHour <= 11
+afternoonPowerWindow = nyHour >= 14 and nyHour <= 15
+primeWindowOk = not usePrimeHours or morningPowerWindow or afternoonPowerWindow
+dailyQualityWindow = nyHour >= dailyFallbackStartHour and nyHour <= 15
+backtestStart = timenow - backtestDays * 86400000
+withinBacktestWindow = not useBacktestWindow or time >= backtestStart
 
 emaFast = ta.ema(close, emaFastLen)
 emaTrend = ta.ema(close, emaTrendLen)
@@ -73,24 +88,31 @@ distanceFromVwap = math.abs(close - vwapValue)
 distanceFromFast = math.abs(close - emaFast)
 atrPct = atrValue / close * 100
 trendSlope = (emaTrend - emaTrend[5]) / math.max(atrValue, syminfo.mintick)
-healthyVolatility = atrPct >= 0.08 and atrPct <= 3.0
-notChasing = distanceFromVwap <= atrValue * maxVwapAtrDistance and distanceFromFast <= atrValue * 1.25
+lookbackMove = math.abs(close - nz(close[structureLen], close))
+lookbackRange = math.max(ta.highest(high, structureLen) - ta.lowest(low, structureLen), syminfo.mintick)
+trendEfficiency = lookbackMove / lookbackRange
+emaSpread = math.abs(emaFast - emaTrend) / math.max(atrValue, syminfo.mintick)
+trendSeparation = math.abs(emaTrend - emaMacro) / math.max(atrValue, syminfo.mintick)
+cleanTrend = trendEfficiency >= 0.32 and emaSpread >= 0.10 and trendSeparation >= 0.18
+healthyVolatility = atrPct >= 0.08 and atrPct <= 2.35
+notChasing = distanceFromVwap <= atrValue * maxVwapAtrDistance and distanceFromFast <= atrValue * 1.05
 cooldownOk = na(lastEntryBar) or bar_index - lastEntryBar > cooldownBars
 
 bullMacro = close > emaMacro and emaTrend > emaMacro and emaFast > emaTrend
 bearMacro = close < emaMacro and emaTrend < emaMacro and emaFast < emaTrend
-bullTape = close > vwapValue and plusDi > minusDi and adxValue >= minAdx
-bearTape = close < vwapValue and minusDi > plusDi and adxValue >= minAdx
+diSpread = math.abs(plusDi - minusDi)
+bullTape = close > vwapValue and plusDi > minusDi and adxValue >= minAdx and diSpread >= 4
+bearTape = close < vwapValue and minusDi > plusDi and adxValue >= minAdx and diSpread >= 4
 bullPullbackReclaim = low <= emaFast and close > emaFast and close > open and longCloseQuality >= 0.58
 bearPullbackReject = high >= emaFast and close < emaFast and close < open and shortCloseQuality >= 0.58
 bullStructureBreak = close > priorHigh and close > high[1]
 bearStructureBreak = close < priorLow and close < low[1]
 bullMomentum = rsiValue >= 54 and rsiValue <= 78 and trendSlope >= 0.12
 bearMomentum = rsiValue <= 46 and rsiValue >= 22 and trendSlope <= -0.12
-volumeConfirmLong = relativeVolume >= 0.85 and close >= open
-volumeConfirmShort = relativeVolume >= 0.85 and close <= open
-candleConfirmLong = bodyQuality >= 0.35 and longCloseQuality >= 0.62
-candleConfirmShort = bodyQuality >= 0.35 and shortCloseQuality >= 0.62
+volumeConfirmLong = relativeVolume >= 1.05 and close >= open
+volumeConfirmShort = relativeVolume >= 1.05 and close <= open
+candleConfirmLong = bodyQuality >= 0.42 and longCloseQuality >= 0.66
+candleConfirmShort = bodyQuality >= 0.42 and shortCloseQuality >= 0.66
 
 float buyScore = 0.0
 float sellScore = 0.0
@@ -122,6 +144,12 @@ if volumeConfirmShort
 if notChasing
     buyScore += 7
     sellScore += 7
+if cleanTrend
+    buyScore += 8
+    sellScore += 8
+if primeWindowOk
+    buyScore += 5
+    sellScore += 5
 
 buyScore := math.min(math.max(buyScore, 0), 100)
 sellScore := math.min(math.max(sellScore, 0), 100)
@@ -143,15 +171,33 @@ validShortRisk = shortRisk >= minimumStopDistance and shortRisk <= atrValue * ma
 longTakeProfit = close + longRisk * takeProfitR
 shortTakeProfit = close - shortRisk * takeProfitR
 
-ready = barstate.isconfirmed and symbolOk and timeframeOk and sessionOk and healthyVolatility and not na(priorHigh) and not na(priorLow)
-canEnter = tradesToday < maxTradesPerDay and strategy.position_size == 0 and cooldownOk
-longSignal = ready and canEnter and validLongRisk and buyScore >= minSetupScore and edge >= minEdge
-shortSignal = ready and canEnter and validShortRisk and sellScore >= minSetupScore and edge <= -minEdge
+longConfirmations = (bullMacro ? 1 : 0) + (bullTape ? 1 : 0) + (bullMomentum ? 1 : 0) + ((bullStructureBreak or bullPullbackReclaim) ? 1 : 0) + (candleConfirmLong ? 1 : 0) + (volumeConfirmLong ? 1 : 0) + (cleanTrend ? 1 : 0) + (notChasing ? 1 : 0) + (primeWindowOk ? 1 : 0)
+shortConfirmations = (bearMacro ? 1 : 0) + (bearTape ? 1 : 0) + (bearMomentum ? 1 : 0) + ((bearStructureBreak or bearPullbackReject) ? 1 : 0) + (candleConfirmShort ? 1 : 0) + (volumeConfirmShort ? 1 : 0) + (cleanTrend ? 1 : 0) + (notChasing ? 1 : 0) + (primeWindowOk ? 1 : 0)
 
-longReason = "A-quality long: macro trend aligned, VWAP control, ADX/DI momentum, clean structure trigger, defined stop and take profit"
-shortReason = "A-quality short: macro trend aligned lower, VWAP rejection, ADX/DI momentum, clean structure trigger, defined stop and take profit"
-longMessage = '{"source":"tradingview","action":"BUY","ticker":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","price":' + str.tostring(close, format.mintick) + ',"target":' + str.tostring(longTakeProfit, format.mintick) + ',"stop":' + str.tostring(longStopPrice, format.mintick) + ',"qty":' + str.tostring(contractQty) + ',"edge":' + str.tostring(edge, "#.##") + ',"score":' + str.tostring(buyScore, "#.##") + ',"reason":"' + longReason + '","bar_time":"' + str.tostring(time) + '","tag":"' + webhookTag + '"}'
-shortMessage = '{"source":"tradingview","action":"SELL","ticker":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","price":' + str.tostring(close, format.mintick) + ',"target":' + str.tostring(shortTakeProfit, format.mintick) + ',"stop":' + str.tostring(shortStopPrice, format.mintick) + ',"qty":' + str.tostring(contractQty) + ',"edge":' + str.tostring(edge, "#.##") + ',"score":' + str.tostring(sellScore, "#.##") + ',"reason":"' + shortReason + '","bar_time":"' + str.tostring(time) + '","tag":"' + webhookTag + '"}'
+ready = barstate.isconfirmed and symbolOk and timeframeOk and sessionOk and withinBacktestWindow and healthyVolatility and cleanTrend and notChasing and not na(priorHigh) and not na(priorLow)
+canEnter = tradesToday < maxTradesPerDay and strategy.position_size == 0 and cooldownOk
+effectiveMinTrades = math.min(minTradesPerDay, maxTradesPerDay)
+needsDailyTrade = tradesToday < effectiveMinTrades
+dailyMode = needsDailyTrade and dailyQualityWindow
+
+longAPlusCandidate = ready and canEnter and primeWindowOk and validLongRisk and longConfirmations >= 8 and buyScore >= minSetupScore and edge >= minEdge
+shortAPlusCandidate = ready and canEnter and primeWindowOk and validShortRisk and shortConfirmations >= 8 and sellScore >= minSetupScore and edge <= -minEdge
+longDailyCandidate = ready and canEnter and dailyMode and validLongRisk and longConfirmations >= 6 and buyScore >= dailyFallbackScore and edge >= dailyFallbackEdge
+shortDailyCandidate = ready and canEnter and dailyMode and validShortRisk and shortConfirmations >= 6 and sellScore >= dailyFallbackScore and edge <= -dailyFallbackEdge
+
+longSignalAPlus = longAPlusCandidate and buyScore > sellScore
+shortSignalAPlus = shortAPlusCandidate and sellScore > buyScore and not longSignalAPlus
+longSignalDaily = not longSignalAPlus and not shortSignalAPlus and longDailyCandidate and buyScore > sellScore
+shortSignalDaily = not longSignalAPlus and not shortSignalAPlus and shortDailyCandidate and sellScore > buyScore and not longSignalDaily
+longSignal = longSignalAPlus or longSignalDaily
+shortSignal = shortSignalAPlus or shortSignalDaily
+
+longTier = longSignalAPlus ? "A_PLUS" : "DAILY_QUALITY"
+shortTier = shortSignalAPlus ? "A_PLUS" : "DAILY_QUALITY"
+longReason = longSignalAPlus ? "A-plus long: trend, VWAP, ADX/DI, volume, candle quality and structure all confirmed with defined stop and take profit" : "Daily quality long: no trade yet today, but trend, momentum, risk and structure still meet the safety rules"
+shortReason = shortSignalAPlus ? "A-plus short: trend, VWAP rejection, ADX/DI, volume, candle quality and structure all confirmed with defined stop and take profit" : "Daily quality short: no trade yet today, but trend, momentum, risk and structure still meet the safety rules"
+longMessage = '{"source":"tradingview","action":"BUY","ticker":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","price":' + str.tostring(close, format.mintick) + ',"target":' + str.tostring(longTakeProfit, format.mintick) + ',"stop":' + str.tostring(longStopPrice, format.mintick) + ',"qty":' + str.tostring(contractQty) + ',"edge":' + str.tostring(edge, "#.##") + ',"score":' + str.tostring(buyScore, "#.##") + ',"tier":"' + longTier + '","reason":"' + longReason + '","bar_time":"' + str.tostring(time) + '","tag":"' + webhookTag + '"}'
+shortMessage = '{"source":"tradingview","action":"SELL","ticker":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","price":' + str.tostring(close, format.mintick) + ',"target":' + str.tostring(shortTakeProfit, format.mintick) + ',"stop":' + str.tostring(shortStopPrice, format.mintick) + ',"qty":' + str.tostring(contractQty) + ',"edge":' + str.tostring(edge, "#.##") + ',"score":' + str.tostring(sellScore, "#.##") + ',"tier":"' + shortTier + '","reason":"' + shortReason + '","bar_time":"' + str.tostring(time) + '","tag":"' + webhookTag + '"}'
 
 var float activeLongStop = na
 var float activeLongTarget = na
@@ -218,12 +264,14 @@ longMomentumFlip = minusDi > plusDi and close < vwapValue and adxValue >= minAdx
 shortMomentumFlip = plusDi > minusDi and close > vwapValue and adxValue >= minAdx
 longVolatilityShock = high - low > atrValue * 2.2 and close < open and close < emaFast
 shortVolatilityShock = high - low > atrValue * 2.2 and close > open and close > emaFast
-canSmartExit = useSmartRiskExit and barstate.isconfirmed and not na(activeEntryBar) and bar_index > activeEntryBar and (na(lastRiskExitBar) or lastRiskExitBar != bar_index)
-riskExitLong = canSmartExit and strategy.position_size > 0 and (longSetupBroken or longMomentumFlip or longVolatilityShock)
-riskExitShort = canSmartExit and strategy.position_size < 0 and (shortSetupBroken or shortMomentumFlip or shortVolatilityShock)
+longScoreFlip = sellScore >= buyScore + dailyFallbackEdge and close < emaFast
+shortScoreFlip = buyScore >= sellScore + dailyFallbackEdge and close > emaFast
+canSmartExit = useSmartRiskExit and barstate.isconfirmed and not na(activeEntryBar) and bar_index - activeEntryBar >= minHoldBarsBeforeRiskExit and (na(lastRiskExitBar) or lastRiskExitBar != bar_index)
+riskExitLong = canSmartExit and strategy.position_size > 0 and (longSetupBroken or longMomentumFlip or longVolatilityShock or longScoreFlip)
+riskExitShort = canSmartExit and strategy.position_size < 0 and (shortSetupBroken or shortMomentumFlip or shortVolatilityShock or shortScoreFlip)
 
-exitLongReason = longSetupBroken ? "Trend and RSI failed before target" : longMomentumFlip ? "DI/VWAP momentum flipped against long" : "Volatility shock against long"
-exitShortReason = shortSetupBroken ? "Trend and RSI failed before target" : shortMomentumFlip ? "DI/VWAP momentum flipped against short" : "Volatility shock against short"
+exitLongReason = longScoreFlip ? "Score flipped against long before target" : longSetupBroken ? "Trend and RSI failed before target" : longMomentumFlip ? "DI/VWAP momentum flipped against long" : "Volatility shock against long"
+exitShortReason = shortScoreFlip ? "Score flipped against short before target" : shortSetupBroken ? "Trend and RSI failed before target" : shortMomentumFlip ? "DI/VWAP momentum flipped against short" : "Volatility shock against short"
 exitLongMessage = '{"source":"tradingview","action":"EXIT_LONG","ticker":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","price":' + str.tostring(close, format.mintick) + ',"qty":' + str.tostring(contractQty) + ',"edge":' + str.tostring(edge, "#.##") + ',"score":' + str.tostring(buyScore, "#.##") + ',"reason":"' + exitLongReason + '","bar_time":"' + str.tostring(time) + '","tag":"' + webhookTag + '"}'
 exitShortMessage = '{"source":"tradingview","action":"EXIT_SHORT","ticker":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","price":' + str.tostring(close, format.mintick) + ',"qty":' + str.tostring(contractQty) + ',"edge":' + str.tostring(edge, "#.##") + ',"score":' + str.tostring(sellScore, "#.##") + ',"reason":"' + exitShortReason + '","bar_time":"' + str.tostring(time) + '","tag":"' + webhookTag + '"}'
 
@@ -251,10 +299,34 @@ plot(activeLongStop, "Active Long Stop", color=color.new(color.red, 15), style=p
 plot(activeLongTarget, "Active Long Take Profit", color=color.new(color.lime, 15), style=plot.style_linebr)
 plot(activeShortStop, "Active Short Stop", color=color.new(color.red, 15), style=plot.style_linebr)
 plot(activeShortTarget, "Active Short Take Profit", color=color.new(color.lime, 15), style=plot.style_linebr)
-plotshape(longSignal, title="BUY", style=shape.labelup, location=location.belowbar, color=color.new(color.lime, 0), text="BUY", textcolor=color.black, size=size.small)
-plotshape(shortSignal, title="SELL", style=shape.labeldown, location=location.abovebar, color=color.new(color.red, 0), text="SELL", textcolor=color.white, size=size.small)
+plotshape(longSignalAPlus, title="BUY A+", style=shape.labelup, location=location.belowbar, color=color.new(color.lime, 0), text="BUY A+", textcolor=color.black, size=size.small)
+plotshape(longSignalDaily, title="BUY Daily Quality", style=shape.labelup, location=location.belowbar, color=color.new(color.teal, 0), text="BUY Q", textcolor=color.black, size=size.small)
+plotshape(shortSignalAPlus, title="SELL A+", style=shape.labeldown, location=location.abovebar, color=color.new(color.red, 0), text="SELL A+", textcolor=color.white, size=size.small)
+plotshape(shortSignalDaily, title="SELL Daily Quality", style=shape.labeldown, location=location.abovebar, color=color.new(color.orange, 0), text="SELL Q", textcolor=color.black, size=size.small)
 plotshape(riskExitLong, title="Risk Exit Long", style=shape.xcross, location=location.abovebar, color=color.new(color.yellow, 0), text="EXIT", textcolor=color.black, size=size.tiny)
 plotshape(riskExitShort, title="Risk Exit Short", style=shape.xcross, location=location.belowbar, color=color.new(color.yellow, 0), text="EXIT", textcolor=color.black, size=size.tiny)
+
+totalClosedTrades = strategy.closedtrades
+totalOpenTrades = strategy.opentrades
+totalTrades = totalClosedTrades + totalOpenTrades
+winRate = totalClosedTrades > 0 ? strategy.wintrades / totalClosedTrades * 100 : 0.0
+activeMode = dailyMode ? "Daily quality search" : "A+ only"
+var table statsTable = table.new(position.top_right, 2, 7, bgcolor=color.new(color.black, 18), border_color=color.new(color.white, 70), border_width=1)
+if barstate.islast
+    table.cell(statsTable, 0, 0, "MNQ Bot v5", text_color=color.white, bgcolor=color.new(color.blue, 72))
+    table.cell(statsTable, 1, 0, activeMode, text_color=color.white, bgcolor=color.new(color.blue, 72))
+    table.cell(statsTable, 0, 1, "Window", text_color=color.silver)
+    table.cell(statsTable, 1, 1, str.tostring(backtestDays) + " days", text_color=color.white)
+    table.cell(statsTable, 0, 2, "Total Trades", text_color=color.silver)
+    table.cell(statsTable, 1, 2, str.tostring(totalTrades), text_color=color.white)
+    table.cell(statsTable, 0, 3, "Closed Wins", text_color=color.silver)
+    table.cell(statsTable, 1, 3, str.tostring(strategy.wintrades) + " / " + str.tostring(totalClosedTrades), text_color=winRate >= 50 ? color.lime : color.orange)
+    table.cell(statsTable, 0, 4, "Win Rate", text_color=color.silver)
+    table.cell(statsTable, 1, 4, str.tostring(winRate, "#.##") + "%", text_color=winRate >= 50 ? color.lime : color.orange)
+    table.cell(statsTable, 0, 5, "Today", text_color=color.silver)
+    table.cell(statsTable, 1, 5, str.tostring(tradesToday) + " / " + str.tostring(maxTradesPerDay) + " max, min " + str.tostring(effectiveMinTrades), text_color=tradesToday >= effectiveMinTrades ? color.lime : color.orange)
+    table.cell(statsTable, 0, 6, "Net P/L", text_color=color.silver)
+    table.cell(statsTable, 1, 6, str.tostring(strategy.netprofit, "#.##"), text_color=strategy.netprofit >= 0 ? color.lime : color.red)
 bgcolor(not timeframeOk or not symbolOk ? color.new(color.red, 88) : na, title="Guardrail Warning")
 """
 

@@ -4,7 +4,7 @@
 def build_pine_script() -> str:
     return """//@version=5
 //@strategy_alert_message {{strategy.order.alert_message}}
-strategy("AI MNQ Smart Paper Bot v13", overlay=true, initial_capital=100000, default_qty_type=strategy.fixed, default_qty_value=1, pyramiding=0, process_orders_on_close=true, calc_on_every_tick=true)
+strategy("AI MNQ Smart Paper Bot v14", overlay=true, initial_capital=100000, default_qty_type=strategy.fixed, default_qty_value=1, pyramiding=0, process_orders_on_close=true, calc_on_every_tick=true)
 
 contractQty = input.int(1, "Requested Contracts / Paper Size", minval=1, maxval=10)
 accountSizeDollars = input.float(100000.0, "Account Size Guard ($)", minval=1000.0, step=1000.0)
@@ -13,7 +13,7 @@ useChartPointValue = input.bool(true, "Use Chart Point Value For Risk")
 maxLossDollars = input.float(150.0, "Max Loss Per Trade ($)", minval=1.0, step=5.0)
 minimumProfitTargetDollars = input.float(25.0, "Minimum Profit Target ($)", minval=0.0, step=5.0)
 maxTradesPerDay = input.int(5, "Max Trades Per Day", minval=1, maxval=5)
-targetTradesPerDay = input.int(5, "Target Quality Trades Per Day", minval=1, maxval=5)
+targetTradesPerDay = input.int(3, "Target Quality Trades Per Day", minval=1, maxval=5)
 minTradesPerDay = input.int(1, "Minimum Quality Trades Per Day", minval=0, maxval=5)
 requireOneHour = input.bool(true, "Only Fire On 1H Chart")
 restrictMnq = input.bool(true, "Only MNQ")
@@ -24,7 +24,7 @@ useSessionFilter = input.bool(true, "Use Regular Session Filter")
 usePrimeHours = input.bool(false, "Trade Prime NY Hours Only")
 forceDailyMinimum = input.bool(true, "Force One Daily Setup If No Trade")
 tradeSession = input.session("0930-1600", "Trading Session")
-webhookTag = input.string("mnq-smart-paper-v13", "Webhook Tag")
+webhookTag = input.string("mnq-smart-paper-v14", "Webhook Tag")
 
 emaFastLen = input.int(21, "Fast EMA", minval=5)
 emaTrendLen = input.int(55, "Trade Trend EMA", minval=10)
@@ -144,6 +144,21 @@ fastSlope = (emaFast - nz(emaFast[2], emaFast)) / math.max(atrValue, syminfo.min
 vwapSlope = (vwapValue - nz(vwapValue[3], vwapValue)) / math.max(atrValue, syminfo.mintick)
 bullImpulse = close > emaFast and close > close[1] and fastSlope >= 0.04 and vwapSlope >= -0.04
 bearImpulse = close < emaFast and close < close[1] and fastSlope <= -0.04 and vwapSlope <= 0.04
+structureRange = math.max(ta.highest(high, structureLen) - ta.lowest(low, structureLen), syminfo.mintick)
+compressionRange = structureRange / math.max(atrValue, syminfo.mintick)
+tightCoil = compressionRange <= 3.2 and trendEfficiency < 0.45 and emaSpread < 0.90
+bullLiquiditySweep = low < priorLow and close > priorLow and close > open and longCloseQuality >= 0.62
+bearLiquiditySweep = high > priorHigh and close < priorHigh and close < open and shortCloseQuality >= 0.62
+bullCoilBreak = tightCoil[1] and close > priorHigh and close > vwapValue and longCloseQuality >= 0.58
+bearCoilBreak = tightCoil[1] and close < priorLow and close < vwapValue and shortCloseQuality >= 0.58
+bullTrendReclaim = bullPullbackReclaim and close > vwapValue and fastSlope >= 0 and rsiValue >= 50
+bearTrendReject = bearPullbackReject and close < vwapValue and fastSlope <= 0 and rsiValue <= 50
+bullFailedBreakdown = low < priorLow and close > emaFast and close > vwapValue and plusDi >= minusDi
+bearFailedBreakout = high > priorHigh and close < emaFast and close < vwapValue and minusDi >= plusDi
+bullVirtualPattern = bullLiquiditySweep or bullCoilBreak or bullTrendReclaim or bullFailedBreakdown
+bearVirtualPattern = bearLiquiditySweep or bearCoilBreak or bearTrendReject or bearFailedBreakout
+strongBullPattern = (bullCoilBreak or bullLiquiditySweep) and volumeConfirmLong and close > emaFast
+strongBearPattern = (bearCoilBreak or bearLiquiditySweep) and volumeConfirmShort and close < emaFast
 
 float buyScore = 0.0
 float sellScore = 0.0
@@ -176,6 +191,10 @@ if bullImpulse
     buyScore += 8
 if bearImpulse
     sellScore += 8
+if bullVirtualPattern
+    buyScore += strongBullPattern ? 14 : 8
+if bearVirtualPattern
+    sellScore += strongBearPattern ? 14 : 8
 if notChasing
     buyScore += 7
     sellScore += 7
@@ -207,10 +226,10 @@ shortRisk = shortStopPrice - close
 validLongRisk = longRisk >= syminfo.mintick * 4 and longRisk <= riskCapPoints and longRisk <= atrValue * maxRiskAtr
 validShortRisk = shortRisk >= syminfo.mintick * 4 and shortRisk <= riskCapPoints and shortRisk <= atrValue * maxRiskAtr
 
-longConfirmations = (bullMacro ? 1 : 0) + (bullTape ? 1 : 0) + (bullMomentum ? 1 : 0) + ((bullStructureBreak or bullPullbackReclaim) ? 1 : 0) + (candleConfirmLong ? 1 : 0) + (volumeConfirmLong ? 1 : 0) + (bullImpulse ? 1 : 0) + (cleanTrend ? 1 : 0) + (notChasing ? 1 : 0) + (primeWindowOk ? 1 : 0)
-shortConfirmations = (bearMacro ? 1 : 0) + (bearTape ? 1 : 0) + (bearMomentum ? 1 : 0) + ((bearStructureBreak or bearPullbackReject) ? 1 : 0) + (candleConfirmShort ? 1 : 0) + (volumeConfirmShort ? 1 : 0) + (bearImpulse ? 1 : 0) + (cleanTrend ? 1 : 0) + (notChasing ? 1 : 0) + (primeWindowOk ? 1 : 0)
-longTargetR = takeProfitR + (longConfirmations >= 8 and buyScore >= 90 and edge >= minEdge + 10 ? strongTargetBoostR : 0.0)
-shortTargetR = takeProfitR + (shortConfirmations >= 8 and sellScore >= 90 and edge <= -minEdge - 10 ? strongTargetBoostR : 0.0)
+longConfirmations = (bullMacro ? 1 : 0) + (bullTape ? 1 : 0) + (bullMomentum ? 1 : 0) + ((bullStructureBreak or bullPullbackReclaim) ? 1 : 0) + (candleConfirmLong ? 1 : 0) + (volumeConfirmLong ? 1 : 0) + (bullImpulse ? 1 : 0) + (bullVirtualPattern ? 1 : 0) + (cleanTrend ? 1 : 0) + (notChasing ? 1 : 0) + (primeWindowOk ? 1 : 0)
+shortConfirmations = (bearMacro ? 1 : 0) + (bearTape ? 1 : 0) + (bearMomentum ? 1 : 0) + ((bearStructureBreak or bearPullbackReject) ? 1 : 0) + (candleConfirmShort ? 1 : 0) + (volumeConfirmShort ? 1 : 0) + (bearImpulse ? 1 : 0) + (bearVirtualPattern ? 1 : 0) + (cleanTrend ? 1 : 0) + (notChasing ? 1 : 0) + (primeWindowOk ? 1 : 0)
+longTargetR = takeProfitR + (longConfirmations >= 8 and buyScore >= 90 and edge >= minEdge + 10 and (strongBullPattern or cleanTrend) ? strongTargetBoostR : 0.0)
+shortTargetR = takeProfitR + (shortConfirmations >= 8 and sellScore >= 90 and edge <= -minEdge - 10 and (strongBearPattern or cleanTrend) ? strongTargetBoostR : 0.0)
 longTakeProfit = close + math.max(longRisk * longTargetR, minimumTargetDistance)
 shortTakeProfit = close - math.max(shortRisk * shortTargetR, minimumTargetDistance)
 
@@ -238,8 +257,10 @@ longAPlusCandidate = ready and canEnter and primeWindowOk and notChasing and val
 shortAPlusCandidate = ready and canEnter and primeWindowOk and notChasing and validShortRisk and shortConfirmations >= 7 and sellScore >= minSetupScore and edge <= -minEdge
 longDailyCandidate = ready and canEnter and dailyMode and dailyLongSafety and longConfirmations >= paceConfirmMin and buyScore >= paceScoreMin and edge >= paceEdgeMin
 shortDailyCandidate = ready and canEnter and dailyMode and dailyShortSafety and shortConfirmations >= paceConfirmMin and sellScore >= paceScoreMin and edge <= -paceEdgeMin
-longMinimumCandidate = minimumReady and canEnter and minimumSafeWindow and dailyLongSafety and fallbackLongBias and longConfirmations >= 3 and buyScore >= dailyFallbackScore - 4 and edge >= 0
-shortMinimumCandidate = minimumReady and canEnter and minimumSafeWindow and dailyShortSafety and fallbackShortBias and shortConfirmations >= 3 and sellScore >= dailyFallbackScore - 4 and edge <= 0
+longMinimumQuality = bullVirtualPattern or bullImpulse or cleanTrend or bullTape
+shortMinimumQuality = bearVirtualPattern or bearImpulse or cleanTrend or bearTape
+longMinimumCandidate = minimumReady and canEnter and minimumSafeWindow and dailyLongSafety and fallbackLongBias and longMinimumQuality and longConfirmations >= 3 and buyScore >= dailyFallbackScore - 4 and edge >= 0
+shortMinimumCandidate = minimumReady and canEnter and minimumSafeWindow and dailyShortSafety and fallbackShortBias and shortMinimumQuality and shortConfirmations >= 3 and sellScore >= dailyFallbackScore - 4 and edge <= 0
 
 longSignalAPlus = longAPlusCandidate and buyScore > sellScore
 shortSignalAPlus = shortAPlusCandidate and sellScore > buyScore and not longSignalAPlus
@@ -252,8 +273,8 @@ shortSignal = shortSignalAPlus or shortSignalDaily
 
 longTier = longSignalAPlus ? "A_PLUS" : longSignalMinimum ? "MINIMUM_SAFE" : behindTradePace ? "PACE_QUALITY" : "DAILY_QUALITY"
 shortTier = shortSignalAPlus ? "A_PLUS" : shortSignalMinimum ? "MINIMUM_SAFE" : behindTradePace ? "PACE_QUALITY" : "DAILY_QUALITY"
-longReason = longSignalAPlus ? "A-plus long: trend, VWAP, ADX/DI, volume, candle quality, impulse and structure confirmed with defined stop and take profit" : longSignalMinimum ? "Minimum safe long: no trade yet today, but trend, VWAP, risk and direction still align" : behindTradePace ? "Pace quality long: bot is behind the 5-trade target, but trend, risk, structure and impulse still pass safety rules" : "Daily quality long: trend, momentum, risk and structure meet the safety rules"
-shortReason = shortSignalAPlus ? "A-plus short: trend, VWAP rejection, ADX/DI, volume, candle quality, impulse and structure confirmed with defined stop and take profit" : shortSignalMinimum ? "Minimum safe short: no trade yet today, but trend, VWAP, risk and direction still align" : behindTradePace ? "Pace quality short: bot is behind the 5-trade target, but trend, risk, structure and impulse still pass safety rules" : "Daily quality short: trend, momentum, risk and structure meet the safety rules"
+longReason = longSignalAPlus ? "A-plus long: trend, VWAP, ADX/DI, volume, candle quality, virtual pattern behavior, impulse and structure confirmed with defined stop and take profit" : longSignalMinimum ? "Minimum safe long: no trade yet today, but pattern behavior, trend, VWAP, risk and direction still align" : behindTradePace ? "Pace quality long: bot is below the 2-3 trade goal, but pattern behavior, trend, risk, structure and impulse still pass safety rules" : "Daily quality long: trend, momentum, pattern behavior, risk and structure meet the safety rules"
+shortReason = shortSignalAPlus ? "A-plus short: trend, VWAP rejection, ADX/DI, volume, candle quality, virtual pattern behavior, impulse and structure confirmed with defined stop and take profit" : shortSignalMinimum ? "Minimum safe short: no trade yet today, but pattern behavior, trend, VWAP, risk and direction still align" : behindTradePace ? "Pace quality short: bot is below the 2-3 trade goal, but pattern behavior, trend, risk, structure and impulse still pass safety rules" : "Daily quality short: trend, momentum, pattern behavior, risk and structure meet the safety rules"
 longMessage = '{"source":"tradingview","action":"BUY","ticker":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","price":' + str.tostring(close, format.mintick) + ',"target":' + str.tostring(longTakeProfit, format.mintick) + ',"stop":' + str.tostring(longStopPrice, format.mintick) + ',"qty":' + str.tostring(safeContractQty) + ',"edge":' + str.tostring(edge, "#.##") + ',"score":' + str.tostring(buyScore, "#.##") + ',"tier":"' + longTier + '","reason":"' + longReason + '","bar_time":"' + str.tostring(time) + '","tag":"' + webhookTag + '"}'
 shortMessage = '{"source":"tradingview","action":"SELL","ticker":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","price":' + str.tostring(close, format.mintick) + ',"target":' + str.tostring(shortTakeProfit, format.mintick) + ',"stop":' + str.tostring(shortStopPrice, format.mintick) + ',"qty":' + str.tostring(safeContractQty) + ',"edge":' + str.tostring(edge, "#.##") + ',"score":' + str.tostring(sellScore, "#.##") + ',"tier":"' + shortTier + '","reason":"' + shortReason + '","bar_time":"' + str.tostring(time) + '","tag":"' + webhookTag + '"}'
 
@@ -433,7 +454,7 @@ activeMode = minimumSafeWindow ? "Minimum daily search" : dailyMode ? "Daily qua
 windowLabel = limitToCurrentWeek ? "Current week only" : str.tostring(backtestDays) + " days"
 var table statsTable = table.new(position.top_right, 2, 8, bgcolor=color.new(color.black, 18), border_color=color.new(color.white, 70), border_width=1)
 if barstate.islast
-    table.cell(statsTable, 0, 0, "MNQ Bot v13", text_color=color.white, bgcolor=color.new(color.blue, 72))
+    table.cell(statsTable, 0, 0, "MNQ Bot v14", text_color=color.white, bgcolor=color.new(color.blue, 72))
     table.cell(statsTable, 1, 0, activeMode, text_color=color.white, bgcolor=color.new(color.blue, 72))
     table.cell(statsTable, 0, 1, "Window", text_color=color.silver)
     table.cell(statsTable, 1, 1, windowLabel, text_color=color.white)

@@ -77,6 +77,7 @@ Run it on an MNQ chart like `MNQ1!` or the active MNQ contract. Keep the chart s
 The Pine strategy has guardrails built in:
 
 - Maximum of 5 entries per day
+- Targets 2-3 quality entries per day without forcing weak setups
 - Current-week-only trading window by default
 - $100,000 account-size guard for MNQ sizing
 - Hard stop-loss on every trade

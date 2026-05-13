@@ -1,9 +1,10 @@
 //@version=5
 //@strategy_alert_message {{strategy.order.alert_message}}
-strategy("AI MNQ Smart Paper Bot v9", overlay=true, initial_capital=100000, default_qty_type=strategy.fixed, default_qty_value=1, pyramiding=0, process_orders_on_close=true, calc_on_every_tick=true)
+strategy("AI MNQ Smart Paper Bot v10", overlay=true, initial_capital=100000, default_qty_type=strategy.fixed, default_qty_value=1, pyramiding=0, process_orders_on_close=true, calc_on_every_tick=true)
 
 contractQty = input.int(1, "Contracts / Paper Size", minval=1, maxval=10)
-mnqDollarsPerPoint = input.float(2.0, "MNQ Dollars Per Point", minval=0.01, step=0.25)
+mnqDollarsPerPoint = input.float(2.0, "Fallback MNQ Dollars Per Point", minval=0.01, step=0.25)
+useChartPointValue = input.bool(true, "Use Chart Point Value For Risk")
 maxLossDollars = input.float(150.0, "Max Loss Per Trade ($)", minval=1.0, step=5.0)
 minimumProfitTargetDollars = input.float(25.0, "Minimum Profit Target ($)", minval=0.0, step=5.0)
 maxTradesPerDay = input.int(5, "Max Trades Per Day", minval=1, maxval=5)
@@ -16,7 +17,7 @@ useSessionFilter = input.bool(true, "Use Regular Session Filter")
 usePrimeHours = input.bool(false, "Trade Prime NY Hours Only")
 forceDailyMinimum = input.bool(true, "Force One Daily Setup If No Trade")
 tradeSession = input.session("0930-1600", "Trading Session")
-webhookTag = input.string("mnq-smart-paper-v9", "Webhook Tag")
+webhookTag = input.string("mnq-smart-paper-v10", "Webhook Tag")
 
 emaFastLen = input.int(21, "Fast EMA", minval=5)
 emaTrendLen = input.int(55, "Trade Trend EMA", minval=10)
@@ -28,14 +29,15 @@ structureLen = input.int(12, "Structure Lookback", minval=3)
 volumeLen = input.int(30, "Volume Baseline", minval=5)
 atrLen = input.int(14, "ATR Length", minval=2)
 atrStopMult = input.float(1.45, "ATR Stop Multiplier", minval=0.25, step=0.05)
-takeProfitR = input.float(2.40, "Take Profit R", minval=0.75, step=0.05)
+takeProfitR = input.float(3.20, "Base Take Profit R", minval=0.75, step=0.05)
+strongTargetBoostR = input.float(0.55, "A+ Runner Target Boost R", minval=0.0, step=0.05)
 breakEvenAtR = input.float(0.55, "Move Stop To Breakeven At R", minval=0.10, step=0.05)
 breakEvenBufferDollars = input.float(10.0, "Breakeven Buffer ($)", minval=0.0, step=1.0)
 profitLockAtR = input.float(0.90, "Start Locking Profit At R", minval=0.25, step=0.05)
 profitLockR = input.float(0.25, "Minimum Profit Lock R", minval=0.0, step=0.05)
 trailAtR = input.float(1.15, "Start Smart Trail At R", minval=0.5, step=0.05)
 trailAtrMult = input.float(0.80, "Trail ATR Multiplier", minval=0.25, step=0.05)
-maxProfitGivebackPct = input.float(0.38, "Max Profit Giveback %", minval=0.05, maxval=0.85, step=0.01)
+maxProfitGivebackPct = input.float(0.30, "Max Profit Giveback %", minval=0.05, maxval=0.85, step=0.01)
 minAdx = input.float(18.0, "Minimum ADX", minval=1.0, step=0.5)
 minSetupScore = input.float(80.0, "A+ Minimum Setup Score", minval=50.0, maxval=100.0, step=1.0)
 minEdge = input.float(20.0, "A+ Minimum Directional Edge", minval=1.0, step=1.0)
@@ -62,6 +64,8 @@ primeWindowOk = not usePrimeHours or morningPowerWindow or afternoonPowerWindow
 dailyQualityWindow = nyHour >= dailyFallbackStartHour and nyHour <= 15
 backtestStart = timenow - backtestDays * 86400000
 withinBacktestWindow = not useBacktestWindow or time >= backtestStart
+chartPointValue = syminfo.pointvalue > 0 ? syminfo.pointvalue : mnqDollarsPerPoint
+dollarsPerPoint = useChartPointValue ? chartPointValue : mnqDollarsPerPoint
 
 emaFast = ta.ema(close, emaFastLen)
 emaTrend = ta.ema(close, emaTrendLen)
@@ -164,9 +168,10 @@ buyScore := math.min(math.max(buyScore, 0), 100)
 sellScore := math.min(math.max(sellScore, 0), 100)
 edge = buyScore - sellScore
 
-riskCapPoints = math.max(maxLossDollars / math.max(contractQty * mnqDollarsPerPoint, 0.01), syminfo.mintick * 4)
+riskCapPoints = math.max(maxLossDollars / math.max(contractQty * dollarsPerPoint, 0.01), syminfo.mintick * 4)
+riskCapTicks = int(math.max(math.round(riskCapPoints / syminfo.mintick), 1))
 minimumStopDistance = math.max(atrValue * minRiskAtr, syminfo.mintick * 4)
-minimumTargetDistance = minimumProfitTargetDollars / math.max(contractQty * mnqDollarsPerPoint, 0.01)
+minimumTargetDistance = minimumProfitTargetDollars / math.max(contractQty * dollarsPerPoint, 0.01)
 longStructureStop = priorSwingLow - syminfo.mintick * 2
 shortStructureStop = priorSwingHigh + syminfo.mintick * 2
 longAtrStop = close - atrValue * atrStopMult
@@ -179,11 +184,13 @@ longRisk = close - longStopPrice
 shortRisk = shortStopPrice - close
 validLongRisk = longRisk >= syminfo.mintick * 4 and longRisk <= riskCapPoints and longRisk <= atrValue * maxRiskAtr
 validShortRisk = shortRisk >= syminfo.mintick * 4 and shortRisk <= riskCapPoints and shortRisk <= atrValue * maxRiskAtr
-longTakeProfit = close + math.max(longRisk * takeProfitR, minimumTargetDistance)
-shortTakeProfit = close - math.max(shortRisk * takeProfitR, minimumTargetDistance)
 
 longConfirmations = (bullMacro ? 1 : 0) + (bullTape ? 1 : 0) + (bullMomentum ? 1 : 0) + ((bullStructureBreak or bullPullbackReclaim) ? 1 : 0) + (candleConfirmLong ? 1 : 0) + (volumeConfirmLong ? 1 : 0) + (cleanTrend ? 1 : 0) + (notChasing ? 1 : 0) + (primeWindowOk ? 1 : 0)
 shortConfirmations = (bearMacro ? 1 : 0) + (bearTape ? 1 : 0) + (bearMomentum ? 1 : 0) + ((bearStructureBreak or bearPullbackReject) ? 1 : 0) + (candleConfirmShort ? 1 : 0) + (volumeConfirmShort ? 1 : 0) + (cleanTrend ? 1 : 0) + (notChasing ? 1 : 0) + (primeWindowOk ? 1 : 0)
+longTargetR = takeProfitR + (longConfirmations >= 8 and buyScore >= 90 and edge >= minEdge + 10 ? strongTargetBoostR : 0.0)
+shortTargetR = takeProfitR + (shortConfirmations >= 8 and sellScore >= 90 and edge <= -minEdge - 10 ? strongTargetBoostR : 0.0)
+longTakeProfit = close + math.max(longRisk * longTargetR, minimumTargetDistance)
+shortTakeProfit = close - math.max(shortRisk * shortTargetR, minimumTargetDistance)
 
 ready = barstate.isconfirmed and symbolOk and timeframeOk and sessionOk and withinBacktestWindow and healthyVolatility and basicTrend and tradeableTape and notExtremeChase and not na(priorHigh) and not na(priorLow)
 canEnter = tradesToday < maxTradesPerDay and strategy.position_size == 0 and cooldownOk
@@ -226,6 +233,8 @@ var float activeLongRisk = na
 var float activeShortStop = na
 var float activeShortTarget = na
 var float activeShortRisk = na
+var float activeLongTargetR = na
+var float activeShortTargetR = na
 var float activeLongBest = na
 var float activeShortBest = na
 var int activeEntryBar = na
@@ -239,6 +248,8 @@ if strategy.position_size == 0 and not longSignal and not shortSignal
     activeShortStop := na
     activeShortTarget := na
     activeShortRisk := na
+    activeLongTargetR := na
+    activeShortTargetR := na
     activeLongBest := na
     activeShortBest := na
     activeEntryBar := na
@@ -251,10 +262,12 @@ if longSignal
     activeLongStop := longStopPrice
     activeLongTarget := longTakeProfit
     activeLongRisk := longRisk
+    activeLongTargetR := longTargetR
     activeLongBest := close
     activeShortStop := na
     activeShortTarget := na
     activeShortRisk := na
+    activeShortTargetR := na
     activeShortBest := na
     strategy.entry("Long", strategy.long, qty=contractQty, alert_message=longMessage)
     alert(longMessage, alert.freq_once_per_bar_close)
@@ -266,10 +279,12 @@ if shortSignal
     activeShortStop := shortStopPrice
     activeShortTarget := shortTakeProfit
     activeShortRisk := shortRisk
+    activeShortTargetR := shortTargetR
     activeShortBest := close
     activeLongStop := na
     activeLongTarget := na
     activeLongRisk := na
+    activeLongTargetR := na
     activeLongBest := na
     strategy.entry("Short", strategy.short, qty=contractQty, alert_message=shortMessage)
     alert(shortMessage, alert.freq_once_per_bar_close)
@@ -280,9 +295,19 @@ if strategy.position_size > 0 and not na(activeLongRisk) and activeLongRisk > 0
 if strategy.position_size < 0 and not na(activeShortRisk) and activeShortRisk > 0
     activeShortBest := na(activeShortBest) ? math.min(low, strategy.position_avg_price) : math.min(activeShortBest, low)
 
+if strategy.position_size > 0 and not na(activeLongStop)
+    activeLongStop := math.max(activeLongStop, strategy.position_avg_price - riskCapPoints)
+    activeLongRisk := math.max(strategy.position_avg_price - activeLongStop, syminfo.mintick * 4)
+    activeLongTarget := math.max(activeLongTarget, strategy.position_avg_price + math.max(activeLongRisk * nz(activeLongTargetR, takeProfitR), minimumTargetDistance))
+
+if strategy.position_size < 0 and not na(activeShortStop)
+    activeShortStop := math.min(activeShortStop, strategy.position_avg_price + riskCapPoints)
+    activeShortRisk := math.max(activeShortStop - strategy.position_avg_price, syminfo.mintick * 4)
+    activeShortTarget := math.min(activeShortTarget, strategy.position_avg_price - math.max(activeShortRisk * nz(activeShortTargetR, takeProfitR), minimumTargetDistance))
+
 longProgressR = strategy.position_size > 0 and not na(activeLongRisk) and activeLongRisk > 0 and not na(activeLongBest) ? (activeLongBest - strategy.position_avg_price) / activeLongRisk : 0.0
 shortProgressR = strategy.position_size < 0 and not na(activeShortRisk) and activeShortRisk > 0 and not na(activeShortBest) ? (strategy.position_avg_price - activeShortBest) / activeShortRisk : 0.0
-breakEvenBufferPoints = breakEvenBufferDollars / math.max(contractQty * mnqDollarsPerPoint, 0.01)
+breakEvenBufferPoints = breakEvenBufferDollars / math.max(contractQty * dollarsPerPoint, 0.01)
 
 if strategy.position_size > 0 and not na(activeLongStop)
     float longStopCandidate = activeLongStop
@@ -329,11 +354,11 @@ protectShortMessage = '{"source":"tradingview","action":"EXIT_SHORT","ticker":"'
 protectiveExitLong = strategy.position_size > 0 and not na(activeLongStop) and not na(activeLongTarget) and (close <= activeLongStop or close >= activeLongTarget)
 protectiveExitShort = strategy.position_size < 0 and not na(activeShortStop) and not na(activeShortTarget) and (close >= activeShortStop or close <= activeShortTarget)
 
-if strategy.position_size > 0 and not na(activeLongStop) and not na(activeLongTarget)
-    strategy.exit("Long Bracket", "Long", stop=activeLongStop, limit=activeLongTarget, alert_message=protectLongMessage)
+if not na(activeLongStop) and not na(activeLongTarget)
+    strategy.exit("Long Bracket", "Long", stop=activeLongStop, limit=activeLongTarget, loss=riskCapTicks, alert_message=protectLongMessage)
 
-if strategy.position_size < 0 and not na(activeShortStop) and not na(activeShortTarget)
-    strategy.exit("Short Bracket", "Short", stop=activeShortStop, limit=activeShortTarget, alert_message=protectShortMessage)
+if not na(activeShortStop) and not na(activeShortTarget)
+    strategy.exit("Short Bracket", "Short", stop=activeShortStop, limit=activeShortTarget, loss=riskCapTicks, alert_message=protectShortMessage)
 
 if protectiveExitLong and (na(lastProtectExitBar) or lastProtectExitBar != bar_index)
     lastProtectExitBar := bar_index
@@ -375,7 +400,7 @@ winRate = totalClosedTrades > 0 ? strategy.wintrades / totalClosedTrades * 100 :
 activeMode = minimumSafeWindow ? "Minimum daily search" : dailyMode ? "Daily quality search" : "A+ only"
 var table statsTable = table.new(position.top_right, 2, 7, bgcolor=color.new(color.black, 18), border_color=color.new(color.white, 70), border_width=1)
 if barstate.islast
-    table.cell(statsTable, 0, 0, "MNQ Bot v9", text_color=color.white, bgcolor=color.new(color.blue, 72))
+    table.cell(statsTable, 0, 0, "MNQ Bot v10", text_color=color.white, bgcolor=color.new(color.blue, 72))
     table.cell(statsTable, 1, 0, activeMode, text_color=color.white, bgcolor=color.new(color.blue, 72))
     table.cell(statsTable, 0, 1, "Window", text_color=color.silver)
     table.cell(statsTable, 1, 1, str.tostring(backtestDays) + " days", text_color=color.white)

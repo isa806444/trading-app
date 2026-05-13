@@ -85,6 +85,7 @@ The Pine strategy has guardrails built in:
 - Full-position take-profit on every trade
 - ATR and structure-based stop sizing
 - Breakeven/trailing stop protection after the trade proves itself
+- Smart adverse-move exits when a trade fails to follow through or starts trending against entry
 - Smart early-exit alerts when trend, VWAP, DI, RSI, or volatility conditions break
 - Symbol guard for MNQ charts
 

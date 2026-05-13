@@ -1460,14 +1460,18 @@ def build_tradingview_execution_signal(payload):
 
     target = first_payload_float(payload, ["target", "take_profit", "takeProfit", "tp"], None)
     stop = first_payload_float(payload, ["stop", "stop_loss", "stopLoss", "sl"], None)
+    profit_mode = str(first_payload_value(payload, ["profit_mode", "profitMode"], "") or "").upper().strip()
+    trail_only = profit_mode in {"TRAIL_ONLY", "RUNNER", "NO_TARGET", "TRAILING_STOP"}
     target_pct = first_payload_float(payload, ["target_pct", "targetPct"], env_float(ALGO_DEFAULT_TARGET_PCT_ENV, 0.02))
     stop_pct = first_payload_float(payload, ["stop_pct", "stopPct"], env_float(ALGO_DEFAULT_STOP_PCT_ENV, 0.01))
 
     if price and action in {"BUY", "SELL"}:
-        if target is None:
+        if target is None and not trail_only:
             target = price * (1 + target_pct) if action == "BUY" else price * (1 - target_pct)
         if stop is None:
             stop = price * (1 - stop_pct) if action == "BUY" else price * (1 + stop_pct)
+    if not profit_mode:
+        profit_mode = "TRAIL_ONLY" if target is None else "BRACKET_TARGET"
 
     signal_key = str(first_payload_value(payload, ["trade_id", "id", "bar_time", "time"], "")).strip()
     if not signal_key:
@@ -1482,6 +1486,7 @@ def build_tradingview_execution_signal(payload):
         "qty": qty,
         "target": round(target, 4) if target else None,
         "stop": round(stop, 4) if stop else None,
+        "profit_mode": profit_mode,
         "tag": str(first_payload_value(payload, ["tag"], "ai-algo")),
         "signal_key": f"{symbol}:{action}:{signal_key}"
     }
@@ -1682,10 +1687,11 @@ def translate_mnq_signal_to_tradovate(signal):
 
     action = signal.get("action")
     if action in {"BUY", "SELL"}:
-        if not signal.get("price") or not signal.get("target") or not signal.get("stop"):
-            raise RuntimeError("MNQ entry alerts need price, target, and stop before routing to Tradovate.")
+        trail_only = signal.get("profit_mode") == "TRAIL_ONLY"
+        if not signal.get("price") or not signal.get("stop") or (not trail_only and not signal.get("target")):
+            raise RuntimeError("MNQ entry alerts need price and stop before routing to Tradovate; bracket mode also needs target.")
         translated["price"] = round_to_tick(signal["price"])
-        translated["target"] = round_to_tick(signal["target"])
+        translated["target"] = round_to_tick(signal["target"]) if signal.get("target") else None
         translated["stop"] = round_to_tick(signal["stop"])
     elif translated.get("price"):
         translated["price"] = round_to_tick(translated["price"])
@@ -1736,8 +1742,8 @@ def place_tradovate_market_order(signal, account):
 def place_tradovate_bracket_order(signal, account):
     entry_action = "Buy" if signal["action"] == "BUY" else "Sell"
     exit_action = "Sell" if signal["action"] == "BUY" else "Buy"
-    if not signal.get("target") or not signal.get("stop"):
-        raise RuntimeError("TradingView alert needs a target and stop before routing a bracket order.")
+    if not signal.get("stop"):
+        raise RuntimeError("TradingView alert needs a stop before routing an automated entry.")
 
     body = {
         "accountSpec": account["accountSpec"],
@@ -1748,17 +1754,18 @@ def place_tradovate_bracket_order(signal, account):
         "orderType": "Market",
         "isAutomated": True,
         "customTag50": signal.get("tag", "ai-algo")[:64],
-        "bracket1": {
-            "action": exit_action,
-            "orderType": "Limit",
-            "price": signal["target"]
-        },
         "bracket2": {
             "action": exit_action,
             "orderType": "Stop",
             "stopPrice": signal["stop"]
         }
     }
+    if signal.get("target"):
+        body["bracket1"] = {
+            "action": exit_action,
+            "orderType": "Limit",
+            "price": signal["target"]
+        }
     return post_tradovate_order("placeoso", body)
 
 

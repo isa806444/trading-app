@@ -78,13 +78,13 @@ The Pine strategy has guardrails built in:
 
 - Maximum of 5 entries per day
 - Targets 2-3 quality entries per day without forcing weak setups
-- v18 chop filter blocks weak VWAP balance trades unless a real breakout or sweep confirms
-- v18 defaults use a $100 max-loss guard and $90 minimum target guard at the 1-contract default
+- v19 chop filter blocks weak VWAP balance trades unless a real breakout, jump, drop, or sweep confirms
+- v19 keeps the $100 max-loss guard at the 1-contract default and uses runner/trailing exits instead of a fixed profit cap
 - Searches harder for the first quality trade of each non-sideways day
 - Current-week-only trading window by default
 - $100,000 account-size guard for MNQ sizing
 - Hard stop-loss on every trade
-- Full-position take-profit on every trade
+- No fixed take-profit cap; winners are managed by the runner trailing stop
 - ATR and structure-based stop sizing
 - Breakeven/trailing stop protection after the trade proves itself
 - Smart adverse-move exits when a trade fails to follow through or starts trending against entry
@@ -97,7 +97,7 @@ Create an alert using `Any alert() function call` and this webhook URL:
 https://trading-app-kb38.onrender.com/tradingview-webhook?secret=make_a_private_secret
 ```
 
-The Pine alert sends `BUY` or `SELL` plus live price, targets, stop, contracts, edge, score, timeframe, reason, and bar time.
+The Pine alert sends `BUY` or `SELL` plus live price, stop, contracts, edge, score, timeframe, profit mode, reason, and bar time. v19 sends `profit_mode=TRAIL_ONLY` with `target=null`.
 
 Important: Pine strategies simulate fills inside TradingView's broker emulator and can trigger alerts. Pine does not directly take over the TradingView Paper Trading panel by itself. For automated paper execution outside the Strategy Tester, this app receives TradingView webhooks and can route them to Tradeify/Tradovate when all bridge env vars are enabled.
 

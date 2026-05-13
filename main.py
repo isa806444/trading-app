@@ -47,6 +47,8 @@ TRADOVATE_LIVE_TRADING_ACK_ENV = "TRADOVATE_LIVE_TRADING_ACK"
 TRADOVATE_DEFAULT_ORDER_QTY_ENV = "TRADOVATE_DEFAULT_ORDER_QTY"
 TRADOVATE_MAX_ORDER_QTY_ENV = "TRADOVATE_MAX_ORDER_QTY"
 TRADOVATE_MAX_DAILY_ORDERS_ENV = "TRADOVATE_MAX_DAILY_ORDERS"
+TRADOVATE_MAX_ACCOUNT_SIZE_USD_ENV = "TRADOVATE_MAX_ACCOUNT_SIZE_USD"
+TRADOVATE_MNQ_DOLLARS_PER_POINT_ENV = "TRADOVATE_MNQ_DOLLARS_PER_POINT"
 TRADOVATE_MNQ_BRIDGE_ENABLED_ENV = "TRADOVATE_MNQ_BRIDGE_ENABLED"
 TRADOVATE_MNQ_EXECUTION_SYMBOL_ENV = "TRADOVATE_MNQ_EXECUTION_SYMBOL"
 TRADOVATE_TICK_SIZE_ENV = "TRADOVATE_TICK_SIZE"
@@ -80,7 +82,7 @@ STATIC_US_MACRO_EVENTS = [
 ALGORITHM_LOCKED_SYMBOL = "MNQ"
 ALGORITHM_POLYGON_SYMBOL = "MNQ"
 ALGORITHM_DEFAULT_UNIVERSE = [ALGORITHM_LOCKED_SYMBOL]
-ALGORITHM_SIGNAL_CAPITAL = 1000
+ALGORITHM_SIGNAL_CAPITAL = 50000
 FUTURES_ROOTS = {
     "ES", "MES", "NQ", "MNQ", "YM", "MYM", "RTY", "M2K",
     "CL", "MCL", "GC", "MGC", "SI", "SIL", "HG", "NG",
@@ -244,6 +246,14 @@ def get_mnq_execution_symbol():
 
 def get_tradovate_tick_size():
     return env_float(TRADOVATE_TICK_SIZE_ENV, 0.25)
+
+
+def get_tradovate_max_account_size_usd():
+    return env_float(TRADOVATE_MAX_ACCOUNT_SIZE_USD_ENV, 50000)
+
+
+def get_mnq_dollars_per_point():
+    return env_float(TRADOVATE_MNQ_DOLLARS_PER_POINT_ENV, 2)
 
 
 def mnq_tradovate_bridge_ready():
@@ -1651,6 +1661,15 @@ def round_to_tick(price, tick_size=None):
     return round(round(float(price) / tick) * tick, 4)
 
 
+def estimate_mnq_notional(signal):
+    try:
+        price = abs(float(signal.get("price") or 0))
+        qty = abs(int(float(signal.get("qty") or 0)))
+    except (TypeError, ValueError):
+        return 0
+    return price * qty * get_mnq_dollars_per_point()
+
+
 def translate_mnq_signal_to_tradovate(signal):
     execution_symbol = get_mnq_execution_symbol() or signal.get("tradovate_symbol") or signal.get("symbol")
     tradovate_symbol = normalize_tradovate_symbol(execution_symbol)
@@ -1814,6 +1833,15 @@ def route_tradingview_signal_to_tradovate(payload):
             return result
         if not signal.get("price"):
             result["reason"] = "Entry alerts need a live TradingView price."
+            return result
+        max_account_size = get_tradovate_max_account_size_usd()
+        estimated_notional = estimate_mnq_notional(signal)
+        result["account_guard"] = {
+            "max_account_size_usd": max_account_size,
+            "estimated_notional": round(estimated_notional, 2)
+        }
+        if estimated_notional > max_account_size:
+            result["reason"] = f"Rejected: estimated MNQ notional ${estimated_notional:,.0f} exceeds the ${max_account_size:,.0f} account guard."
             return result
 
     try:

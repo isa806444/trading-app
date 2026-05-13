@@ -78,6 +78,8 @@ The Pine strategy has guardrails built in:
 
 - Maximum of 5 entries per day
 - Targets 2-3 quality entries per day without forcing weak setups
+- v18 chop filter blocks weak VWAP balance trades unless a real breakout or sweep confirms
+- v18 defaults use a $100 max-loss guard and $90 minimum target guard at the 1-contract default
 - Searches harder for the first quality trade of each non-sideways day
 - Current-week-only trading window by default
 - $100,000 account-size guard for MNQ sizing

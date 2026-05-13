@@ -66,11 +66,13 @@ TRADOVATE_LIVE_TRADING_ACK=I_UNDERSTAND_REAL_MONEY_RISK
 
 ## TradingView
 
-Open this file in TradingView Pine Editor:
+Open this copy-ready file in TradingView Pine Editor:
 
 ```text
-tradingview/ai_algorithm_strategy.pine
+tradingview/PASTE_THIS_IN_TRADINGVIEW.pine
 ```
+
+Use `Ctrl+A` in TradingView first, delete the old script, then paste the full file. The very first line must be exactly `//@version=5`; if that line is missing, TradingView falls back to Pine v1 and fails on lines like `var int tradesToday = 0`.
 
 Run it on an MNQ chart like `MNQ1!` or the active MNQ contract. Keep the chart set to `1H`. The strategy is intentionally single-timeframe and only fires confirmed bar-close alerts, so it does not use multi-timeframe lookups or repainting live-bar signals.
 

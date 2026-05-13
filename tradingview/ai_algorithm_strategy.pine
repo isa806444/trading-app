@@ -1,6 +1,6 @@
 //@version=5
 //@strategy_alert_message {{strategy.order.alert_message}}
-strategy("AI MNQ Smart Paper Bot v11", overlay=true, initial_capital=50000, default_qty_type=strategy.fixed, default_qty_value=1, pyramiding=0, process_orders_on_close=true, calc_on_every_tick=true)
+strategy("AI MNQ Smart Paper Bot v12", overlay=true, initial_capital=50000, default_qty_type=strategy.fixed, default_qty_value=1, pyramiding=0, process_orders_on_close=true, calc_on_every_tick=true)
 
 contractQty = input.int(1, "Requested Contracts / Paper Size", minval=1, maxval=10)
 accountSizeDollars = input.float(50000.0, "Account Size Guard ($)", minval=1000.0, step=1000.0)
@@ -20,7 +20,7 @@ useSessionFilter = input.bool(true, "Use Regular Session Filter")
 usePrimeHours = input.bool(false, "Trade Prime NY Hours Only")
 forceDailyMinimum = input.bool(true, "Force One Daily Setup If No Trade")
 tradeSession = input.session("0930-1600", "Trading Session")
-webhookTag = input.string("mnq-smart-paper-v11", "Webhook Tag")
+webhookTag = input.string("mnq-smart-paper-v12", "Webhook Tag")
 
 emaFastLen = input.int(21, "Fast EMA", minval=5)
 emaTrendLen = input.int(55, "Trade Trend EMA", minval=10)
@@ -73,9 +73,9 @@ chartPointValue = syminfo.pointvalue > 0 ? syminfo.pointvalue : mnqDollarsPerPoi
 dollarsPerPoint = useChartPointValue ? chartPointValue : mnqDollarsPerPoint
 notionalPerContract = close * dollarsPerPoint
 maxContractsForAccount = int(math.floor(accountSizeDollars / math.max(notionalPerContract, 0.01)))
-safeContractQty = math.min(contractQty, maxContractsForAccount)
+safeContractQty = contractQty <= 1 ? 1 : math.min(contractQty, maxContractsForAccount)
 tradeQtyForRisk = math.max(safeContractQty, 1)
-sizeOk = safeContractQty >= 1 and notionalPerContract * safeContractQty <= accountSizeDollars
+sizeOk = safeContractQty >= 1 and (contractQty <= 1 or notionalPerContract * safeContractQty <= accountSizeDollars)
 
 emaFast = ta.ema(close, emaFastLen)
 emaTrend = ta.ema(close, emaTrendLen)
@@ -429,7 +429,7 @@ activeMode = minimumSafeWindow ? "Minimum daily search" : dailyMode ? "Daily qua
 windowLabel = limitToCurrentWeek ? "Current week only" : str.tostring(backtestDays) + " days"
 var table statsTable = table.new(position.top_right, 2, 8, bgcolor=color.new(color.black, 18), border_color=color.new(color.white, 70), border_width=1)
 if barstate.islast
-    table.cell(statsTable, 0, 0, "MNQ Bot v11", text_color=color.white, bgcolor=color.new(color.blue, 72))
+    table.cell(statsTable, 0, 0, "MNQ Bot v12", text_color=color.white, bgcolor=color.new(color.blue, 72))
     table.cell(statsTable, 1, 0, activeMode, text_color=color.white, bgcolor=color.new(color.blue, 72))
     table.cell(statsTable, 0, 1, "Window", text_color=color.silver)
     table.cell(statsTable, 1, 1, windowLabel, text_color=color.white)

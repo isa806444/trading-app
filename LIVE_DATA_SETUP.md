@@ -78,7 +78,7 @@ The Pine strategy has guardrails built in:
 
 - Maximum of 5 entries per day
 - Current-week-only trading window by default
-- $50,000 account-size guard for MNQ sizing
+- $50,000 account-size guard for MNQ sizing, capped to the 1-contract MNQ minimum because strict futures notional can otherwise block every MNQ trade
 - Hard stop-loss on every trade
 - Full-position take-profit on every trade
 - ATR and structure-based stop sizing

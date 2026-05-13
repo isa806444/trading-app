@@ -1840,7 +1840,9 @@ def route_tradingview_signal_to_tradovate(payload):
             "max_account_size_usd": max_account_size,
             "estimated_notional": round(estimated_notional, 2)
         }
-        if estimated_notional > max_account_size:
+        minimum_mnq_contract = is_mnq_symbol(signal.get("symbol")) and int(signal.get("qty") or 0) <= 1
+        result["account_guard"]["minimum_mnq_contract_allowed"] = minimum_mnq_contract and estimated_notional > max_account_size
+        if estimated_notional > max_account_size and not minimum_mnq_contract:
             result["reason"] = f"Rejected: estimated MNQ notional ${estimated_notional:,.0f} exceeds the ${max_account_size:,.0f} account guard."
             return result
 

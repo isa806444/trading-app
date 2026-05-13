@@ -48,7 +48,7 @@ TRADOVATE_TICK_SIZE=0.25
 TRADOVATE_DEFAULT_ORDER_QTY=1
 TRADOVATE_MAX_ORDER_QTY=1
 TRADOVATE_MAX_DAILY_ORDERS=5
-TRADOVATE_MAX_ACCOUNT_SIZE_USD=50000
+TRADOVATE_MAX_ACCOUNT_SIZE_USD=100000
 TRADOVATE_MNQ_DOLLARS_PER_POINT=2
 ALGO_MIN_EDGE_FOR_AUTO_TRADE=18
 ALGO_DEFAULT_TARGET_PCT=0.02
@@ -78,7 +78,7 @@ The Pine strategy has guardrails built in:
 
 - Maximum of 5 entries per day
 - Current-week-only trading window by default
-- $50,000 account-size guard for MNQ sizing, capped to the 1-contract MNQ minimum because strict futures notional can otherwise block every MNQ trade
+- $100,000 account-size guard for MNQ sizing
 - Hard stop-loss on every trade
 - Full-position take-profit on every trade
 - ATR and structure-based stop sizing

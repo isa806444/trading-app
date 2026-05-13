@@ -82,7 +82,7 @@ STATIC_US_MACRO_EVENTS = [
 ALGORITHM_LOCKED_SYMBOL = "MNQ"
 ALGORITHM_POLYGON_SYMBOL = "MNQ"
 ALGORITHM_DEFAULT_UNIVERSE = [ALGORITHM_LOCKED_SYMBOL]
-ALGORITHM_SIGNAL_CAPITAL = 50000
+ALGORITHM_SIGNAL_CAPITAL = 100000
 FUTURES_ROOTS = {
     "ES", "MES", "NQ", "MNQ", "YM", "MYM", "RTY", "M2K",
     "CL", "MCL", "GC", "MGC", "SI", "SIL", "HG", "NG",
@@ -249,7 +249,7 @@ def get_tradovate_tick_size():
 
 
 def get_tradovate_max_account_size_usd():
-    return env_float(TRADOVATE_MAX_ACCOUNT_SIZE_USD_ENV, 50000)
+    return env_float(TRADOVATE_MAX_ACCOUNT_SIZE_USD_ENV, 100000)
 
 
 def get_mnq_dollars_per_point():

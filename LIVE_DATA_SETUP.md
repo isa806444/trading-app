@@ -78,9 +78,9 @@ The Pine strategy has guardrails built in:
 
 - Maximum of 5 entries per day
 - Targets 2-3 quality entries per day without forcing weak setups
-- v20 fast pro-trigger engine can catch VWAP failures, fast structure breaks, downside flushes, and upside jumps
-- v20 chop filter blocks repeated weak balance trades unless a real pro trigger confirms
-- v20 keeps the $100 max-loss guard at the 1-contract default and uses runner/trailing exits instead of a fixed profit cap
+- v21 regime classifier switches between trend momentum, range mean-reversion, high-volatility scalp defense, and low-volatility breakout-only behavior
+- v21 adaptive learning filter penalizes losing directions after negative trades and raises required scores instead of forcing weak setups
+- v21 keeps the $100 max-loss guard at the 1-contract default, but tries to exit failed trades before the full stop when setup quality breaks
 - Searches harder for the first quality trade of each non-sideways day
 - Current-week-only trading window by default
 - $100,000 account-size guard for MNQ sizing
@@ -92,13 +92,15 @@ The Pine strategy has guardrails built in:
 - Smart early-exit alerts when trend, VWAP, DI, RSI, or volatility conditions break
 - Symbol guard for MNQ charts
 
+Note: Pine Script cannot rewrite its own source code or run an external machine-learning model inside TradingView. The v21 "self-learning" behavior is an in-script adaptive classifier: it reads recent closed trade results, penalizes the setup type/direction that just failed, tightens entry requirements, and lowers early-failure tolerance after losses.
+
 Create an alert using `Any alert() function call` and this webhook URL:
 
 ```text
 https://trading-app-kb38.onrender.com/tradingview-webhook?secret=make_a_private_secret
 ```
 
-The Pine alert sends `BUY` or `SELL` plus live price, stop, contracts, edge, score, timeframe, profit mode, reason, and bar time. v20 sends `profit_mode=TRAIL_ONLY` with `target=null`.
+The Pine alert sends `BUY` or `SELL` plus live price, stop, contracts, edge, score, timeframe, profit mode, reason, and bar time. v21 sends `profit_mode=TRAIL_ONLY` with `target=null`.
 
 Important: Pine strategies simulate fills inside TradingView's broker emulator and can trigger alerts. Pine does not directly take over the TradingView Paper Trading panel by itself. For automated paper execution outside the Strategy Tester, this app receives TradingView webhooks and can route them to Tradeify/Tradovate when all bridge env vars are enabled.
 

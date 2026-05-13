@@ -1,6 +1,6 @@
 //@version=5
 //@strategy_alert_message {{strategy.order.alert_message}}
-strategy("AI MNQ Smart Paper Bot v14", overlay=true, initial_capital=100000, default_qty_type=strategy.fixed, default_qty_value=1, pyramiding=0, process_orders_on_close=true, calc_on_every_tick=true)
+strategy("AI MNQ Smart Paper Bot v15", overlay=true, initial_capital=100000, default_qty_type=strategy.fixed, default_qty_value=1, pyramiding=0, process_orders_on_close=true, calc_on_every_tick=true)
 
 contractQty = input.int(1, "Requested Contracts / Paper Size", minval=1, maxval=10)
 accountSizeDollars = input.float(100000.0, "Account Size Guard ($)", minval=1000.0, step=1000.0)
@@ -20,7 +20,7 @@ useSessionFilter = input.bool(true, "Use Regular Session Filter")
 usePrimeHours = input.bool(false, "Trade Prime NY Hours Only")
 forceDailyMinimum = input.bool(true, "Force One Daily Setup If No Trade")
 tradeSession = input.session("0930-1600", "Trading Session")
-webhookTag = input.string("mnq-smart-paper-v14", "Webhook Tag")
+webhookTag = input.string("mnq-smart-paper-v15", "Webhook Tag")
 
 emaFastLen = input.int(21, "Fast EMA", minval=5)
 emaTrendLen = input.int(55, "Trade Trend EMA", minval=10)
@@ -44,14 +44,14 @@ maxProfitGivebackPct = input.float(0.30, "Max Profit Giveback %", minval=0.05, m
 minAdx = input.float(18.0, "Minimum ADX", minval=1.0, step=0.5)
 minSetupScore = input.float(80.0, "A+ Minimum Setup Score", minval=50.0, maxval=100.0, step=1.0)
 minEdge = input.float(20.0, "A+ Minimum Directional Edge", minval=1.0, step=1.0)
-dailyFallbackScore = input.float(66.0, "Pace Quality Minimum Score", minval=45.0, maxval=100.0, step=1.0)
-dailyFallbackEdge = input.float(8.0, "Pace Quality Minimum Edge", minval=0.0, step=1.0)
-dailyFallbackStartHour = input.int(10, "Daily Quality Search Starts NY Hour", minval=9, maxval=15)
-minimumFallbackStartHour = input.int(12, "Minimum Trade Search Starts NY Hour", minval=10, maxval=15)
+dailyFallbackScore = input.float(60.0, "Pace Quality Minimum Score", minval=45.0, maxval=100.0, step=1.0)
+dailyFallbackEdge = input.float(4.0, "Pace Quality Minimum Edge", minval=0.0, step=1.0)
+dailyFallbackStartHour = input.int(9, "Daily Quality Search Starts NY Hour", minval=9, maxval=15)
+minimumFallbackStartHour = input.int(11, "Minimum Trade Search Starts NY Hour", minval=10, maxval=15)
 maxVwapAtrDistance = input.float(1.70, "Max Chase Distance From VWAP", minval=0.25, step=0.05)
 minRiskAtr = input.float(0.35, "Minimum Stop Distance ATR", minval=0.05, step=0.05)
 maxRiskAtr = input.float(3.25, "Maximum Stop Distance ATR", minval=0.5, step=0.05)
-cooldownBars = input.int(1, "Cooldown Bars After Entry", minval=0, maxval=20)
+cooldownBars = input.int(0, "Cooldown Bars After Entry", minval=0, maxval=20)
 minHoldBarsBeforeRiskExit = input.int(0, "Minimum Bars Before Smart Exit", minval=0, maxval=10)
 useSmartRiskExit = input.bool(true, "Smart Exit If Setup Breaks")
 useFastRiskExit = input.bool(true, "Fast Live Risk Exit")
@@ -151,10 +151,16 @@ bullTrendReclaim = bullPullbackReclaim and close > vwapValue and fastSlope >= 0 
 bearTrendReject = bearPullbackReject and close < vwapValue and fastSlope <= 0 and rsiValue <= 50
 bullFailedBreakdown = low < priorLow and close > emaFast and close > vwapValue and plusDi >= minusDi
 bearFailedBreakout = high > priorHigh and close < emaFast and close < vwapValue and minusDi >= plusDi
+bullVwapReclaim = low <= vwapValue and close > vwapValue and close > open and plusDi >= minusDi
+bearVwapReject = high >= vwapValue and close < vwapValue and close < open and minusDi >= plusDi
+bullHigherLow = low > nz(low[1], low) and low[1] > nz(low[2], low[1]) and close > emaFast and close >= open
+bearLowerHigh = high < nz(high[1], high) and high[1] < nz(high[2], high[1]) and close < emaFast and close <= open
 bullVirtualPattern = bullLiquiditySweep or bullCoilBreak or bullTrendReclaim or bullFailedBreakdown
 bearVirtualPattern = bearLiquiditySweep or bearCoilBreak or bearTrendReject or bearFailedBreakout
-strongBullPattern = (bullCoilBreak or bullLiquiditySweep) and volumeConfirmLong and close > emaFast
-strongBearPattern = (bearCoilBreak or bearLiquiditySweep) and volumeConfirmShort and close < emaFast
+bullOpportunityPattern = bullVirtualPattern or bullVwapReclaim or bullHigherLow
+bearOpportunityPattern = bearVirtualPattern or bearVwapReject or bearLowerHigh
+strongBullPattern = (bullCoilBreak or bullLiquiditySweep or bullVwapReclaim) and volumeConfirmLong and close > emaFast
+strongBearPattern = (bearCoilBreak or bearLiquiditySweep or bearVwapReject) and volumeConfirmShort and close < emaFast
 
 float buyScore = 0.0
 float sellScore = 0.0
@@ -187,9 +193,9 @@ if bullImpulse
     buyScore += 8
 if bearImpulse
     sellScore += 8
-if bullVirtualPattern
+if bullOpportunityPattern
     buyScore += strongBullPattern ? 14 : 8
-if bearVirtualPattern
+if bearOpportunityPattern
     sellScore += strongBearPattern ? 14 : 8
 if notChasing
     buyScore += 7
@@ -222,39 +228,42 @@ shortRisk = shortStopPrice - close
 validLongRisk = longRisk >= syminfo.mintick * 4 and longRisk <= riskCapPoints and longRisk <= atrValue * maxRiskAtr
 validShortRisk = shortRisk >= syminfo.mintick * 4 and shortRisk <= riskCapPoints and shortRisk <= atrValue * maxRiskAtr
 
-longConfirmations = (bullMacro ? 1 : 0) + (bullTape ? 1 : 0) + (bullMomentum ? 1 : 0) + ((bullStructureBreak or bullPullbackReclaim) ? 1 : 0) + (candleConfirmLong ? 1 : 0) + (volumeConfirmLong ? 1 : 0) + (bullImpulse ? 1 : 0) + (bullVirtualPattern ? 1 : 0) + (cleanTrend ? 1 : 0) + (notChasing ? 1 : 0) + (primeWindowOk ? 1 : 0)
-shortConfirmations = (bearMacro ? 1 : 0) + (bearTape ? 1 : 0) + (bearMomentum ? 1 : 0) + ((bearStructureBreak or bearPullbackReject) ? 1 : 0) + (candleConfirmShort ? 1 : 0) + (volumeConfirmShort ? 1 : 0) + (bearImpulse ? 1 : 0) + (bearVirtualPattern ? 1 : 0) + (cleanTrend ? 1 : 0) + (notChasing ? 1 : 0) + (primeWindowOk ? 1 : 0)
+longConfirmations = (bullMacro ? 1 : 0) + (bullTape ? 1 : 0) + (bullMomentum ? 1 : 0) + ((bullStructureBreak or bullPullbackReclaim) ? 1 : 0) + (candleConfirmLong ? 1 : 0) + (volumeConfirmLong ? 1 : 0) + (bullImpulse ? 1 : 0) + (bullOpportunityPattern ? 1 : 0) + (cleanTrend ? 1 : 0) + (notChasing ? 1 : 0) + (primeWindowOk ? 1 : 0)
+shortConfirmations = (bearMacro ? 1 : 0) + (bearTape ? 1 : 0) + (bearMomentum ? 1 : 0) + ((bearStructureBreak or bearPullbackReject) ? 1 : 0) + (candleConfirmShort ? 1 : 0) + (volumeConfirmShort ? 1 : 0) + (bearImpulse ? 1 : 0) + (bearOpportunityPattern ? 1 : 0) + (cleanTrend ? 1 : 0) + (notChasing ? 1 : 0) + (primeWindowOk ? 1 : 0)
 longTargetR = takeProfitR + (longConfirmations >= 8 and buyScore >= 90 and edge >= minEdge + 10 and (strongBullPattern or cleanTrend) ? strongTargetBoostR : 0.0)
 shortTargetR = takeProfitR + (shortConfirmations >= 8 and sellScore >= 90 and edge <= -minEdge - 10 and (strongBearPattern or cleanTrend) ? strongTargetBoostR : 0.0)
 longTakeProfit = close + math.max(longRisk * longTargetR, minimumTargetDistance)
 shortTakeProfit = close - math.max(shortRisk * shortTargetR, minimumTargetDistance)
 
 ready = barstate.isconfirmed and symbolOk and timeframeOk and sessionOk and withinBacktestWindow and healthyVolatility and basicTrend and tradeableTape and notExtremeChase and not na(priorHigh) and not na(priorLow)
+opportunityReady = barstate.isconfirmed and symbolOk and timeframeOk and sessionOk and withinBacktestWindow and tradeableTape and notExtremeChase and atrValue > syminfo.mintick * 4 and not na(priorHigh) and not na(priorLow)
 canEnter = tradesToday < maxTradesPerDay and strategy.position_size == 0 and cooldownOk and sizeOk
 effectiveMinTrades = math.min(minTradesPerDay, maxTradesPerDay)
 effectiveTargetTrades = math.min(targetTradesPerDay, maxTradesPerDay)
 needsDailyTrade = tradesToday < effectiveMinTrades
 needsMoreTrades = tradesToday < effectiveTargetTrades
-paceTargetByNow = nyHour <= 10 ? 1 : nyHour <= 11 ? 2 : nyHour <= 12 ? 3 : nyHour <= 14 ? 4 : 5
+paceTargetByNow = nyHour <= 10 ? 1 : nyHour <= 12 ? 2 : 3
 desiredTradesByNow = math.min(effectiveTargetTrades, paceTargetByNow)
 behindTradePace = needsMoreTrades and tradesToday < desiredTradesByNow
 dailyMode = needsMoreTrades and dailyQualityWindow
 minimumSafeWindow = forceDailyMinimum and needsDailyTrade and nyHour >= minimumFallbackStartHour and nyHour <= 15
-paceScoreMin = dailyFallbackScore + (behindTradePace ? 0.0 : 8.0)
-paceEdgeMin = dailyFallbackEdge + (behindTradePace ? 0.0 : 4.0)
-paceConfirmMin = behindTradePace ? 4 : 5
+paceScoreMin = dailyFallbackScore + (behindTradePace ? 0.0 : 6.0)
+paceEdgeMin = dailyFallbackEdge + (behindTradePace ? 0.0 : 3.0)
+paceConfirmMin = behindTradePace ? 3 : 4
 
 minimumReady = barstate.isconfirmed and symbolOk and timeframeOk and sessionOk and withinBacktestWindow and tradeableTape and atrValue > syminfo.mintick * 4 and not na(priorHigh) and not na(priorLow)
 fallbackLongBias = buyScore >= sellScore
 fallbackShortBias = sellScore > buyScore
-dailyLongSafety = validLongRisk and notExtremeChase and (close >= emaFast or close >= vwapValue or plusDi >= minusDi or fallbackLongBias)
-dailyShortSafety = validShortRisk and notExtremeChase and (close <= emaFast or close <= vwapValue or minusDi >= plusDi or fallbackShortBias)
+dailyLongSafety = validLongRisk and notExtremeChase and (close >= emaFast or close >= vwapValue or plusDi >= minusDi or bullOpportunityPattern)
+dailyShortSafety = validShortRisk and notExtremeChase and (close <= emaFast or close <= vwapValue or minusDi >= plusDi or bearOpportunityPattern)
+longOpportunityQuality = bullOpportunityPattern or bullImpulse or bullTape or cleanTrend
+shortOpportunityQuality = bearOpportunityPattern or bearImpulse or bearTape or cleanTrend
 longAPlusCandidate = ready and canEnter and primeWindowOk and notChasing and validLongRisk and longConfirmations >= 7 and buyScore >= minSetupScore and edge >= minEdge
 shortAPlusCandidate = ready and canEnter and primeWindowOk and notChasing and validShortRisk and shortConfirmations >= 7 and sellScore >= minSetupScore and edge <= -minEdge
-longDailyCandidate = ready and canEnter and dailyMode and dailyLongSafety and longConfirmations >= paceConfirmMin and buyScore >= paceScoreMin and edge >= paceEdgeMin
-shortDailyCandidate = ready and canEnter and dailyMode and dailyShortSafety and shortConfirmations >= paceConfirmMin and sellScore >= paceScoreMin and edge <= -paceEdgeMin
-longMinimumQuality = bullVirtualPattern or bullImpulse or cleanTrend or bullTape
-shortMinimumQuality = bearVirtualPattern or bearImpulse or cleanTrend or bearTape
+longDailyCandidate = opportunityReady and canEnter and dailyMode and dailyLongSafety and longOpportunityQuality and longConfirmations >= paceConfirmMin and buyScore >= paceScoreMin and edge >= paceEdgeMin
+shortDailyCandidate = opportunityReady and canEnter and dailyMode and dailyShortSafety and shortOpportunityQuality and shortConfirmations >= paceConfirmMin and sellScore >= paceScoreMin and edge <= -paceEdgeMin
+longMinimumQuality = bullOpportunityPattern or bullImpulse or cleanTrend or bullTape
+shortMinimumQuality = bearOpportunityPattern or bearImpulse or cleanTrend or bearTape
 longMinimumCandidate = minimumReady and canEnter and minimumSafeWindow and dailyLongSafety and fallbackLongBias and longMinimumQuality and longConfirmations >= 3 and buyScore >= dailyFallbackScore - 4 and edge >= 0
 shortMinimumCandidate = minimumReady and canEnter and minimumSafeWindow and dailyShortSafety and fallbackShortBias and shortMinimumQuality and shortConfirmations >= 3 and sellScore >= dailyFallbackScore - 4 and edge <= 0
 
@@ -269,8 +278,8 @@ shortSignal = shortSignalAPlus or shortSignalDaily
 
 longTier = longSignalAPlus ? "A_PLUS" : longSignalMinimum ? "MINIMUM_SAFE" : behindTradePace ? "PACE_QUALITY" : "DAILY_QUALITY"
 shortTier = shortSignalAPlus ? "A_PLUS" : shortSignalMinimum ? "MINIMUM_SAFE" : behindTradePace ? "PACE_QUALITY" : "DAILY_QUALITY"
-longReason = longSignalAPlus ? "A-plus long: trend, VWAP, ADX/DI, volume, candle quality, virtual pattern behavior, impulse and structure confirmed with defined stop and take profit" : longSignalMinimum ? "Minimum safe long: no trade yet today, but pattern behavior, trend, VWAP, risk and direction still align" : behindTradePace ? "Pace quality long: bot is below the 2-3 trade goal, but pattern behavior, trend, risk, structure and impulse still pass safety rules" : "Daily quality long: trend, momentum, pattern behavior, risk and structure meet the safety rules"
-shortReason = shortSignalAPlus ? "A-plus short: trend, VWAP rejection, ADX/DI, volume, candle quality, virtual pattern behavior, impulse and structure confirmed with defined stop and take profit" : shortSignalMinimum ? "Minimum safe short: no trade yet today, but pattern behavior, trend, VWAP, risk and direction still align" : behindTradePace ? "Pace quality short: bot is below the 2-3 trade goal, but pattern behavior, trend, risk, structure and impulse still pass safety rules" : "Daily quality short: trend, momentum, pattern behavior, risk and structure meet the safety rules"
+longReason = longSignalAPlus ? "A-plus long: trend, VWAP, ADX/DI, volume, candle quality, virtual pattern behavior, impulse and structure confirmed with defined stop and take profit" : longSignalMinimum ? "Minimum safe long: no trade yet today, but opportunity pattern behavior, trend, VWAP, risk and direction still align" : behindTradePace ? "Pace quality long: bot is below the 2-3 trade goal, but opportunity pattern behavior, trend, risk, structure and impulse still pass safety rules" : "Daily quality long: trend, momentum, opportunity pattern behavior, risk and structure meet the safety rules"
+shortReason = shortSignalAPlus ? "A-plus short: trend, VWAP rejection, ADX/DI, volume, candle quality, virtual pattern behavior, impulse and structure confirmed with defined stop and take profit" : shortSignalMinimum ? "Minimum safe short: no trade yet today, but opportunity pattern behavior, trend, VWAP, risk and direction still align" : behindTradePace ? "Pace quality short: bot is below the 2-3 trade goal, but opportunity pattern behavior, trend, risk, structure and impulse still pass safety rules" : "Daily quality short: trend, momentum, opportunity pattern behavior, risk and structure meet the safety rules"
 longMessage = '{"source":"tradingview","action":"BUY","ticker":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","price":' + str.tostring(close, format.mintick) + ',"target":' + str.tostring(longTakeProfit, format.mintick) + ',"stop":' + str.tostring(longStopPrice, format.mintick) + ',"qty":' + str.tostring(safeContractQty) + ',"edge":' + str.tostring(edge, "#.##") + ',"score":' + str.tostring(buyScore, "#.##") + ',"tier":"' + longTier + '","reason":"' + longReason + '","bar_time":"' + str.tostring(time) + '","tag":"' + webhookTag + '"}'
 shortMessage = '{"source":"tradingview","action":"SELL","ticker":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","price":' + str.tostring(close, format.mintick) + ',"target":' + str.tostring(shortTakeProfit, format.mintick) + ',"stop":' + str.tostring(shortStopPrice, format.mintick) + ',"qty":' + str.tostring(safeContractQty) + ',"edge":' + str.tostring(edge, "#.##") + ',"score":' + str.tostring(sellScore, "#.##") + ',"tier":"' + shortTier + '","reason":"' + shortReason + '","bar_time":"' + str.tostring(time) + '","tag":"' + webhookTag + '"}'
 
@@ -450,7 +459,7 @@ activeMode = minimumSafeWindow ? "Minimum daily search" : dailyMode ? "Daily qua
 windowLabel = limitToCurrentWeek ? "Current week only" : str.tostring(backtestDays) + " days"
 var table statsTable = table.new(position.top_right, 2, 8, bgcolor=color.new(color.black, 18), border_color=color.new(color.white, 70), border_width=1)
 if barstate.islast
-    table.cell(statsTable, 0, 0, "MNQ Bot v14", text_color=color.white, bgcolor=color.new(color.blue, 72))
+    table.cell(statsTable, 0, 0, "MNQ Bot v15", text_color=color.white, bgcolor=color.new(color.blue, 72))
     table.cell(statsTable, 1, 0, activeMode, text_color=color.white, bgcolor=color.new(color.blue, 72))
     table.cell(statsTable, 0, 1, "Window", text_color=color.silver)
     table.cell(statsTable, 1, 1, windowLabel, text_color=color.white)

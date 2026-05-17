@@ -2254,6 +2254,48 @@ body {
   background:rgba(15, 23, 42, 0.36);
 }
 
+.backtest-chart-grid {
+  display:grid;
+  grid-template-columns:minmax(0, 1.1fr) minmax(320px, 0.9fr);
+  gap:14px;
+  margin-bottom:16px;
+}
+
+.backtest-chart-card {
+  min-height:340px;
+  border:1px solid rgba(148, 163, 184, 0.14);
+  border-radius:20px;
+  padding:12px;
+  background:linear-gradient(180deg, rgba(15, 23, 42, 0.72), rgba(2, 6, 23, 0.58));
+}
+
+.backtest-chart-title {
+  font-size:12px;
+  font-weight:900;
+  color:#cbd5e1;
+  text-transform:uppercase;
+  letter-spacing:0.08em;
+  margin:2px 4px 10px;
+}
+
+.backtest-chart {
+  width:100%;
+  height:290px;
+}
+
+.backtest-report-actions {
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+  align-items:center;
+}
+
+.backtest-note {
+  margin-top:10px;
+  color:#8aa0ba;
+  font-size:12px;
+}
+
 @media (max-width:860px){
   .algo-hero,
   .algo-board,
@@ -2266,7 +2308,8 @@ body {
   .algo-hero-grid,
   .algo-control-grid,
   .algo-search-row,
-  .algo-decision-grid {
+  .algo-decision-grid,
+  .backtest-chart-grid {
     grid-template-columns:1fr;
   }
 
@@ -2304,21 +2347,22 @@ body {
     <div class="algo-hero-grid">
       <div>
         <div class="hero-eyebrow">AI Algorithm Terminal</div>
-        <h1 class="algo-title">MNQ bot. Paper-first signals.</h1>
-        <div class="algo-copy">TradingView runs the MNQ futures strategy, this app receives the alerts, and the guarded bridge can route them through Tradeify/Tradovate.</div>
+        <h1 class="algo-title">NQ1 bot. Paper-first signals.</h1>
+        <div class="algo-copy">TradingView runs the NQ1 futures strategy, this app receives the alerts, and the guarded bridge can route them through Tradeify/Tradovate.</div>
         <div class="hero-chip-row">
           <div class="hero-chip live" id="providerChip">TradingView -> App Paper Signals</div>
           <div class="hero-chip" id="alertsChip">Alerts idle</div>
         </div>
         <div class="algo-actions">
           <button class="algo-primary" onclick="loadAlgorithmDashboard(true)">Check Orders</button>
-          <button class="algo-secondary" onclick="manualRefresh()">Refresh MNQ</button>
+          <button class="algo-secondary" onclick="loadBacktestReport(true)">Backtest Report</button>
+          <button class="algo-secondary" onclick="manualRefresh()">Refresh NQ1</button>
         </div>
       </div>
       <div id="algoLivePanel" class="algo-live-card">
         <div class="algo-live-orb"></div>
         <div class="algo-live-label">Execution Status</div>
-        <div class="algo-live-title">MNQ paper signals armed</div>
+        <div class="algo-live-title">NQ1 paper signals armed</div>
         <div class="algo-live-copy">TradingView can fire strategy alerts into this app. The app can route them to Tradovate only when the demo bridge env vars are enabled.</div>
       </div>
     </div>
@@ -2329,23 +2373,23 @@ body {
       <div class="section-head">
         <div>
           <div class="section-kicker">Armed Market</div>
-          <div class="section-title">MNQ only</div>
+          <div class="section-title">NQ1 only</div>
         </div>
         <div class="helper-pill">Auto-routed from TradingView</div>
       </div>
       <div class="locked-market-card">
-        <div class="locked-market-symbol">MNQ</div>
+        <div class="locked-market-symbol">NQ1!</div>
         <div>
-          <div class="locked-market-title">Micro E-mini Nasdaq 100 bot</div>
-          <div class="locked-market-copy">TradingView alerts must come from an MNQ chart. Other markets are ignored before the app logs the paper signal.</div>
+          <div class="locked-market-title">E-mini Nasdaq 100 bot</div>
+          <div class="locked-market-copy">TradingView alerts must come from an NQ1 chart. Other markets are ignored before the app logs the paper signal.</div>
         </div>
-        <div id="armedFuture" class="armed-future active">Armed: MNQ</div>
+        <div id="armedFuture" class="armed-future active">Armed: NQ1</div>
       </div>
     </div>
     <div class="algo-live-card">
       <div class="algo-live-label">Last Updated</div>
       <div class="algo-live-title" id="lastUpdated">Waiting for data...</div>
-      <div class="algo-live-copy">TradingView handles the strategy and alerts. The app shows the MNQ quote and logs paper signals live.</div>
+      <div class="algo-live-copy">TradingView handles the strategy and alerts. The app shows the NQ1 quote and logs paper signals live.</div>
       <div class="algo-actions">
         <button id="refreshBtn" class="algo-secondary" onclick="manualRefresh()">Refresh Now</button>
       </div>
@@ -2354,6 +2398,10 @@ body {
 
   <div id="algoDashboard" class="algo-board">
     <div class="algo-empty">No routed algorithm orders yet. Real trades will appear here only after TradingView alerts route through Render and Tradeify/Tradovate.</div>
+  </div>
+
+  <div id="backtestReport" class="algo-board">
+    <div class="algo-empty">Loading Python backtest report...</div>
   </div>
 
   <div id="result" class="algo-result-card"></div>
@@ -2503,7 +2551,7 @@ body {
 <script>
 let strategy = "momentum";
 let timeframe = "5m";
-const LOCKED_SYMBOL = "MNQ";
+const LOCKED_SYMBOL = "NQ1!";
 let lastTicker = LOCKED_SYMBOL;
 let watchlist = [];
 let watchlistData = [];
@@ -2551,6 +2599,7 @@ let searchSuggestions = [];
 let searchDebounce = null;
 let latestHotList = [];
 let latestAlgorithmDashboard = null;
+let latestBacktestReport = null;
 let portfolioCoachState = null;
 let portfolioReviewState = [];
 let portfolioStreakState = null;
@@ -2559,7 +2608,7 @@ let scannerCache = {};
 let scannerCacheTime = 0;
 const DEFAULT_SCANNER_UNIVERSE = [LOCKED_SYMBOL];
 const FUTURES_SUGGESTIONS = [
-  { symbol: "MNQ", name: "Micro E-mini Nasdaq 100 Futures", exchange: "CME" }
+  { symbol: "NQ1!", name: "E-mini Nasdaq 100 Futures", exchange: "CME" }
 ];
 const CANDLE_REFRESH_INTERVAL_MS = 15000;
 const SEARCH_DEBOUNCE_MS = 400;
@@ -2609,8 +2658,9 @@ function updateArmedFuture(active){
     return;
   }
   if(active && active.root){
+    const displayRoot = active.searched_symbol === "NQ1" ? "NQ1" : active.root;
     const routeSymbol = active.tradovate_symbol || active.searched_symbol || active.root;
-    badge.innerText = routeSymbol && routeSymbol !== active.root ? `Armed: ${active.root} -> ${routeSymbol}` : `Armed: ${active.root}`;
+    badge.innerText = routeSymbol && routeSymbol !== displayRoot ? `Armed: ${displayRoot} -> ${routeSymbol}` : `Armed: ${displayRoot}`;
     badge.classList.add("active");
   }else{
     badge.innerText = "No market armed";
@@ -2622,7 +2672,7 @@ function setOnboardingVisible(visible){
   return;
 }
 
-function renderMarketEmptyState(title="MNQ paper bot is armed.", copy="TradingView MNQ alerts can be logged by the app while the strategy runs in TradingView."){
+function renderMarketEmptyState(title="NQ1 paper bot is armed.", copy="TradingView NQ1 alerts can be logged by the app while the strategy runs in TradingView."){
     const result = document.getElementById("result");
     const insights = document.getElementById("marketInsights");
     result.innerHTML = `
@@ -2630,7 +2680,7 @@ function renderMarketEmptyState(title="MNQ paper bot is armed.", copy="TradingVi
         <div class="empty-title">${title}</div>
       <div class="empty-copy">${copy}</div>
       <div class="empty-grid">
-        <div class="empty-tip">Only <strong>MNQ</strong> TradingView alerts are accepted.</div>
+        <div class="empty-tip">Only <strong>NQ1</strong> TradingView alerts are accepted.</div>
         <div class="empty-tip">Use TradingView Strategy Tester or alerts to watch the paper logic fire live.</div>
         <div class="empty-tip">Direct TradingView Paper Trading auto-fills are not available from Pine alone.</div>
         </div>
@@ -3750,7 +3800,7 @@ function formatPercent(value){
 
 function isIndexTicker(ticker){
   const symbol = String(ticker || lastTicker || "").toUpperCase();
-  return symbol === "MNQ" || symbol.startsWith("MNQ");
+  return (symbol === "NQ" || symbol.startsWith("NQ")) && !symbol.startsWith("MNQ");
 }
 
 function formatMarketPrice(value, ticker=lastTicker){
@@ -3790,12 +3840,12 @@ function renderAlgoLivePanel(payload){
     <div class="algo-live-orb"></div>
     <div class="algo-live-label">Execution Status</div>
     <div class="algo-live-title">${live.label || "Live execution locked"}</div>
-    <div class="algo-live-copy">${live.summary || "TradingView can generate MNQ strategy alerts now. The app logs those paper signals live."}</div>
+    <div class="algo-live-copy">${live.summary || "TradingView can generate NQ1 strategy alerts now. The app logs those paper signals live."}</div>
     <div class="confirmation-list" style="margin-top:14px;">
       <div class="confirmation-pill">${live.tradovate_configured ? "Broker bridge configured" : "TradingView paper panel not directly automatable"}</div>
       <div class="confirmation-pill">${live.tradingview_webhook_configured ? "TradingView webhook ready" : "Webhook not configured"}</div>
-      <div class="confirmation-pill">${live.mnq_bridge_enabled ? "MNQ bridge on" : "MNQ bridge off"}</div>
-      <div class="confirmation-pill">${live.mnq_execution_symbol ? `Executes ${live.mnq_execution_symbol}` : "Execution contract not set"}</div>
+      <div class="confirmation-pill">${live.nq_bridge_enabled ? "NQ bridge on" : "NQ bridge off"}</div>
+      <div class="confirmation-pill">${live.nq_execution_symbol ? `Executes ${live.nq_execution_symbol}` : "Execution contract not set"}</div>
       <div class="confirmation-pill">${live.enabled ? "Tradovate routing enabled" : "Paper signal log only"}</div>
     </div>
   `;
@@ -3878,15 +3928,16 @@ function renderAlgorithmDashboard(payload){
             <tr>
               <td>
                 <div class="algo-name">${row.algo}</div>
-                <div class="algo-sub">${row.ticker || "MNQ"} -> ${row.tradovate_symbol || "Tradovate"} | ${row.received_at ? formatLongDate(row.received_at) : "Just now"}</div>
+                <div class="algo-sub">${row.ticker || "NQ1!"} -> ${row.tradovate_symbol || "Tradovate"} | ${row.received_at ? formatLongDate(row.received_at) : "Just now"}</div>
               </td>
               <td><span class="algo-pill ${getAlgoPillClass(row.action)}">${row.action || "SIGNAL"}</span></td>
               <td>${row.qty || 1}</td>
-              <td>${formatMarketPrice(row.price, "MNQ")}</td>
-              <td>${row.target ? formatMarketPrice(row.target, "MNQ") : "--"}</td>
-              <td>${row.stop ? formatMarketPrice(row.stop, "MNQ") : "--"}</td>
+              <td>${formatMarketPrice(row.price, LOCKED_SYMBOL)}</td>
+              <td>${row.target ? formatMarketPrice(row.target, LOCKED_SYMBOL) : "--"}</td>
+              <td>${row.stop ? formatMarketPrice(row.stop, LOCKED_SYMBOL) : "--"}</td>
               <td>
                 <div>${row.status || "Placed"}</div>
+                ${renderBotIntelligenceMeta(row, "algo-sub")}
                 <div class="algo-sub">${row.reason || row.mode || "Order routed."}</div>
               </td>
             </tr>
@@ -3917,6 +3968,288 @@ async function loadAlgorithmDashboard(force=false){
     console.log("Algorithm dashboard failed", err);
     if(container){
       container.innerHTML = '<div class="algo-empty">The algorithm board could not load. Try Refresh Board in a moment.</div>';
+    }
+  }
+}
+
+function safeReportText(value){
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function formatBacktestMoney(value, signed=true){
+  const number = Number(value || 0);
+  const sign = signed && number > 0 ? "+" : number < 0 ? "-" : "";
+  return `${sign}$${Math.abs(number).toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+}
+
+function formatBacktestNumber(value, decimals=0){
+  const number = Number(value || 0);
+  return number.toLocaleString(undefined, { maximumFractionDigits: decimals, minimumFractionDigits: decimals });
+}
+
+function renderBacktestCharts(payload){
+  const equityChart = document.getElementById("backtestEquityChart");
+  const tradeChart = document.getElementById("backtestTradeChart");
+  if(!window.Plotly || !equityChart || !tradeChart){
+    return;
+  }
+
+  const equity = Array.isArray(payload?.equity) ? payload.equity : [];
+  const trades = Array.isArray(payload?.trades) ? payload.trades : [];
+  const chartConfig = {
+    responsive: true,
+    displaylogo: false,
+    scrollZoom: true
+  };
+  const baseLayout = {
+    paper_bgcolor: "rgba(8, 16, 29, 0)",
+    plot_bgcolor: "rgba(8, 16, 29, 0)",
+    margin: { l: 56, r: 18, t: 10, b: 46 },
+    font: { color: "#94a3b8" },
+    showlegend: false,
+    xaxis: { gridcolor: "rgba(148, 163, 184, 0.12)", zeroline: false, automargin: true },
+    yaxis: { gridcolor: "rgba(148, 163, 184, 0.12)", zeroline: false, tickprefix: "$", automargin: true }
+  };
+
+  const peakValues = [];
+  let peak = equity[0]?.equity || 0;
+  equity.forEach(point => {
+    peak = Math.max(peak, Number(point.equity || 0));
+    peakValues.push(peak);
+  });
+
+  Plotly.react(equityChart, [{
+    x: equity.map(point => point.time),
+    y: equity.map(point => Number(point.equity || 0)),
+    type: "scatter",
+    mode: "lines",
+    line: { color: "#22c55e", width: 3 },
+    fill: "tozeroy",
+    fillcolor: "rgba(34, 197, 94, 0.12)",
+    hovertemplate: "Time: %{x}<br>Equity: $%{y:,.2f}<extra></extra>"
+  },{
+    x: equity.map(point => point.time),
+    y: peakValues,
+    type: "scatter",
+    mode: "lines",
+    line: { color: "#60a5fa", width: 1.4, dash: "dot" },
+    hovertemplate: "Peak: $%{y:,.2f}<extra></extra>"
+  }], baseLayout, chartConfig);
+
+  Plotly.react(tradeChart, [{
+    x: trades.map(trade => trade.index),
+    y: trades.map(trade => Number(trade.pnl || 0)),
+    type: "bar",
+    marker: { color: trades.map(trade => Number(trade.pnl || 0) >= 0 ? "#22c55e" : "#ef4444") },
+    customdata: trades.map(trade => [trade.side, trade.setup, trade.points, trade.exit_time]),
+    hovertemplate: "Trade %{x}<br>%{customdata[0]} %{customdata[1]}<br>P/L: $%{y:,.2f}<br>Points: %{customdata[2]:.2f}<br>%{customdata[3]}<extra></extra>"
+  }], {
+    ...baseLayout,
+    yaxis: { ...baseLayout.yaxis, zeroline: true, zerolinecolor: "rgba(226, 232, 240, 0.36)" },
+    xaxis: { ...baseLayout.xaxis, title: "Trade number" }
+  }, chartConfig);
+}
+
+function renderBacktestReport(payload){
+  const container = document.getElementById("backtestReport");
+  if(!container){
+    return;
+  }
+
+  if(!payload?.ok){
+    container.innerHTML = `
+      <div class="algo-board-head">
+        <div>
+          <div class="section-kicker">Python Backtest Report</div>
+          <div class="section-title">No report files found yet</div>
+          <div class="compact-copy">Run the Python backtest again and this panel will load the newest summary, equity curve, and trade list.</div>
+        </div>
+        <button class="algo-secondary" onclick="loadBacktestReport(true)">Refresh Report</button>
+      </div>
+    `;
+    return;
+  }
+
+  const summary = payload.summary || {};
+  const counts = payload.counts || {};
+  const trades = Array.isArray(payload.trades) ? payload.trades : [];
+  const setupRows = Array.isArray(payload.setup_breakdown) ? payload.setup_breakdown : [];
+  const firstTrade = trades[0];
+  const lastTrade = trades[trades.length - 1];
+  const generated = payload.generated_at ? new Date(payload.generated_at) : new Date();
+
+  container.innerHTML = `
+    <div class="algo-board-head">
+      <div>
+        <div class="section-kicker">Python Backtest Report</div>
+        <div class="section-title">${formatBacktestNumber(counts.trades || summary.trades || trades.length)} strategy trades</div>
+        <div class="compact-copy">Strategy Report style view from your local Python backtest. This is research/backtesting only; routed live orders still appear in the board above.</div>
+        <div class="backtest-note">${safeReportText(summary.symbol || "NQ")} | ${safeReportText(summary.logic || "current logic")} | ${safeReportText(summary.backtest_start || firstTrade?.entry_time || "")} to ${safeReportText(summary.backtest_end || lastTrade?.exit_time || "")}</div>
+      </div>
+      <div class="backtest-report-actions">
+        <button class="algo-secondary" onclick="loadBacktestReport(true)">Refresh Report</button>
+      </div>
+    </div>
+
+    <div class="algo-stat-grid">
+      <div class="algo-stat">
+        <div class="algo-stat-label">Net Profit</div>
+        <div class="algo-stat-value ${Number(summary.total_pnl || 0) >= 0 ? "up" : "down"}">${formatBacktestMoney(summary.total_pnl)}</div>
+      </div>
+      <div class="algo-stat">
+        <div class="algo-stat-label">Max Drawdown</div>
+        <div class="algo-stat-value down">${formatBacktestMoney(summary.max_drawdown_dollars)}</div>
+      </div>
+      <div class="algo-stat">
+        <div class="algo-stat-label">Total Trades</div>
+        <div class="algo-stat-value">${formatBacktestNumber(counts.trades || summary.trades || trades.length)}</div>
+      </div>
+      <div class="algo-stat">
+        <div class="algo-stat-label">Profitable Trades</div>
+        <div class="algo-stat-value">${formatBacktestNumber(summary.wins || counts.wins || 0)} / ${formatBacktestNumber(summary.losses || counts.losses || 0)}</div>
+      </div>
+      <div class="algo-stat">
+        <div class="algo-stat-label">Profit Factor</div>
+        <div class="algo-stat-value">${formatBacktestNumber(summary.profit_factor, 2)}</div>
+      </div>
+    </div>
+
+    <div class="algo-stat-grid">
+      <div class="algo-stat">
+        <div class="algo-stat-label">Win Rate</div>
+        <div class="algo-stat-value">${formatBacktestNumber(summary.win_rate, 2)}%</div>
+      </div>
+      <div class="algo-stat">
+        <div class="algo-stat-label">Expectancy</div>
+        <div class="algo-stat-value ${Number(summary.expectancy || 0) >= 0 ? "up" : "down"}">${formatBacktestMoney(summary.expectancy)}</div>
+      </div>
+      <div class="algo-stat">
+        <div class="algo-stat-label">Largest Win</div>
+        <div class="algo-stat-value up">${formatBacktestMoney(summary.largest_win)}</div>
+      </div>
+      <div class="algo-stat">
+        <div class="algo-stat-label">Largest Loss</div>
+        <div class="algo-stat-value down">${formatBacktestMoney(summary.largest_loss)}</div>
+      </div>
+      <div class="algo-stat">
+        <div class="algo-stat-label">Ending Equity</div>
+        <div class="algo-stat-value">${formatBacktestMoney(summary.ending_cash, false)}</div>
+      </div>
+    </div>
+
+    <div class="backtest-chart-grid">
+      <div class="backtest-chart-card">
+        <div class="backtest-chart-title">Equity Chart</div>
+        <div id="backtestEquityChart" class="backtest-chart"></div>
+      </div>
+      <div class="backtest-chart-card">
+        <div class="backtest-chart-title">All ${formatBacktestNumber(trades.length)} Trades P/L</div>
+        <div id="backtestTradeChart" class="backtest-chart"></div>
+      </div>
+    </div>
+
+    <div class="algo-board-head">
+      <div>
+        <div class="section-kicker">Per-Setup Breakdown</div>
+        <div class="compact-copy">Grouped like a quick strategy report so we can see which setup carried or hurt the test.</div>
+      </div>
+    </div>
+    <div class="algo-table-wrap" style="margin-bottom:16px;">
+      <table class="algo-table">
+        <thead>
+          <tr>
+            <th>Setup</th>
+            <th>Trades</th>
+            <th>Win Rate</th>
+            <th>Wins</th>
+            <th>Losses</th>
+            <th>Net P/L</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${setupRows.map(row => `
+            <tr>
+              <td><div class="algo-name">${safeReportText(row.setup)}</div></td>
+              <td>${formatBacktestNumber(row.trades)}</td>
+              <td>${formatBacktestNumber(row.win_rate, 2)}%</td>
+              <td class="up">${formatBacktestNumber(row.wins)}</td>
+              <td class="down">${formatBacktestNumber(row.losses)}</td>
+              <td class="${Number(row.pnl || 0) >= 0 ? "up" : "down"}">${formatBacktestMoney(row.pnl)}</td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="algo-board-head">
+      <div>
+        <div class="section-kicker">List Of Trades</div>
+        <div class="compact-copy">Every backtest trade is shown here, matching the ${formatBacktestNumber(trades.length)} bars in the P/L chart.</div>
+      </div>
+    </div>
+    <div class="algo-table-wrap">
+      <table class="algo-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Side</th>
+            <th>Setup</th>
+            <th>Entry</th>
+            <th>Exit</th>
+            <th>Points</th>
+            <th>P/L</th>
+            <th>Reason</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${trades.map(trade => `
+            <tr>
+              <td>${formatBacktestNumber(trade.index)}</td>
+              <td><span class="algo-pill ${getAlgoPillClass(trade.side)}">${safeReportText(trade.side)}</span></td>
+              <td>
+                <div class="algo-name">${safeReportText(trade.setup)}</div>
+                <div class="algo-sub">${trade.entry_time ? formatLongDate(trade.entry_time) : "--"}</div>
+              </td>
+              <td>${formatMarketPrice(trade.entry, LOCKED_SYMBOL)}</td>
+              <td>
+                <div>${formatMarketPrice(trade.exit, LOCKED_SYMBOL)}</div>
+                <div class="algo-sub">${trade.exit_time ? formatLongDate(trade.exit_time) : "--"}</div>
+              </td>
+              <td class="${Number(trade.points || 0) >= 0 ? "up" : "down"}">${formatBacktestNumber(trade.points, 2)}</td>
+              <td class="${Number(trade.pnl || 0) >= 0 ? "up" : "down"}">${formatBacktestMoney(trade.pnl)}</td>
+              <td>${safeReportText(trade.reason)}</td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="algo-sub" style="margin-top:12px;">Updated ${liveEtTimeFormatter.format(generated)} ET | ${formatBacktestNumber(counts.equity_points)} equity points | ${formatBacktestNumber(counts.signals)} scored bars</div>
+  `;
+
+  renderBacktestCharts(payload);
+}
+
+async function loadBacktestReport(force=false){
+  const container = document.getElementById("backtestReport");
+  if(container){
+    container.innerHTML = '<div class="algo-empty">Loading Python backtest report...</div>';
+  }
+
+  try{
+    const res = await fetch("/backtest-report?id=NQ_C_0");
+    const payload = await res.json();
+    latestBacktestReport = payload;
+    renderBacktestReport(payload);
+  }catch(err){
+    console.log("Backtest report failed", err);
+    if(container){
+      container.innerHTML = '<div class="algo-empty">The Python backtest report could not load. Run the backtest again or refresh the app.</div>';
     }
   }
 }
@@ -5528,7 +5861,7 @@ async function analyze(sym){
 
     if(!d || d.error){
       setOnboardingVisible(true);
-      renderMarketEmptyState("MNQ data is temporarily unavailable.", "The bot is still armed to MNQ, but the app could not build the MNQ card yet. Try Refresh Now in a moment.");
+      renderMarketEmptyState("NQ1 data is temporarily unavailable.", "The bot is still armed to NQ1, but the app could not build the NQ1 card yet. Try Refresh Now in a moment.");
       showChartMessage("No chart data is available yet. Try Refresh Now after a moment.");
       setLastUpdated("No recent market data available");
       setStatus("Live provider data is temporarily unavailable.", "warning");
@@ -5633,7 +5966,7 @@ async function analyze(sym){
   }catch(err){
     console.log(err);
     setOnboardingVisible(true);
-    renderMarketEmptyState("Something went wrong while loading MNQ.", "The bot remains armed to MNQ. Try again in a moment.");
+    renderMarketEmptyState("Something went wrong while loading NQ1.", "The bot remains armed to NQ1. Try again in a moment.");
     setLastUpdated("Update failed");
     setStatus("Something went wrong while loading market data.", "warning");
   }finally{
@@ -5688,6 +6021,47 @@ function formatBotTradePrice(value){
   return Number.isFinite(number) ? formatMarketPrice(number, LOCKED_SYMBOL) : "--";
 }
 
+function renderBotIntelligenceMeta(item, className="alert-meta"){
+  const bits = [];
+  if(item.ai_score !== null && item.ai_score !== undefined){
+    bits.push(`AI ${Number(item.ai_score).toFixed(1)}`);
+  }
+  if(item.ai_bias){
+    bits.push(`Bias: ${item.ai_bias}`);
+  }
+  if(item.entry_style){
+    bits.push(item.entry_style);
+  }
+  if(item.grade){
+    bits.push(`Grade ${item.grade}`);
+  }
+  if(item.risk_mode){
+    bits.push(`Risk: ${item.risk_mode}`);
+  }
+  if(item.stop_mode){
+    bits.push(item.stop_mode.replaceAll("_", " "));
+  }
+  if(item.score !== null && item.score !== undefined){
+    bits.push(`Setup ${Number(item.score).toFixed(1)}`);
+  }
+  if(item.buyers_pct !== null && item.buyers_pct !== undefined && item.sellers_pct !== null && item.sellers_pct !== undefined){
+    bits.push(`${Number(item.buyers_pct).toFixed(0)}% buyers / ${Number(item.sellers_pct).toFixed(0)}% sellers`);
+  }
+  if(item.pattern){
+    bits.push(`Pattern: ${item.pattern}`);
+  }
+  if(item.projection){
+    bits.push(`Projection: ${item.projection}`);
+  }
+  if(item.decision_zone){
+    bits.push(`Zone: ${item.decision_zone}`);
+  }
+  if(item.crowd_pressure){
+    bits.push(item.crowd_pressure);
+  }
+  return bits.length ? `<div class="${className}">${bits.join(" | ")}</div>` : "";
+}
+
 function renderBotTrades(){
   const summary = document.getElementById("botTradeSummary");
   const list = document.getElementById("botTradeList");
@@ -5699,7 +6073,7 @@ function renderBotTrades(){
 
   if(!botTrades.length){
     summary.innerText = "No algorithm trades yet.";
-    list.innerHTML = '<div class="paper-empty">TradingView MNQ bot alerts will show here as app paper signals.</div>';
+    list.innerHTML = '<div class="paper-empty">TradingView NQ1 bot alerts will show here as app paper signals.</div>';
     return;
   }
 
@@ -5720,6 +6094,7 @@ function renderBotTrades(){
           <div class="alert-status-pill">${trade.status || "Logged"}</div>
         </div>
         <div class="alert-meta">Qty ${trade.qty || 1} | Entry ${formatBotTradePrice(trade.price)} | Target ${formatBotTradePrice(trade.target)} | Stop ${formatBotTradePrice(trade.stop)}</div>
+        ${renderBotIntelligenceMeta(trade)}
         <div class="alert-meta">${trade.verification_status || "Not verified"} | Edge ${Number(trade.edge || 0).toFixed(1)} | ${trade.reason || "Algorithm signal received."}</div>
       </div>
     `;
@@ -5765,7 +6140,7 @@ function renderAlerts(){
     summary.innerText = activeAlerts.length
       ? `${activeAlerts.length} active alert${activeAlerts.length === 1 ? "" : "s"} | No triggered messages yet.`
       : "No alert messages yet.";
-    list.innerHTML = '<div class="paper-empty">Create an MNQ alert from the market card and the triggered message will appear here when price hits your level.</div>';
+    list.innerHTML = '<div class="paper-empty">Create an NQ1 alert from the market card and the triggered message will appear here when price hits your level.</div>';
     return;
   }
 
@@ -5820,6 +6195,7 @@ async function initializeApp(){
   await loadWatchlist();
   await loadBotTrades();
   await loadAlgorithmDashboard();
+  await loadBacktestReport();
   setInterval(() => loadBotTrades(true), 15000);
 }
 

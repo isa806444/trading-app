@@ -2,10 +2,12 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from flask import Flask, jsonify, request, send_from_directory, session, has_request_context
 from flask_cors import CORS
+import csv
 import hashlib
 import json
 import math
 import os
+from pathlib import Path
 import psycopg2
 import requests
 import time
@@ -18,6 +20,8 @@ CORS(app)
 
 WATCHLIST_FILE = "watchlist.json"
 MARKET_CACHE_FILE = "market_cache.json"
+BACKTEST_OUTPUT_DIR = Path("data/backtests")
+BACKTEST_SNAPSHOT_DIR = Path("static/backtests")
 POLYGON_BASE_URL = "https://api.polygon.io"
 POLYGON_API_KEY_ENV = "POLYGON_API_KEY"
 DATABENTO_API_KEY_ENV = "DATABENTO_API_KEY"
@@ -48,14 +52,15 @@ TRADOVATE_DEFAULT_ORDER_QTY_ENV = "TRADOVATE_DEFAULT_ORDER_QTY"
 TRADOVATE_MAX_ORDER_QTY_ENV = "TRADOVATE_MAX_ORDER_QTY"
 TRADOVATE_MAX_DAILY_ORDERS_ENV = "TRADOVATE_MAX_DAILY_ORDERS"
 TRADOVATE_MAX_ACCOUNT_SIZE_USD_ENV = "TRADOVATE_MAX_ACCOUNT_SIZE_USD"
-TRADOVATE_MNQ_DOLLARS_PER_POINT_ENV = "TRADOVATE_MNQ_DOLLARS_PER_POINT"
-TRADOVATE_MNQ_BRIDGE_ENABLED_ENV = "TRADOVATE_MNQ_BRIDGE_ENABLED"
-TRADOVATE_MNQ_EXECUTION_SYMBOL_ENV = "TRADOVATE_MNQ_EXECUTION_SYMBOL"
+TRADOVATE_NQ_DOLLARS_PER_POINT_ENV = "TRADOVATE_NQ_DOLLARS_PER_POINT"
+TRADOVATE_NQ_BRIDGE_ENABLED_ENV = "TRADOVATE_NQ_BRIDGE_ENABLED"
+TRADOVATE_NQ_EXECUTION_SYMBOL_ENV = "TRADOVATE_NQ_EXECUTION_SYMBOL"
 TRADOVATE_TICK_SIZE_ENV = "TRADOVATE_TICK_SIZE"
 ALGO_MIN_EDGE_FOR_AUTO_TRADE_ENV = "ALGO_MIN_EDGE_FOR_AUTO_TRADE"
 ALGO_DEFAULT_TARGET_PCT_ENV = "ALGO_DEFAULT_TARGET_PCT"
 ALGO_DEFAULT_STOP_PCT_ENV = "ALGO_DEFAULT_STOP_PCT"
 TRADINGVIEW_WEBHOOK_SECRET_ENV = "TRADINGVIEW_WEBHOOK_SECRET"
+TRADINGVIEW_ALLOWED_TAGS_ENV = "TRADINGVIEW_ALLOWED_TAGS"
 DATABASE_URL_ENV = "DATABASE_URL"
 QUOTE_CACHE_TTL = 90
 LIVE_PRICE_CACHE_TTL = 5
@@ -79,9 +84,10 @@ STATIC_US_MACRO_EVENTS = [
     ("2026-07-14T08:30:00-04:00", "Consumer Price Index", "June 2026"),
     ("2026-07-15T08:30:00-04:00", "Producer Price Index", "June 2026"),
 ]
-ALGORITHM_LOCKED_SYMBOL = "MNQ"
-ALGORITHM_POLYGON_SYMBOL = "MNQ"
-ALGORITHM_DEFAULT_UNIVERSE = [ALGORITHM_LOCKED_SYMBOL]
+ALGORITHM_LOCKED_SYMBOL = "NQ"
+ALGORITHM_DISPLAY_SYMBOL = "NQ1!"
+ALGORITHM_POLYGON_SYMBOL = "NQ"
+ALGORITHM_DEFAULT_UNIVERSE = [ALGORITHM_DISPLAY_SYMBOL]
 ALGORITHM_SIGNAL_CAPITAL = 100000
 FUTURES_ROOTS = {
     "ES", "MES", "NQ", "MNQ", "YM", "MYM", "RTY", "M2K",
@@ -108,11 +114,11 @@ def is_mnq_symbol(symbol):
         clean = clean.split(":", 1)[1]
     clean = clean.replace("!", "")
     alnum = "".join(ch for ch in clean if ch.isalnum())
-    return alnum == "MNQ" or alnum.startswith("MNQ")
+    return (alnum == "NQ" or alnum.startswith("NQ")) and not alnum.startswith("MNQ")
 
 
 def display_market_symbol(symbol):
-    return ALGORITHM_LOCKED_SYMBOL if is_mnq_symbol(symbol) else str(symbol or "").upper().strip()
+    return ALGORITHM_DISPLAY_SYMBOL if is_mnq_symbol(symbol) else str(symbol or "").upper().strip()
 
 
 def polygon_market_symbol(symbol):
@@ -201,6 +207,11 @@ def tradingview_webhook_secret():
     return os.environ.get(TRADINGVIEW_WEBHOOK_SECRET_ENV, "").strip()
 
 
+def allowed_tradingview_tags():
+    raw = os.environ.get(TRADINGVIEW_ALLOWED_TAGS_ENV, "nq1-smart-paper-v44")
+    return {tag.strip() for tag in raw.split(",") if tag.strip()}
+
+
 def env_bool(key, default=False):
     raw = os.environ.get(key, "").strip().lower()
     if not raw:
@@ -237,11 +248,11 @@ def tradovate_execution_ready():
 
 
 def mnq_tradovate_bridge_enabled():
-    return env_bool(TRADOVATE_MNQ_BRIDGE_ENABLED_ENV, False)
+    return env_bool(TRADOVATE_NQ_BRIDGE_ENABLED_ENV, False)
 
 
 def get_mnq_execution_symbol():
-    return os.environ.get(TRADOVATE_MNQ_EXECUTION_SYMBOL_ENV, "").strip().upper()
+    return os.environ.get(TRADOVATE_NQ_EXECUTION_SYMBOL_ENV, "").strip().upper()
 
 
 def get_tradovate_tick_size():
@@ -253,7 +264,7 @@ def get_tradovate_max_account_size_usd():
 
 
 def get_mnq_dollars_per_point():
-    return env_float(TRADOVATE_MNQ_DOLLARS_PER_POINT_ENV, 2)
+    return env_float(TRADOVATE_NQ_DOLLARS_PER_POINT_ENV, 20)
 
 
 def mnq_tradovate_bridge_ready():
@@ -1222,7 +1233,7 @@ def set_active_futures_market(symbol):
 
 def get_active_futures_market():
     if not active_futures_market or active_futures_market.get("root") != ALGORITHM_LOCKED_SYMBOL:
-        return set_active_futures_market(ALGORITHM_LOCKED_SYMBOL)
+        return set_active_futures_market(ALGORITHM_DISPLAY_SYMBOL)
     return active_futures_market
 
 
@@ -1452,6 +1463,19 @@ def build_tradingview_execution_signal(payload):
     symbol = display_market_symbol(raw_symbol)
     price = first_payload_float(payload, ["price", "close", "mark", "entry"], None)
     edge = first_payload_float(payload, ["edge", "score"], 0)
+    setup_score = first_payload_float(payload, ["score", "setup_score", "setupScore"], None)
+    ai_score = first_payload_float(payload, ["ai_score", "aiScore"], None)
+    buyers_pct = first_payload_float(payload, ["buyers_pct", "buyersPct"], None)
+    sellers_pct = first_payload_float(payload, ["sellers_pct", "sellersPct"], None)
+    pattern = str(first_payload_value(payload, ["pattern", "chart_pattern", "chartPattern"], "") or "").strip()
+    projection = str(first_payload_value(payload, ["projection", "projection_label", "projectionLabel"], "") or "").strip()
+    decision_zone = str(first_payload_value(payload, ["decision_zone", "decisionZone"], "") or "").strip()
+    crowd_pressure = str(first_payload_value(payload, ["crowd_pressure", "crowdPressure"], "") or "").strip()
+    ai_bias = str(first_payload_value(payload, ["ai_bias", "aiBias"], "") or "").strip()
+    entry_style = str(first_payload_value(payload, ["entry_style", "entryStyle"], "") or "").strip()
+    grade = str(first_payload_value(payload, ["grade", "trade_grade", "tradeGrade"], "") or "").strip()
+    risk_mode = str(first_payload_value(payload, ["risk_mode", "riskMode"], "") or "").strip()
+    reason = str(first_payload_value(payload, ["reason", "message"], "") or "").strip()
     qty = env_int(TRADOVATE_DEFAULT_ORDER_QTY_ENV, 1)
     payload_qty = first_payload_float(payload, ["qty", "quantity", "orderQty", "contracts"], None)
     if payload_qty is not None:
@@ -1461,14 +1485,16 @@ def build_tradingview_execution_signal(payload):
     target = first_payload_float(payload, ["target", "take_profit", "takeProfit", "tp"], None)
     stop = first_payload_float(payload, ["stop", "stop_loss", "stopLoss", "sl"], None)
     profit_mode = str(first_payload_value(payload, ["profit_mode", "profitMode"], "") or "").upper().strip()
+    stop_mode = str(first_payload_value(payload, ["stop_mode", "stopMode"], "") or "").upper().strip()
     trail_only = profit_mode in {"TRAIL_ONLY", "RUNNER", "NO_TARGET", "TRAILING_STOP"}
+    smart_exit_only = stop_mode in {"SMART_EXIT_ONLY", "NO_HARD_STOP", "DISASTER_ONLY"}
     target_pct = first_payload_float(payload, ["target_pct", "targetPct"], env_float(ALGO_DEFAULT_TARGET_PCT_ENV, 0.02))
     stop_pct = first_payload_float(payload, ["stop_pct", "stopPct"], env_float(ALGO_DEFAULT_STOP_PCT_ENV, 0.01))
 
     if price and action in {"BUY", "SELL"}:
         if target is None and not trail_only:
             target = price * (1 + target_pct) if action == "BUY" else price * (1 - target_pct)
-        if stop is None:
+        if stop is None and not smart_exit_only:
             stop = price * (1 - stop_pct) if action == "BUY" else price * (1 + stop_pct)
     if not profit_mode:
         profit_mode = "TRAIL_ONLY" if target is None else "BRACKET_TARGET"
@@ -1483,10 +1509,24 @@ def build_tradingview_execution_signal(payload):
         "tradovate_symbol": normalize_tradovate_symbol(get_mnq_execution_symbol() or symbol),
         "price": round(price, 4) if price else None,
         "edge": round(edge, 2),
+        "score": round(setup_score, 2) if setup_score is not None else None,
+        "ai_score": round(ai_score, 2) if ai_score is not None else None,
+        "buyers_pct": round(buyers_pct, 2) if buyers_pct is not None else None,
+        "sellers_pct": round(sellers_pct, 2) if sellers_pct is not None else None,
+        "pattern": pattern,
+        "projection": projection,
+        "decision_zone": decision_zone,
+        "crowd_pressure": crowd_pressure,
+        "ai_bias": ai_bias,
+        "entry_style": entry_style,
+        "grade": grade,
+        "risk_mode": risk_mode,
+        "reason": reason,
         "qty": qty,
         "target": round(target, 4) if target else None,
         "stop": round(stop, 4) if stop else None,
         "profit_mode": profit_mode,
+        "stop_mode": stop_mode,
         "tag": str(first_payload_value(payload, ["tag"], "ai-algo")),
         "signal_key": f"{symbol}:{action}:{signal_key}"
     }
@@ -1675,24 +1715,34 @@ def estimate_mnq_notional(signal):
     return price * qty * get_mnq_dollars_per_point()
 
 
+def signal_uses_smart_exit_only(signal):
+    stop_mode = str(signal.get("stop_mode") or "").upper().strip()
+    profit_mode = str(signal.get("profit_mode") or "").upper().strip()
+    return (
+        stop_mode in {"SMART_EXIT_ONLY", "NO_HARD_STOP", "DISASTER_ONLY"}
+        or (profit_mode in {"TRAIL_ONLY", "RUNNER", "NO_TARGET", "TRAILING_STOP"} and not signal.get("stop"))
+    )
+
+
 def translate_mnq_signal_to_tradovate(signal):
     execution_symbol = get_mnq_execution_symbol() or signal.get("tradovate_symbol") or signal.get("symbol")
     tradovate_symbol = normalize_tradovate_symbol(execution_symbol)
     if not tradovate_symbol:
-        raise RuntimeError(f"Set {TRADOVATE_MNQ_EXECUTION_SYMBOL_ENV}=MNQM6 or map MNQ in {TRADOVATE_SYMBOL_MAP_ENV}.")
+        raise RuntimeError(f"Set {TRADOVATE_NQ_EXECUTION_SYMBOL_ENV}=NQM6 or map NQ in {TRADOVATE_SYMBOL_MAP_ENV}.")
 
     translated = dict(signal)
-    translated["source_symbol"] = signal.get("symbol") or ALGORITHM_LOCKED_SYMBOL
+    translated["source_symbol"] = signal.get("symbol") or ALGORITHM_DISPLAY_SYMBOL
     translated["tradovate_symbol"] = tradovate_symbol
 
     action = signal.get("action")
     if action in {"BUY", "SELL"}:
-        trail_only = signal.get("profit_mode") == "TRAIL_ONLY"
-        if not signal.get("price") or not signal.get("stop") or (not trail_only and not signal.get("target")):
-            raise RuntimeError("MNQ entry alerts need price and stop before routing to Tradovate; bracket mode also needs target.")
+        trail_only = str(signal.get("profit_mode") or "").upper().strip() in {"TRAIL_ONLY", "RUNNER", "NO_TARGET", "TRAILING_STOP"}
+        smart_exit_only = signal_uses_smart_exit_only(signal)
+        if not signal.get("price") or (not smart_exit_only and not signal.get("stop")) or (not trail_only and not signal.get("target")):
+            raise RuntimeError("NQ1 entry alerts need price; bracket mode also needs stop and target.")
         translated["price"] = round_to_tick(signal["price"])
         translated["target"] = round_to_tick(signal["target"]) if signal.get("target") else None
-        translated["stop"] = round_to_tick(signal["stop"])
+        translated["stop"] = round_to_tick(signal["stop"]) if signal.get("stop") else None
     elif translated.get("price"):
         translated["price"] = round_to_tick(translated["price"])
 
@@ -1726,6 +1776,21 @@ def post_tradovate_order(endpoint, body):
 
 def place_tradovate_market_order(signal, account):
     action = "Sell" if signal["action"] == "EXIT_LONG" else "Buy"
+    body = {
+        "accountSpec": account["accountSpec"],
+        "accountId": account["accountId"],
+        "action": action,
+        "symbol": signal["tradovate_symbol"],
+        "orderQty": signal["qty"],
+        "orderType": "Market",
+        "isAutomated": True,
+        "customTag50": signal.get("tag", "ai-algo")[:64]
+    }
+    return post_tradovate_order("placeorder", body)
+
+
+def place_tradovate_entry_market_order(signal, account):
+    action = "Buy" if signal["action"] == "BUY" else "Sell"
     body = {
         "accountSpec": account["accountSpec"],
         "accountId": account["accountId"],
@@ -1785,38 +1850,42 @@ def route_tradingview_signal_to_tradovate(payload):
     if signal["action"] not in {"BUY", "SELL", "EXIT_LONG", "EXIT_SHORT"}:
         result["reason"] = "TradingView alert was stored but action is not routable."
         return result
+    allowed_tags = allowed_tradingview_tags()
+    if allowed_tags and signal.get("tag") not in allowed_tags:
+        result["reason"] = f"Rejected: TradingView alert tag must be one of {', '.join(sorted(allowed_tags))}."
+        return result
     if not signal["symbol"]:
         result["reason"] = "TradingView alert was stored but no ticker/contract was supplied."
         return result
     if not is_mnq_symbol(signal["symbol"]):
-        result["reason"] = "Rejected: this bot is locked to MNQ only."
+        result["reason"] = "Rejected: this bot is locked to NQ1 only."
         return result
     active_market = get_active_futures_market()
     result["active_future"] = active_market
     if not active_market:
-        result["reason"] = "Rejected: the bot is waiting for the default MNQ market lock."
+        result["reason"] = "Rejected: the bot is waiting for the default NQ1 market lock."
         return result
     if not active_market_matches_signal(signal):
         result["reason"] = f"Rejected: {active_market.get('root')} is armed, but this alert was for {signal['symbol']}."
         return result
     if duplicate_tradingview_signal(signal):
-        result["reason"] = "Duplicate TradingView MNQ signal ignored."
+        result["reason"] = "Duplicate TradingView NQ1 signal ignored."
         return result
 
     result["verification"] = {
         "enabled": mnq_tradovate_bridge_enabled(),
         "passed": True,
-        "source": "tradingview_mnq",
-        "reason": "MNQ alert accepted. If the Tradovate bridge is enabled, the app routes this to the configured MNQ contract.",
+        "source": "tradingview_nq1",
+        "reason": "NQ1 alert accepted. If the Tradovate bridge is enabled, the app routes this to the configured NQ contract.",
         "candles": 0,
-        "symbol": ALGORITHM_LOCKED_SYMBOL,
+        "symbol": ALGORITHM_DISPLAY_SYMBOL,
         "model_action": signal["action"],
         "model_edge": signal.get("edge") or 0,
         "price_deviation_pct": None
     }
 
     if not mnq_tradovate_bridge_enabled():
-        result["reason"] = f"MNQ signal logged only. Set {TRADOVATE_MNQ_BRIDGE_ENABLED_ENV}=true to route to Tradeify/Tradovate."
+        result["reason"] = f"NQ1 signal logged only. Set {TRADOVATE_NQ_BRIDGE_ENABLED_ENV}=true to route to Tradeify/Tradovate."
         return result
     if not tradovate_configured():
         result["reason"] = "Tradeify/Tradovate credentials are not configured."
@@ -1847,10 +1916,10 @@ def route_tradingview_signal_to_tradovate(payload):
             "max_account_size_usd": max_account_size,
             "estimated_notional": round(estimated_notional, 2)
         }
-        minimum_mnq_contract = is_mnq_symbol(signal.get("symbol")) and int(signal.get("qty") or 0) <= 1
-        result["account_guard"]["minimum_mnq_contract_allowed"] = minimum_mnq_contract and estimated_notional > max_account_size
-        if estimated_notional > max_account_size and not minimum_mnq_contract:
-            result["reason"] = f"Rejected: estimated MNQ notional ${estimated_notional:,.0f} exceeds the ${max_account_size:,.0f} account guard."
+        minimum_nq_contract = is_mnq_symbol(signal.get("symbol")) and int(signal.get("qty") or 0) <= 1
+        result["account_guard"]["minimum_nq_contract_allowed"] = minimum_nq_contract and estimated_notional > max_account_size
+        if estimated_notional > max_account_size and not minimum_nq_contract:
+            result["reason"] = f"Rejected: estimated NQ notional ${estimated_notional:,.0f} exceeds the ${max_account_size:,.0f} account guard."
             return result
 
     try:
@@ -1858,7 +1927,9 @@ def route_tradingview_signal_to_tradovate(payload):
         result["signal"] = execution_signal
         account = resolve_tradovate_account()
         order_result = (
-            place_tradovate_bracket_order(execution_signal, account)
+            place_tradovate_entry_market_order(execution_signal, account)
+            if execution_signal["action"] in {"BUY", "SELL"} and signal_uses_smart_exit_only(execution_signal)
+            else place_tradovate_bracket_order(execution_signal, account)
             if execution_signal["action"] in {"BUY", "SELL"}
             else place_tradovate_market_order(execution_signal, account)
         )
@@ -1871,7 +1942,7 @@ def route_tradingview_signal_to_tradovate(payload):
             "order": order_result.get("response"),
             "failure": order_result.get("failure"),
             "reason": order_result.get("failure_text") or (
-                f"MNQ alert routed to Tradeify/Tradovate as {execution_signal.get('tradovate_symbol')}."
+                f"NQ1 alert routed to Tradeify/Tradovate as {execution_signal.get('tradovate_symbol')}."
                 if order_result.get("ok") else "Tradeify/Tradovate rejected the order."
             )
         })
@@ -1914,11 +1985,25 @@ def build_bot_trade_message(payload, execution):
         "price": signal.get("price"),
         "target": signal.get("target"),
         "stop": signal.get("stop"),
+        "stop_mode": signal.get("stop_mode"),
         "edge": signal.get("edge"),
+        "score": signal.get("score"),
+        "ai_score": signal.get("ai_score"),
+        "buyers_pct": signal.get("buyers_pct"),
+        "sellers_pct": signal.get("sellers_pct"),
+        "pattern": signal.get("pattern"),
+        "projection": signal.get("projection"),
+        "decision_zone": signal.get("decision_zone"),
+        "crowd_pressure": signal.get("crowd_pressure"),
+        "ai_bias": signal.get("ai_bias"),
+        "entry_style": signal.get("entry_style"),
+        "grade": signal.get("grade"),
+        "risk_mode": signal.get("risk_mode"),
         "verification": verification,
         "verification_status": "Verified" if verification.get("passed") else "Not verified",
         "active_future": execution.get("active_future"),
-        "reason": execution.get("reason") or ("Tradeify/Tradovate order routed." if routed else "Demo trade logged from algorithm alert."),
+        "reason": signal.get("reason") or execution.get("reason") or ("Tradeify/Tradovate order routed." if routed else "Demo trade logged from algorithm alert."),
+        "routing_reason": execution.get("reason"),
         "order": execution.get("order"),
         "tag": signal.get("tag")
     }
@@ -2992,8 +3077,8 @@ def build_algorithm_dashboard(tickers):
         edge = float(trade.get("edge") or 0)
         rows.append({
             "id": trade.get("id"),
-            "algo": "MNQ TradingView Bot",
-            "ticker": trade.get("symbol") or ALGORITHM_LOCKED_SYMBOL,
+            "algo": "NQ1 TradingView Bot",
+            "ticker": trade.get("symbol") or ALGORITHM_DISPLAY_SYMBOL,
             "tradovate_symbol": trade.get("tradovate_symbol"),
             "action": action,
             "status": trade.get("status") or "Placed",
@@ -3004,7 +3089,20 @@ def build_algorithm_dashboard(tickers):
             "price": trade.get("price"),
             "target": trade.get("target"),
             "stop": trade.get("stop"),
+            "stop_mode": trade.get("stop_mode"),
             "edge": round(edge, 2),
+            "score": trade.get("score"),
+            "ai_score": trade.get("ai_score"),
+            "buyers_pct": trade.get("buyers_pct"),
+            "sellers_pct": trade.get("sellers_pct"),
+            "pattern": trade.get("pattern"),
+            "projection": trade.get("projection"),
+            "decision_zone": trade.get("decision_zone"),
+            "crowd_pressure": trade.get("crowd_pressure"),
+            "ai_bias": trade.get("ai_bias"),
+            "entry_style": trade.get("entry_style"),
+            "grade": trade.get("grade"),
+            "risk_mode": trade.get("risk_mode"),
             "confidence": int(min(100, max(0, abs(edge)))),
             "reason": trade.get("reason") or "Order routed from TradingView alert.",
             "order": trade.get("order")
@@ -3024,16 +3122,16 @@ def build_algorithm_dashboard(tickers):
             "tradovate_configured": tradovate_configured(),
             "tradovate_auto_trade_enabled": tradovate_auto_trade_enabled(),
             "tradovate_environment": get_tradovate_env(),
-            "mnq_bridge_enabled": mnq_tradovate_bridge_enabled(),
-            "mnq_execution_symbol": get_mnq_execution_symbol(),
+            "nq_bridge_enabled": mnq_tradovate_bridge_enabled(),
+            "nq_execution_symbol": get_mnq_execution_symbol(),
             "tradingview_webhook_configured": bool(tradingview_webhook_secret()),
             "databento_verification_enabled": databento_alert_verification_enabled(),
             "futures_only": True,
-            "label": "MNQ -> Tradovate bridge ready" if mnq_tradovate_bridge_ready() else "MNQ paper signals armed",
+            "label": "NQ1 -> Tradovate bridge ready" if mnq_tradovate_bridge_ready() else "NQ1 paper signals armed",
             "summary": (
-                f"TradingView MNQ alerts route to {get_mnq_execution_symbol() or 'the active MNQ contract'} through Tradeify/Tradovate."
+                f"TradingView NQ1 alerts route to {get_mnq_execution_symbol() or 'the active NQ contract'} through Tradeify/Tradovate."
                 if mnq_tradovate_bridge_ready()
-                else "TradingView can fire MNQ strategy alerts into this app. Turn on the MNQ Tradovate bridge only after demo testing."
+                else "TradingView can fire NQ1 strategy alerts into this app. Turn on the NQ Tradovate bridge only after demo testing."
             )
         },
         "totals": {
@@ -3045,6 +3143,156 @@ def build_algorithm_dashboard(tickers):
             "tracked_algos": 1 if rows else 0
         },
         "rows": rows
+    }
+
+
+def safe_report_float(value, default=0.0):
+    try:
+        if value in (None, ""):
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def safe_report_int(value, default=0):
+    try:
+        if value in (None, ""):
+            return default
+        return int(float(value))
+    except (TypeError, ValueError):
+        return default
+
+
+def read_backtest_csv(path):
+    if not path.exists():
+        return []
+    with path.open("r", encoding="utf-8", newline="") as handle:
+        return list(csv.DictReader(handle))
+
+
+def build_setup_breakdown(trades):
+    grouped = {}
+    for trade in trades:
+        setup = trade.get("setup") or "Unknown"
+        item = grouped.setdefault(setup, {"setup": setup, "trades": 0, "wins": 0, "losses": 0, "pnl": 0.0})
+        pnl = safe_report_float(trade.get("pnl"))
+        item["trades"] += 1
+        item["wins"] += 1 if pnl > 0 else 0
+        item["losses"] += 1 if pnl <= 0 else 0
+        item["pnl"] += pnl
+
+    rows = []
+    for item in grouped.values():
+        trades_count = item["trades"]
+        rows.append({
+            "setup": item["setup"],
+            "trades": trades_count,
+            "wins": item["wins"],
+            "losses": item["losses"],
+            "win_rate": round((item["wins"] / trades_count) * 100, 2) if trades_count else 0,
+            "pnl": round(item["pnl"], 2)
+        })
+    return sorted(rows, key=lambda row: row["pnl"], reverse=True)
+
+
+def build_backtest_report(report_id="NQ_C_0"):
+    clean_report_id = "".join(
+        ch for ch in str(report_id or "NQ_C_0").upper()
+        if ch.isalnum() or ch == "_"
+    ) or "NQ_C_0"
+    summary_path = BACKTEST_OUTPUT_DIR / f"{clean_report_id}_summary.json"
+    trades_path = BACKTEST_OUTPUT_DIR / f"{clean_report_id}_trades.csv"
+    equity_path = BACKTEST_OUTPUT_DIR / f"{clean_report_id}_equity.csv"
+    signals_path = BACKTEST_OUTPUT_DIR / f"{clean_report_id}_signals.csv"
+    snapshot_path = BACKTEST_SNAPSHOT_DIR / f"{clean_report_id}_report.json"
+
+    if not summary_path.exists() or not trades_path.exists() or not equity_path.exists():
+        if snapshot_path.exists():
+            with snapshot_path.open("r", encoding="utf-8") as handle:
+                return json.load(handle)
+        return {
+            "ok": False,
+            "report_id": clean_report_id,
+            "error": "Backtest report files were not found.",
+            "expected_files": [
+                str(summary_path),
+                str(trades_path),
+                str(equity_path),
+                str(snapshot_path)
+            ]
+        }
+
+    with summary_path.open("r", encoding="utf-8") as handle:
+        summary = json.load(handle)
+
+    raw_trades = read_backtest_csv(trades_path)
+    raw_equity = read_backtest_csv(equity_path)
+    cumulative_pnl = 0.0
+    trades = []
+    winners = 0
+    losers = 0
+
+    for index, row in enumerate(raw_trades, start=1):
+        pnl = safe_report_float(row.get("pnl"))
+        points = safe_report_float(row.get("points"))
+        cumulative_pnl += pnl
+        if pnl > 0:
+            winners += 1
+        else:
+            losers += 1
+        trades.append({
+            "index": index,
+            "entry_time": row.get("entry_time") or "",
+            "exit_time": row.get("exit_time") or "",
+            "signal_time": row.get("signal_time") or "",
+            "side": row.get("side") or "",
+            "setup": row.get("setup") or "",
+            "entry": safe_report_float(row.get("entry")),
+            "exit": safe_report_float(row.get("exit")),
+            "stop": safe_report_float(row.get("stop")),
+            "target": safe_report_float(row.get("target")),
+            "qty": safe_report_int(row.get("qty"), 1),
+            "points": round(points, 2),
+            "pnl": round(pnl, 2),
+            "cumulative_pnl": round(cumulative_pnl, 2),
+            "reason": row.get("reason") or ""
+        })
+
+    equity = [
+        {
+            "time": row.get("time") or "",
+            "equity": safe_report_float(row.get("equity"))
+        }
+        for row in raw_equity
+    ]
+
+    signals_count = 0
+    if signals_path.exists():
+        with signals_path.open("r", encoding="utf-8", newline="") as handle:
+            signals_count = max(sum(1 for _ in handle) - 1, 0)
+
+    return {
+        "ok": True,
+        "report_id": clean_report_id,
+        "generated_at": datetime.now(DEMO_TIMEZONE).isoformat(),
+        "summary": summary,
+        "trades": trades,
+        "equity": equity,
+        "setup_breakdown": build_setup_breakdown(raw_trades),
+        "counts": {
+            "trades": len(trades),
+            "wins": winners,
+            "losses": losers,
+            "equity_points": len(equity),
+            "signals": signals_count
+        },
+        "files": {
+            "summary": str(summary_path),
+            "trades": str(trades_path),
+            "equity": str(equity_path),
+            "signals": str(signals_path)
+        }
     }
 
 
@@ -3707,7 +3955,7 @@ def auth_logout():
 
 @app.route("/analyze")
 def analyze():
-    symbol = ALGORITHM_LOCKED_SYMBOL
+    symbol = ALGORITHM_DISPLAY_SYMBOL
     strategy = request.args.get("strategy", "day")
     risk_profile = request.args.get("risk", "balanced").strip().lower() or "balanced"
 
@@ -3851,10 +4099,15 @@ def algorithm_dashboard_route():
     return jsonify(build_algorithm_dashboard(tickers))
 
 
+@app.route("/backtest-report")
+def backtest_report_route():
+    return jsonify(build_backtest_report(request.args.get("id", "NQ_C_0")))
+
+
 @app.route("/live-data-status")
 def live_data_status_route():
     return jsonify({
-        "live_data": "tradingview_mnq_alerts",
+        "live_data": "tradingview_nq1_alerts",
         "futures_only": True,
         "execution_destination": "tradeify_tradovate" if mnq_tradovate_bridge_enabled() else "tradingview_paper_signal",
         "active_future": get_active_futures_market(),
@@ -3862,9 +4115,9 @@ def live_data_status_route():
         "tradovate_environment": get_tradovate_env(),
         "tradovate_auto_trade_enabled": tradovate_auto_trade_enabled(),
         "tradovate_execution_ready": tradovate_execution_ready(),
-        "mnq_bridge_enabled": mnq_tradovate_bridge_enabled(),
-        "mnq_bridge_ready": mnq_tradovate_bridge_ready(),
-        "mnq_execution_symbol": get_mnq_execution_symbol(),
+        "nq_bridge_enabled": mnq_tradovate_bridge_enabled(),
+        "nq_bridge_ready": mnq_tradovate_bridge_ready(),
+        "nq_execution_symbol": get_mnq_execution_symbol(),
         "live_trading_acknowledged": live_trading_acknowledged(),
         "tradingview_webhook_configured": bool(tradingview_webhook_secret()),
         "databento_verification_enabled": databento_alert_verification_enabled(),

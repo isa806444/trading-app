@@ -20,6 +20,7 @@ CORS(app)
 
 WATCHLIST_FILE = "watchlist.json"
 MARKET_CACHE_FILE = "market_cache.json"
+BOT_TRADES_FILE = "bot_trades.json"
 BACKTEST_OUTPUT_DIR = Path("data/backtests")
 BACKTEST_SNAPSHOT_DIR = Path("static/backtests")
 POLYGON_BASE_URL = "https://api.polygon.io"
@@ -422,6 +423,56 @@ def save_state_list(state_key, data, fallback=None, user_id=None):
         fallback(cleaned)
 
 
+def load_app_state_list(state_key, fallback=None):
+    if database_enabled:
+        try:
+            conn = get_db_connection()
+            if conn:
+                with conn:
+                    with conn.cursor() as cursor:
+                        cursor.execute(
+                            "SELECT state_value FROM app_state WHERE state_key = %s",
+                            (state_key,)
+                        )
+                        row = cursor.fetchone()
+                        if row and isinstance(row[0], list):
+                            conn.close()
+                            return row[0]
+                conn.close()
+        except Exception as exc:
+            print(f"App state read failed for {state_key}:", exc)
+
+    return fallback() if fallback else []
+
+
+def save_app_state_list(state_key, data, fallback=None):
+    cleaned = data if isinstance(data, list) else []
+    if database_enabled:
+        try:
+            conn = get_db_connection()
+            if conn:
+                with conn:
+                    with conn.cursor() as cursor:
+                        cursor.execute(
+                            """
+                            INSERT INTO app_state (state_key, state_value, updated_at)
+                            VALUES (%s, %s::jsonb, NOW())
+                            ON CONFLICT (state_key)
+                            DO UPDATE SET
+                                state_value = EXCLUDED.state_value,
+                                updated_at = NOW()
+                            """,
+                            (state_key, json.dumps(cleaned))
+                        )
+                conn.close()
+                return
+        except Exception as exc:
+            print(f"App state write failed for {state_key}:", exc)
+
+    if fallback:
+        fallback(cleaned)
+
+
 def load_watchlist_file_only():
     if not os.path.exists(WATCHLIST_FILE):
         return []
@@ -444,6 +495,30 @@ def load_watchlist():
 
 def save_watchlist(data):
     save_state_list("watchlist", data, save_watchlist_file_only)
+
+
+def load_bot_trades_file_only():
+    if not os.path.exists(BOT_TRADES_FILE):
+        return []
+    try:
+        with open(BOT_TRADES_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data if isinstance(data, list) else []
+    except (json.JSONDecodeError, OSError):
+        return []
+
+
+def save_bot_trades_file_only(data):
+    with open(BOT_TRADES_FILE, "w", encoding="utf-8") as f:
+        json.dump(data if isinstance(data, list) else [], f, indent=2)
+
+
+def load_bot_trade_messages():
+    return load_app_state_list("bot_trade_messages", load_bot_trades_file_only)
+
+
+def save_bot_trade_messages():
+    save_app_state_list("bot_trade_messages", bot_trade_messages[:250], save_bot_trades_file_only)
 
 
 def load_market_cache():
@@ -499,8 +574,14 @@ def initialize_market_cache():
     candle_cache = stored["candles"]
 
 
+def initialize_bot_trade_messages():
+    global bot_trade_messages
+    bot_trade_messages = load_bot_trade_messages()
+
+
 initialize_database()
 initialize_market_cache()
+initialize_bot_trade_messages()
 
 
 # =========================
@@ -1952,9 +2033,72 @@ def route_tradingview_signal_to_tradovate(payload):
     return result
 
 
+def calculate_bot_trade_pnl(entry_message, exit_signal):
+    try:
+        entry_price = float(entry_message.get("price") or 0)
+        exit_price = float(exit_signal.get("price") or 0)
+        qty = int(float(exit_signal.get("qty") or entry_message.get("qty") or 1))
+    except (TypeError, ValueError):
+        return None
+
+    if not entry_price or not exit_price:
+        return None
+
+    entry_action = entry_message.get("action")
+    points = exit_price - entry_price if entry_action == "BUY" else entry_price - exit_price
+    pnl = points * qty * get_mnq_dollars_per_point()
+    return {
+        "entry_price": round(entry_price, 4),
+        "exit_price": round(exit_price, 4),
+        "qty": qty,
+        "points": round(points, 2),
+        "pnl": round(pnl, 2)
+    }
+
+
+def find_open_bot_entry(exit_action, symbol):
+    wanted_entry = "BUY" if exit_action == "EXIT_LONG" else "SELL"
+    display_symbol = display_market_symbol(symbol)
+    for message in bot_trade_messages:
+        if message.get("closed"):
+            continue
+        if message.get("action") != wanted_entry:
+            continue
+        if display_market_symbol(message.get("symbol")) != display_symbol:
+            continue
+        return message
+    return None
+
+
+def calculate_bot_realized_totals():
+    total = 0.0
+    wins = 0
+    losses = 0
+    closed_count = 0
+    for message in bot_trade_messages:
+        if not message.get("is_exit"):
+            continue
+        pnl = message.get("realized_pnl")
+        if pnl is None:
+            continue
+        pnl = float(pnl or 0)
+        total += pnl
+        closed_count += 1
+        wins += 1 if pnl > 0 else 0
+        losses += 1 if pnl <= 0 else 0
+    return {
+        "closed_trades": closed_count,
+        "wins": wins,
+        "losses": losses,
+        "realized_pnl": round(total, 2),
+        "win_rate": round((wins / closed_count) * 100, 2) if closed_count else 0
+    }
+
+
 def build_bot_trade_message(payload, execution):
     execution = execution or {}
     signal = execution.get("signal") or build_tradingview_execution_signal(payload)
+    source_signal = execution.get("source_signal") or signal
     verification = execution.get("verification") or {}
     action = signal.get("action", "")
     symbol = signal.get("symbol", "")
@@ -1973,18 +2117,26 @@ def build_bot_trade_message(payload, execution):
         "id": f"bot-{int(time.time() * 1000)}-{len(bot_trade_messages)}",
         "received_at": datetime.now(DEMO_TIMEZONE).isoformat(),
         "source": "TradingView",
+        "trade_id": first_payload_value(payload, ["trade_id", "id", "order_id", "orderId"], None),
+        "signal_key": signal.get("signal_key"),
         "mode": mode,
         "status": status,
         "simulated": simulated,
         "routed": routed,
+        "destination": execution.get("destination"),
         "environment": env,
         "symbol": symbol,
         "tradovate_symbol": signal.get("tradovate_symbol"),
         "action": action,
+        "is_entry": action in {"BUY", "SELL"},
+        "is_exit": action in {"EXIT_LONG", "EXIT_SHORT"},
         "qty": signal.get("qty"),
         "price": signal.get("price"),
+        "entry": signal.get("price") if action in {"BUY", "SELL"} else None,
+        "exit": signal.get("price") if action in {"EXIT_LONG", "EXIT_SHORT"} else None,
         "target": signal.get("target"),
         "stop": signal.get("stop"),
+        "profit_mode": signal.get("profit_mode"),
         "stop_mode": signal.get("stop_mode"),
         "edge": signal.get("edge"),
         "score": signal.get("score"),
@@ -1999,13 +2151,19 @@ def build_bot_trade_message(payload, execution):
         "entry_style": signal.get("entry_style"),
         "grade": signal.get("grade"),
         "risk_mode": signal.get("risk_mode"),
+        "setup": signal.get("entry_style") or signal.get("pattern") or signal.get("grade") or "TradingView Alert",
         "verification": verification,
         "verification_status": "Verified" if verification.get("passed") else "Not verified",
         "active_future": execution.get("active_future"),
+        "account_guard": execution.get("account_guard"),
+        "account": execution.get("account"),
+        "failure": execution.get("failure"),
         "reason": signal.get("reason") or execution.get("reason") or ("Tradeify/Tradovate order routed." if routed else "Demo trade logged from algorithm alert."),
         "routing_reason": execution.get("reason"),
         "order": execution.get("order"),
-        "tag": signal.get("tag")
+        "tag": signal.get("tag"),
+        "source_signal": source_signal,
+        "raw_payload": payload if isinstance(payload, dict) else {"raw": str(payload)}
     }
 
 
@@ -2013,8 +2171,45 @@ def record_bot_trade_message(payload, execution):
     message = build_bot_trade_message(payload, execution)
     if not message:
         return None
+
+    if message.get("is_exit"):
+        entry_message = find_open_bot_entry(message.get("action"), message.get("symbol"))
+        if entry_message:
+            realized = calculate_bot_trade_pnl(entry_message, message)
+            if realized:
+                message.update({
+                    "linked_entry_id": entry_message.get("id"),
+                    "entry": realized["entry_price"],
+                    "exit": realized["exit_price"],
+                    "points": realized["points"],
+                    "realized_pnl": realized["pnl"],
+                    "closed": True,
+                    "closed_at": message.get("received_at"),
+                    "setup": entry_message.get("setup"),
+                    "entry_style": message.get("entry_style") or entry_message.get("entry_style"),
+                    "grade": message.get("grade") or entry_message.get("grade"),
+                    "ai_bias": message.get("ai_bias") or entry_message.get("ai_bias")
+                })
+                entry_message.update({
+                    "closed": True,
+                    "closed_at": message.get("received_at"),
+                    "exit_message_id": message.get("id"),
+                    "exit": realized["exit_price"],
+                    "points": realized["points"],
+                    "realized_pnl": realized["pnl"],
+                    "exit_reason": message.get("reason")
+                })
+
     bot_trade_messages.insert(0, message)
-    del bot_trade_messages[100:]
+    del bot_trade_messages[250:]
+    totals = calculate_bot_realized_totals()
+    running_realized = 0.0
+    for item in reversed(bot_trade_messages):
+        if item.get("is_exit") and item.get("realized_pnl") is not None:
+            running_realized += float(item.get("realized_pnl") or 0)
+            item["cumulative_realized_pnl"] = round(running_realized, 2)
+    save_bot_trade_messages()
+    message["realized_summary"] = totals
     return message
 
 
@@ -3090,6 +3285,14 @@ def build_algorithm_dashboard(tickers):
             "target": trade.get("target"),
             "stop": trade.get("stop"),
             "stop_mode": trade.get("stop_mode"),
+            "profit_mode": trade.get("profit_mode"),
+            "entry": trade.get("entry"),
+            "exit": trade.get("exit"),
+            "points": trade.get("points"),
+            "realized_pnl": trade.get("realized_pnl"),
+            "cumulative_realized_pnl": trade.get("cumulative_realized_pnl"),
+            "closed": trade.get("closed"),
+            "setup": trade.get("setup"),
             "edge": round(edge, 2),
             "score": trade.get("score"),
             "ai_score": trade.get("ai_score"),
@@ -3111,6 +3314,7 @@ def build_algorithm_dashboard(tickers):
     buys = sum(1 for row in rows if row["action"] == "BUY")
     sells = sum(1 for row in rows if row["action"] == "SELL")
     exits = sum(1 for row in rows if row["action"] in {"EXIT_LONG", "EXIT_SHORT"})
+    realized = calculate_bot_realized_totals()
     return {
         "date": datetime.now(DEMO_TIMEZONE).strftime("%Y-%m-%d"),
         "generated_at": datetime.now(DEMO_TIMEZONE).isoformat(),
@@ -3140,7 +3344,10 @@ def build_algorithm_dashboard(tickers):
             "exits": exits,
             "buys": buys,
             "sells": sells,
-            "tracked_algos": 1 if rows else 0
+            "tracked_algos": 1 if rows else 0,
+            "closed_trades": realized["closed_trades"],
+            "realized_pnl": realized["realized_pnl"],
+            "win_rate": realized["win_rate"]
         },
         "rows": rows
     }
@@ -4170,7 +4377,7 @@ def tradingview_alerts_route():
 
 @app.route("/bot-trades")
 def bot_trades_route():
-    return jsonify(bot_trade_messages[:50])
+    return jsonify(bot_trade_messages[:250])
 
 
 @app.route("/search-symbols")

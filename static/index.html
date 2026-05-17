@@ -3901,12 +3901,12 @@ function renderAlgorithmDashboard(payload){
         <div class="algo-stat-value">${totals.exits || 0}</div>
       </div>
       <div class="algo-stat">
-        <div class="algo-stat-label">Buy Orders</div>
-        <div class="algo-stat-value up">${totals.buys || 0}</div>
+        <div class="algo-stat-label">Closed P/L</div>
+        <div class="algo-stat-value ${Number(totals.realized_pnl || 0) >= 0 ? "up" : "down"}">${formatBacktestMoney(totals.realized_pnl || 0)}</div>
       </div>
       <div class="algo-stat">
-        <div class="algo-stat-label">Sell Orders</div>
-        <div class="algo-stat-value down">${totals.sells || 0}</div>
+        <div class="algo-stat-label">Win Rate</div>
+        <div class="algo-stat-value">${Number(totals.win_rate || 0).toFixed(1)}%</div>
       </div>
     </div>
 
@@ -3937,6 +3937,7 @@ function renderAlgorithmDashboard(payload){
               <td>${row.stop ? formatMarketPrice(row.stop, LOCKED_SYMBOL) : "--"}</td>
               <td>
                 <div>${row.status || "Placed"}</div>
+                ${row.realized_pnl !== null && row.realized_pnl !== undefined ? `<div class="algo-sub ${Number(row.realized_pnl || 0) >= 0 ? "up" : "down"}">Closed ${formatBacktestMoney(row.realized_pnl)} | ${Number(row.points || 0).toFixed(2)} pts</div>` : ""}
                 ${renderBotIntelligenceMeta(row, "algo-sub")}
                 <div class="algo-sub">${row.reason || row.mode || "Order routed."}</div>
               </td>
@@ -6023,6 +6024,9 @@ function formatBotTradePrice(value){
 
 function renderBotIntelligenceMeta(item, className="alert-meta"){
   const bits = [];
+  if(item.setup){
+    bits.push(`Setup: ${item.setup}`);
+  }
   if(item.ai_score !== null && item.ai_score !== undefined){
     bits.push(`AI ${Number(item.ai_score).toFixed(1)}`);
   }
@@ -6062,6 +6066,23 @@ function renderBotIntelligenceMeta(item, className="alert-meta"){
   return bits.length ? `<div class="${className}">${bits.join(" | ")}</div>` : "";
 }
 
+function renderBotPnlMeta(trade){
+  const bits = [];
+  if(trade.points !== null && trade.points !== undefined){
+    bits.push(`Points ${Number(trade.points).toFixed(2)}`);
+  }
+  if(trade.realized_pnl !== null && trade.realized_pnl !== undefined){
+    bits.push(`Realized ${formatBacktestMoney(trade.realized_pnl)}`);
+  }
+  if(trade.cumulative_realized_pnl !== null && trade.cumulative_realized_pnl !== undefined){
+    bits.push(`Cumulative ${formatBacktestMoney(trade.cumulative_realized_pnl)}`);
+  }
+  if(trade.linked_entry_id){
+    bits.push("Matched exit");
+  }
+  return bits.length ? `<div class="alert-meta ${Number(trade.realized_pnl || 0) >= 0 ? "up" : "down"}">${bits.join(" | ")}</div>` : "";
+}
+
 function renderBotTrades(){
   const summary = document.getElementById("botTradeSummary");
   const list = document.getElementById("botTradeList");
@@ -6079,23 +6100,29 @@ function renderBotTrades(){
 
   const routed = botTrades.filter(trade => trade.routed).length;
   const loggedSignals = botTrades.length - routed;
-  summary.innerText = `${routed} routed order${routed === 1 ? "" : "s"} | ${loggedSignals} signal${loggedSignals === 1 ? "" : "s"} logged`;
+  const closed = botTrades.filter(trade => trade.is_exit && trade.realized_pnl !== null && trade.realized_pnl !== undefined);
+  const realized = closed.reduce((total, trade) => total + Number(trade.realized_pnl || 0), 0);
+  const wins = closed.filter(trade => Number(trade.realized_pnl || 0) > 0).length;
+  const winRate = closed.length ? (wins / closed.length) * 100 : 0;
+  summary.innerText = `${routed} routed order${routed === 1 ? "" : "s"} | ${loggedSignals} signal${loggedSignals === 1 ? "" : "s"} logged | ${closed.length} closed | Realized ${formatBacktestMoney(realized)} | Win ${winRate.toFixed(1)}%`;
   if(panel){
     panel.open = true;
   }
 
-  botTrades.slice(0, 8).forEach(trade => {
+  botTrades.forEach(trade => {
     const item = document.createElement("div");
     item.className = `alert-item ${trade.routed ? "triggered" : ""}`;
     item.innerHTML = `
       <div>
         <div class="alert-topline">
-          <div class="paper-symbol">${trade.symbol || "--"} | ${trade.action || "SIGNAL"} | ${trade.mode || "Demo"}</div>
+          <div class="paper-symbol">${trade.symbol || "--"} | ${trade.action || "SIGNAL"} | ${trade.mode || "Demo"}${trade.closed ? " | Closed" : ""}</div>
           <div class="alert-status-pill">${trade.status || "Logged"}</div>
         </div>
-        <div class="alert-meta">Qty ${trade.qty || 1} | Entry ${formatBotTradePrice(trade.price)} | Target ${formatBotTradePrice(trade.target)} | Stop ${formatBotTradePrice(trade.stop)}</div>
+        <div class="alert-meta">Qty ${trade.qty || 1} | Price ${formatBotTradePrice(trade.price)} | Entry ${formatBotTradePrice(trade.entry)} | Exit ${formatBotTradePrice(trade.exit)} | Target ${formatBotTradePrice(trade.target)} | Stop ${formatBotTradePrice(trade.stop)}</div>
+        ${renderBotPnlMeta(trade)}
         ${renderBotIntelligenceMeta(trade)}
         <div class="alert-meta">${trade.verification_status || "Not verified"} | Edge ${Number(trade.edge || 0).toFixed(1)} | ${trade.reason || "Algorithm signal received."}</div>
+        ${trade.routing_reason && trade.routing_reason !== trade.reason ? `<div class="alert-meta">Routing: ${trade.routing_reason}</div>` : ""}
       </div>
     `;
     list.appendChild(item);

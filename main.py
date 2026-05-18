@@ -2095,6 +2095,180 @@ def calculate_bot_realized_totals():
     }
 
 
+def trade_card_price(value):
+    try:
+        return round(float(value), 4)
+    except (TypeError, ValueError):
+        return None
+
+
+def build_ai_trade_card(message):
+    if not isinstance(message, dict):
+        return None
+
+    action = str(message.get("action") or "").upper()
+    if action not in {"BUY", "SELL", "EXIT_LONG", "EXIT_SHORT"}:
+        return None
+
+    is_long = action in {"BUY", "EXIT_LONG"}
+    is_exit = action in {"EXIT_LONG", "EXIT_SHORT"}
+    side = "LONG" if is_long else "SHORT"
+    entry = trade_card_price(message.get("entry") or message.get("price"))
+    exit_price = trade_card_price(message.get("exit") if is_exit else None)
+    stop = trade_card_price(message.get("stop"))
+    target = trade_card_price(message.get("target"))
+    price = trade_card_price(message.get("price"))
+    direction = 1 if is_long else -1
+
+    if is_exit and not entry:
+        entry = trade_card_price((message.get("source_signal") or {}).get("entry"))
+
+    if entry and not stop and not is_exit:
+        fallback_risk_points = max(12.0, entry * 0.0015)
+        stop = round(entry - fallback_risk_points if is_long else entry + fallback_risk_points, 4)
+
+    risk_points = abs(entry - stop) if entry and stop else 0
+    target_zones = []
+    if is_exit:
+        if exit_price:
+            target_zones.append({"label": "Exit", "price": exit_price})
+    elif entry:
+        if target:
+            target_zones.append({"label": "Target 1", "price": target})
+            stretch = abs(target - entry) or max(risk_points * 1.8, 18.0)
+            target_zones.append({"label": "Runner", "price": round(entry + direction * stretch * 1.55, 4)})
+        elif risk_points:
+            target_zones.append({"label": "Target 1", "price": round(entry + direction * risk_points * 1.5, 4)})
+            target_zones.append({"label": "Runner", "price": round(entry + direction * risk_points * 2.5, 4)})
+
+    score_values = [
+        message.get("ai_score"),
+        message.get("score"),
+        abs(float(message.get("edge") or 0)) + 58
+    ]
+    confidence_source = next((float(value) for value in score_values if value not in (None, "")), 58.0)
+    grade = str(message.get("grade") or "").upper()
+    if grade == "A+":
+        confidence_source += 8
+    elif grade == "A":
+        confidence_source += 5
+    elif grade == "B":
+        confidence_source += 2
+    if (message.get("verification") or {}).get("passed"):
+        confidence_source += 3
+    if is_exit:
+        confidence_source = max(55, confidence_source - 4)
+    confidence = int(clamp(confidence_source, 35, 95))
+
+    setup = message.get("setup") or message.get("entry_style") or message.get("pattern") or "TradingView signal"
+    status = "Exit signal" if is_exit else "Closed idea" if message.get("closed") else "Active idea"
+    if message.get("routed"):
+        status = "Broker routed" if not is_exit else "Broker exit routed"
+
+    why = []
+    if setup:
+        why.append(f"Setup: {setup}")
+    if message.get("ai_bias"):
+        why.append(f"AI bias: {message.get('ai_bias')}")
+    if message.get("pattern"):
+        why.append(f"Pattern: {message.get('pattern')}")
+    if message.get("projection"):
+        why.append(str(message.get("projection")))
+    if message.get("crowd_pressure"):
+        why.append(str(message.get("crowd_pressure")))
+    if message.get("buyers_pct") is not None and message.get("sellers_pct") is not None:
+        why.append(f"{message.get('buyers_pct')}% buyers / {message.get('sellers_pct')}% sellers")
+    reason = message.get("reason") or message.get("routing_reason")
+    if reason:
+        why.append(str(reason))
+    why = why[:5]
+
+    cautions = []
+    if not message.get("routed"):
+        cautions.append("Manual execution only until broker API/webhook access is available.")
+    if not is_exit:
+        cautions.append("Do not chase if price has already moved far away from the entry.")
+    if stop:
+        invalidation = (
+            f"Long thesis is invalid below {stop}."
+            if is_long else f"Short thesis is invalid above {stop}."
+        )
+    else:
+        invalidation = "Exit if TradingView sends an exit alert or the setup thesis flips."
+        cautions.append("No hard stop was supplied by the alert; use thesis invalidation.")
+
+    if message.get("verification") and not (message.get("verification") or {}).get("passed"):
+        verification_reason = (message.get("verification") or {}).get("reason")
+        if verification_reason:
+            cautions.append(str(verification_reason))
+
+    return {
+        "id": message.get("id"),
+        "received_at": message.get("received_at"),
+        "symbol": message.get("symbol") or ALGORITHM_DISPLAY_SYMBOL,
+        "tradovate_symbol": message.get("tradovate_symbol"),
+        "action": action,
+        "side": side,
+        "status": status,
+        "is_exit": is_exit,
+        "closed": bool(message.get("closed")),
+        "manual_execution_only": not bool(message.get("routed")),
+        "routed": bool(message.get("routed")),
+        "entry": entry,
+        "price": price,
+        "exit": exit_price,
+        "stop": stop,
+        "target": target,
+        "targets": target_zones,
+        "invalidation": invalidation,
+        "qty": message.get("qty") or 1,
+        "confidence": confidence,
+        "grade": grade or ("A" if confidence >= 78 else "B" if confidence >= 64 else "C"),
+        "setup": setup,
+        "risk_mode": message.get("risk_mode") or ("Manual review" if not message.get("routed") else "Broker routed"),
+        "profit_mode": message.get("profit_mode"),
+        "stop_mode": message.get("stop_mode"),
+        "points": message.get("points"),
+        "realized_pnl": message.get("realized_pnl"),
+        "why": why,
+        "cautions": cautions[:4],
+        "next_step": (
+            "Close or stand down; the bot is saying the trade idea is no longer valid."
+            if is_exit else "If you take it manually, match size to your risk and watch for the exit alert."
+        ),
+        "raw_reason": reason
+    }
+
+
+def build_ai_trade_signal_feed():
+    cards = []
+    for message in bot_trade_messages:
+        card = build_ai_trade_card(message)
+        if card:
+            cards.append(card)
+        if len(cards) >= 50:
+            break
+
+    active_cards = [card for card in cards if not card.get("is_exit") and not card.get("closed")]
+    exit_cards = [card for card in cards if card.get("is_exit")]
+    routed_cards = [card for card in cards if card.get("routed")]
+
+    return {
+        "mode": "manual_ai_trade_assistant",
+        "manual_only": not mnq_tradovate_bridge_ready(),
+        "generated_at": datetime.now(DEMO_TIMEZONE).isoformat(),
+        "summary": {
+            "signals": len(cards),
+            "active": len(active_cards),
+            "exits": len(exit_cards),
+            "routed": len(routed_cards),
+            "latest_side": cards[0]["side"] if cards else None,
+            "latest_status": cards[0]["status"] if cards else None
+        },
+        "cards": cards
+    }
+
+
 def build_bot_trade_message(payload, execution):
     execution = execution or {}
     signal = execution.get("signal") or build_tradingview_execution_signal(payload)
@@ -4378,6 +4552,11 @@ def tradingview_alerts_route():
 @app.route("/bot-trades")
 def bot_trades_route():
     return jsonify(bot_trade_messages[:250])
+
+
+@app.route("/ai-trade-signals")
+def ai_trade_signals_route():
+    return jsonify(build_ai_trade_signal_feed())
 
 
 @app.route("/search-symbols")

@@ -1334,6 +1334,218 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
   background:linear-gradient(180deg, rgba(16, 29, 52, 0.96), rgba(8, 18, 34, 0.98));
 }
 
+.ai-cockpit {
+  margin-top:18px;
+  padding:18px;
+  border:1px solid rgba(45, 212, 191, 0.22);
+  border-radius:24px;
+  background:
+    radial-gradient(circle at top left, rgba(45, 212, 191, 0.12), transparent 28%),
+    linear-gradient(180deg, rgba(13, 28, 47, 0.98), rgba(6, 16, 31, 0.98));
+  box-shadow:0 22px 52px rgba(2, 6, 23, 0.25);
+}
+
+.ai-cockpit-head {
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:14px;
+  flex-wrap:wrap;
+  margin-bottom:14px;
+}
+
+.ai-signal-grid {
+  display:grid;
+  grid-template-columns:repeat(auto-fit, minmax(280px, 1fr));
+  gap:12px;
+}
+
+.ai-signal-card {
+  position:relative;
+  overflow:hidden;
+  padding:16px;
+  border:1px solid rgba(51, 81, 118, 0.62);
+  border-radius:20px;
+  background:rgba(5, 14, 26, 0.78);
+}
+
+.ai-signal-card.long {
+  border-color:rgba(34, 197, 94, 0.42);
+  background:
+    radial-gradient(circle at top right, rgba(34, 197, 94, 0.16), transparent 32%),
+    rgba(5, 14, 26, 0.8);
+}
+
+.ai-signal-card.short {
+  border-color:rgba(239, 68, 68, 0.42);
+  background:
+    radial-gradient(circle at top right, rgba(239, 68, 68, 0.14), transparent 32%),
+    rgba(5, 14, 26, 0.8);
+}
+
+.ai-signal-card.exit {
+  border-color:rgba(245, 158, 11, 0.44);
+}
+
+.ai-signal-top {
+  display:flex;
+  justify-content:space-between;
+  gap:10px;
+  align-items:flex-start;
+  flex-wrap:wrap;
+}
+
+.ai-side-pill {
+  display:inline-flex;
+  align-items:center;
+  padding:7px 11px;
+  border-radius:999px;
+  font-size:12px;
+  font-weight:900;
+  letter-spacing:0.08em;
+  text-transform:uppercase;
+}
+
+.ai-side-pill.long {
+  color:#052e16;
+  background:#34d399;
+}
+
+.ai-side-pill.short {
+  color:#450a0a;
+  background:#fb7185;
+}
+
+.ai-side-pill.exit {
+  color:#422006;
+  background:#fbbf24;
+}
+
+.ai-card-status {
+  color:#cbd5e1;
+  font-size:12px;
+  font-weight:800;
+  text-transform:uppercase;
+  letter-spacing:0.08em;
+}
+
+.ai-card-title {
+  margin-top:12px;
+  color:#f8fafc;
+  font-size:18px;
+  font-weight:900;
+  letter-spacing:-0.02em;
+}
+
+.ai-card-subtitle {
+  margin-top:5px;
+  color:#91a7c3;
+  font-size:13px;
+}
+
+.ai-confidence {
+  margin-top:14px;
+}
+
+.ai-confidence-row {
+  display:flex;
+  justify-content:space-between;
+  gap:10px;
+  color:#dbeafe;
+  font-size:12px;
+  font-weight:800;
+  margin-bottom:6px;
+}
+
+.ai-confidence-track {
+  height:8px;
+  border-radius:999px;
+  background:rgba(51, 65, 85, 0.78);
+  overflow:hidden;
+}
+
+.ai-confidence-fill {
+  height:100%;
+  border-radius:999px;
+  background:linear-gradient(90deg, #14b8a6, #22c55e);
+}
+
+.ai-level-grid {
+  display:grid;
+  grid-template-columns:repeat(3, minmax(0, 1fr));
+  gap:8px;
+  margin-top:14px;
+}
+
+.ai-level {
+  padding:10px;
+  border:1px solid rgba(51, 81, 118, 0.5);
+  border-radius:14px;
+  background:rgba(9, 18, 33, 0.72);
+}
+
+.ai-level-label {
+  color:#8ea3bf;
+  font-size:11px;
+  text-transform:uppercase;
+  letter-spacing:0.08em;
+}
+
+.ai-level-value {
+  margin-top:5px;
+  color:#f8fafc;
+  font-size:16px;
+  font-weight:900;
+}
+
+.ai-reason-list {
+  display:grid;
+  gap:6px;
+  margin-top:14px;
+}
+
+.ai-reason,
+.ai-warning {
+  color:#cbd5e1;
+  font-size:13px;
+  line-height:1.4;
+}
+
+.ai-reason::before {
+  content:"";
+  display:inline-block;
+  width:6px;
+  height:6px;
+  margin-right:8px;
+  border-radius:999px;
+  background:#22c55e;
+  vertical-align:middle;
+}
+
+.ai-warning {
+  margin-top:10px;
+  padding:10px;
+  border-radius:14px;
+  border:1px solid rgba(245, 158, 11, 0.34);
+  background:rgba(59, 35, 7, 0.42);
+  color:#fde68a;
+}
+
+.ai-next-step {
+  margin-top:10px;
+  color:#99f6e4;
+  font-size:13px;
+  line-height:1.45;
+}
+
+.ai-empty {
+  padding:18px;
+  border:1px dashed rgba(148, 163, 184, 0.3);
+  border-radius:18px;
+  color:#9fb1c8;
+  background:rgba(7, 18, 33, 0.56);
+}
+
 .bottom-nav {
   position:sticky;
   bottom:12px;
@@ -1869,6 +2081,10 @@ button:disabled { opacity:0.6; cursor:not-allowed; }
     height:62px;
   }
 
+  .ai-level-grid {
+    grid-template-columns:1fr;
+  }
+
   .control-card,
   .chart-controls,
   .result-shell,
@@ -2396,6 +2612,18 @@ body {
     </div>
   </div>
 
+  <div id="aiSignalCockpit" class="ai-cockpit">
+    <div class="ai-cockpit-head">
+      <div>
+        <div class="section-kicker">AI Trade Assistant</div>
+        <div class="section-title">Waiting for the next NQ1 long or short</div>
+        <div class="section-copy">TradingView alerts become manual trade cards here with entries, invalidation, targets, and exit guidance.</div>
+      </div>
+      <button class="algo-secondary" onclick="loadAiTradeSignals(true)">Refresh Signals</button>
+    </div>
+    <div class="ai-empty">No TradingView bot alerts have landed yet.</div>
+  </div>
+
   <div id="algoDashboard" class="algo-board">
     <div class="algo-empty">No routed algorithm orders yet. Real trades will appear here only after TradingView alerts route through Render and Lucid/Tradovate.</div>
   </div>
@@ -2600,6 +2828,7 @@ let searchDebounce = null;
 let latestHotList = [];
 let latestAlgorithmDashboard = null;
 let latestBacktestReport = null;
+let latestAiTradeSignals = null;
 let portfolioCoachState = null;
 let portfolioReviewState = [];
 let portfolioStreakState = null;
@@ -3949,6 +4178,127 @@ function renderAlgorithmDashboard(payload){
 
     <div class="algo-sub" style="margin-top:12px;">Updated ${liveEtTimeFormatter.format(generated)} ET</div>
   `;
+}
+
+function formatSignalLevel(value){
+  const number = Number(value);
+  return Number.isFinite(number) ? formatMarketPrice(number, LOCKED_SYMBOL) : "--";
+}
+
+function renderAiTradeSignals(payload){
+  const container = document.getElementById("aiSignalCockpit");
+  if(!container){
+    return;
+  }
+
+  const cards = Array.isArray(payload?.cards) ? payload.cards : [];
+  const summary = payload?.summary || {};
+  const manualOnly = payload?.manual_only !== false;
+  const generated = payload?.generated_at ? new Date(payload.generated_at) : new Date();
+
+  if(!cards.length){
+    container.innerHTML = `
+      <div class="ai-cockpit-head">
+        <div>
+          <div class="section-kicker">AI Trade Assistant</div>
+          <div class="section-title">Waiting for the next NQ1 long or short</div>
+          <div class="section-copy">TradingView alerts will turn into manual trade cards with entry, invalidation, targets, and exit guidance.</div>
+        </div>
+        <button class="algo-secondary" onclick="loadAiTradeSignals(true)">Refresh Signals</button>
+      </div>
+      <div class="ai-empty">No bot signals yet. Create the TradingView alert with <strong>{{strategy.order.alert_message}}</strong>, then the next strategy order will appear here.</div>
+    `;
+    return;
+  }
+
+  container.innerHTML = `
+    <div class="ai-cockpit-head">
+      <div>
+        <div class="section-kicker">AI Trade Assistant</div>
+        <div class="section-title">${summary.active || 0} active idea${summary.active === 1 ? "" : "s"} | ${summary.signals || cards.length} total signal${(summary.signals || cards.length) === 1 ? "" : "s"}</div>
+        <div class="section-copy">${manualOnly ? "Manual mode: the app gives you long/short cards, but does not place broker orders." : "Broker route is available, but these cards still explain each signal before execution."}</div>
+      </div>
+      <div class="hero-chip-row" style="margin-top:0;">
+        <div class="hero-chip live">${manualOnly ? "Manual signal mode" : "Bridge ready"}</div>
+        <button class="algo-secondary" onclick="loadAiTradeSignals(true)">Refresh Signals</button>
+      </div>
+    </div>
+    <div class="ai-signal-grid">
+      ${cards.slice(0, 12).map(card => {
+        const tone = card.is_exit ? "exit" : String(card.side || "").toLowerCase() === "long" ? "long" : "short";
+        const targets = Array.isArray(card.targets) ? card.targets : [];
+        const firstTarget = targets[0]?.price ?? card.target;
+        const runnerTarget = targets[1]?.price ?? null;
+        const pnlText = card.realized_pnl !== null && card.realized_pnl !== undefined
+          ? ` | ${formatBacktestMoney(card.realized_pnl)}${card.points !== null && card.points !== undefined ? ` / ${Number(card.points).toFixed(2)} pts` : ""}`
+          : "";
+        return `
+          <div class="ai-signal-card ${tone}">
+            <div class="ai-signal-top">
+              <span class="ai-side-pill ${tone}">${card.is_exit ? "EXIT" : safeReportText(card.side || card.action || "SIGNAL")}</span>
+              <div class="ai-card-status">${safeReportText(card.status || "Active idea")}</div>
+            </div>
+            <div class="ai-card-title">${safeReportText(card.symbol || LOCKED_SYMBOL)} ${safeReportText(card.setup || "AI setup")}</div>
+            <div class="ai-card-subtitle">${card.received_at ? formatLongDate(card.received_at) : "Just now"}${pnlText}</div>
+
+            <div class="ai-confidence">
+              <div class="ai-confidence-row">
+                <span>Confidence</span>
+                <span>${Number(card.confidence || 0).toFixed(0)}% | Grade ${safeReportText(card.grade || "B")}</span>
+              </div>
+              <div class="ai-confidence-track"><div class="ai-confidence-fill" style="width:${Math.max(0, Math.min(100, Number(card.confidence || 0)))}%;"></div></div>
+            </div>
+
+            <div class="ai-level-grid">
+              <div class="ai-level">
+                <div class="ai-level-label">Entry</div>
+                <div class="ai-level-value">${formatSignalLevel(card.entry || card.price)}</div>
+              </div>
+              <div class="ai-level">
+                <div class="ai-level-label">Invalidation</div>
+                <div class="ai-level-value">${formatSignalLevel(card.stop)}</div>
+              </div>
+              <div class="ai-level">
+                <div class="ai-level-label">${card.is_exit ? "Exit" : "Target"}</div>
+                <div class="ai-level-value">${formatSignalLevel(card.exit || firstTarget)}</div>
+              </div>
+            </div>
+            ${runnerTarget ? `<div class="ai-next-step">Runner idea: ${formatSignalLevel(runnerTarget)} if momentum keeps confirming.</div>` : ""}
+            <div class="ai-next-step">${safeReportText(card.invalidation || "")}</div>
+
+            <div class="ai-reason-list">
+              ${(card.why || []).slice(0, 5).map(item => `<div class="ai-reason">${safeReportText(item)}</div>`).join("")}
+            </div>
+            ${(card.cautions || []).length ? `<div class="ai-warning">${(card.cautions || []).slice(0, 3).map(item => safeReportText(item)).join(" ")}</div>` : ""}
+            <div class="ai-next-step">${safeReportText(card.next_step || "Review manually before taking the trade.")}</div>
+          </div>
+        `;
+      }).join("")}
+    </div>
+    <div class="algo-sub" style="margin-top:12px;">Updated ${liveEtTimeFormatter.format(generated)} ET</div>
+  `;
+}
+
+async function loadAiTradeSignals(force=false){
+  const container = document.getElementById("aiSignalCockpit");
+  if(container && force){
+    container.innerHTML = '<div class="ai-empty">Refreshing AI trade cards...</div>';
+  }
+
+  try{
+    const res = await fetch("/ai-trade-signals");
+    if(!res.ok){
+      throw new Error("AI trade signals failed");
+    }
+    const payload = await res.json();
+    latestAiTradeSignals = payload;
+    renderAiTradeSignals(payload);
+  }catch(err){
+    console.log("AI trade signals failed", err);
+    if(container && !force){
+      container.innerHTML = '<div class="ai-empty">AI trade cards could not load yet.</div>';
+    }
+  }
 }
 
 async function loadAlgorithmDashboard(force=false){
@@ -6221,9 +6571,13 @@ async function initializeApp(){
   switchView(currentView || "market");
   await loadWatchlist();
   await loadBotTrades();
+  await loadAiTradeSignals();
   await loadAlgorithmDashboard();
   await loadBacktestReport();
-  setInterval(() => loadBotTrades(true), 15000);
+  setInterval(() => {
+    loadBotTrades(true);
+    loadAiTradeSignals();
+  }, 15000);
 }
 
 initializeApp();

@@ -1,6 +1,6 @@
 //@version=6
 //@strategy_alert_message {{strategy.order.alert_message}}
-strategy("AI NQ1 Smart Paper Bot v44 - Pro Simple", overlay=true, initial_capital=100000, default_qty_type=strategy.fixed, default_qty_value=1, pyramiding=0, margin_long=10, margin_short=10, process_orders_on_close=false, calc_on_every_tick=true, calc_on_order_fills=true, commission_type=strategy.commission.cash_per_contract, commission_value=4.0, slippage=2)
+strategy("AI NQ1 Smart Paper Bot v44 - Tight Exits", overlay=true, initial_capital=100000, default_qty_type=strategy.fixed, default_qty_value=1, pyramiding=0, margin_long=10, margin_short=10, process_orders_on_close=false, calc_on_every_tick=true, calc_on_order_fills=true, commission_type=strategy.commission.cash_per_contract, commission_value=4.0, slippage=2)
 
 // Pro-simple version from the 212 idea list:
 // no repainting, confirmed 1H logic, three clean setups, score gate,
@@ -42,10 +42,12 @@ maxChopScore = input.float(72.0, "Max Chop Score", minval=20.0, maxval=100.0, st
 
 // ---------------- Risk Inputs ----------------
 atrStopMult = input.float(1.05, "ATR Stop Multiplier", minval=0.25, maxval=5.0, step=0.05)
-rewardMultiple = input.float(2.2, "Reward Multiple", minval=0.5, maxval=10.0, step=0.25)
-trailAfterR = input.float(0.9, "Trail After R", minval=0.25, maxval=5.0, step=0.25)
-trailAtrMult = input.float(1.35, "Trail ATR Multiplier", minval=0.25, maxval=5.0, step=0.05)
-maxBarsInTrade = input.int(8, "Max Weak Bars In Trade", minval=2, maxval=50)
+rewardMultiple = input.float(2.0, "Reward Multiple", minval=0.5, maxval=10.0, step=0.25)
+trailAfterR = input.float(0.45, "Trail After R", minval=0.10, maxval=5.0, step=0.05)
+trailAtrMult = input.float(0.85, "Trail ATR Multiplier", minval=0.25, maxval=5.0, step=0.05)
+profitGivebackR = input.float(0.35, "Smart Exit Profit Giveback R", minval=0.10, maxval=3.0, step=0.05)
+earlyAdverseR = input.float(0.55, "Smart Exit Adverse R", minval=0.10, maxval=3.0, step=0.05)
+maxBarsInTrade = input.int(5, "Max Weak Bars In Trade", minval=2, maxval=50)
 maxTradesPerDay = input.int(10, "Max Trades Per Day", minval=1, maxval=30)
 maxLossesPerDay = input.int(4, "Max Losses Per Day", minval=1, maxval=10)
 maxConsecutiveLosses = input.int(3, "Max Consecutive Losses", minval=1, maxval=10)
@@ -56,6 +58,7 @@ sessionCloseBufferMinutes = input.int(10, "No New Trades Before Close", minval=0
 // Optional plumbing test. Keep this off unless testing Strategy Report/webhook route.
 enableManualTest = input.bool(false, "Enable Manual Plumbing Test")
 manualTestAction = input.string("OFF", "Manual Test Action", options=["OFF", "BUY", "SELL", "EXIT_LONG", "EXIT_SHORT"])
+enableHourlyWebhookTest = input.bool(false, "Hourly Webhook Test Mode")
 
 // ---------------- Helpers ----------------
 clamp(v, lo, hi) =>
@@ -229,17 +232,22 @@ testLongSignal = enableManualTest and manualTestAction == "BUY" and chartTimefra
 testShortSignal = enableManualTest and manualTestAction == "SELL" and chartTimeframeSafe and confirmedOk and backtestWindowOk
 testExitLongSignal = enableManualTest and manualTestAction == "EXIT_LONG" and chartTimeframeSafe and confirmedOk and backtestWindowOk
 testExitShortSignal = enableManualTest and manualTestAction == "EXIT_SHORT" and chartTimeframeSafe and confirmedOk and backtestWindowOk
+hourlySlot = signalReady ? int(signalTime / 3600000) : 0
+hourlyTestReady = enableHourlyWebhookTest and symbolOk and chartTimeframeSafe and confirmedOk and signalReady and newSignalBar and backtestWindowOk and signalSessionOk
+hourlyTestLongSignal = hourlyTestReady and hourlySlot % 2 == 0
+hourlyTestShortSignal = hourlyTestReady and hourlySlot % 2 != 0
 
-longSignal = strategy.position_size == 0 and (newLongSignal or testLongSignal)
-shortSignal = strategy.position_size == 0 and (newShortSignal or testShortSignal)
+longSignal = hourlyTestLongSignal or (strategy.position_size == 0 and (newLongSignal or testLongSignal))
+shortSignal = hourlyTestShortSignal or (strategy.position_size == 0 and (newShortSignal or testShortSignal))
 
 // ---------------- Stop / Target Plan ----------------
 longAtrStop = signalClose - atrValue * atrStopMult
 shortAtrStop = signalClose + atrValue * atrStopMult
 longStructureStop = na(priorLow) ? longAtrStop : priorLow - syminfo.mintick * 2
 shortStructureStop = na(priorHigh) ? shortAtrStop : priorHigh + syminfo.mintick * 2
-plannedLongStopRaw = enableManualTest ? signalClose - atrValue : math.max(longAtrStop, longStructureStop)
-plannedShortStopRaw = enableManualTest ? signalClose + atrValue : math.min(shortAtrStop, shortStructureStop)
+testModeActive = enableManualTest or enableHourlyWebhookTest
+plannedLongStopRaw = testModeActive ? signalClose - atrValue * 0.75 : math.max(longAtrStop, longStructureStop)
+plannedShortStopRaw = testModeActive ? signalClose + atrValue * 0.75 : math.min(shortAtrStop, shortStructureStop)
 plannedLongStop = math.min(plannedLongStopRaw, signalClose - syminfo.mintick * 4)
 plannedShortStop = math.max(plannedShortStopRaw, signalClose + syminfo.mintick * 4)
 plannedLongRisk = math.max(signalClose - plannedLongStop, syminfo.mintick)
@@ -247,17 +255,19 @@ plannedShortRisk = math.max(plannedShortStop - signalClose, syminfo.mintick)
 plannedLongTarget = signalClose + plannedLongRisk * rewardMultiple
 plannedShortTarget = signalClose - plannedShortRisk * rewardMultiple
 
-longSetup = kaufmanLong ? "KaufmanRatio" : atrLong ? "ATRExpansion" : emaPullbackLong ? "EMAPullback" : sweepLong ? "EMAPullback" : "ManualTest"
-shortSetup = kaufmanShort ? "KaufmanRatio" : atrShort ? "ATRExpansion" : emaPullbackShort ? "EMAPullback" : sweepShort ? "EMAPullback" : "ManualTest"
+longSetup = enableHourlyWebhookTest ? "HourlyWebhookTest" : kaufmanLong ? "KaufmanRatio" : atrLong ? "ATRExpansion" : emaPullbackLong ? "EMAPullback" : sweepLong ? "EMAPullback" : "ManualTest"
+shortSetup = enableHourlyWebhookTest ? "HourlyWebhookTest" : kaufmanShort ? "KaufmanRatio" : atrShort ? "ATRExpansion" : emaPullbackShort ? "EMAPullback" : sweepShort ? "EMAPullback" : "ManualTest"
 longGrade = longScore >= 84 ? "A+" : longScore >= 74 ? "A" : "B"
 shortGrade = shortScore >= 84 ? "A+" : shortScore >= 74 ? "A" : "B"
-longReason = longSetup + " | score " + str.tostring(longScore, "#") + " | KR " + str.tostring(kaufmanRatioValue, "#.##") + " | ATR " + str.tostring(atrRatio, "#.##") + "x | chop " + str.tostring(chopScore, "#") + " | VWAP/location/no-repaint"
-shortReason = shortSetup + " | score " + str.tostring(shortScore, "#") + " | KR " + str.tostring(kaufmanRatioValue, "#.##") + " | ATR " + str.tostring(atrRatio, "#.##") + "x | chop " + str.tostring(chopScore, "#") + " | VWAP/location/no-repaint"
+riskMode = enableHourlyWebhookTest ? "WebhookTestHourly" : "ProSimpleTight"
+testModeJson = enableHourlyWebhookTest ? "true" : "false"
+longReason = enableHourlyWebhookTest ? "Hourly webhook route test only | alternates every confirmed 1H bar" : longSetup + " | score " + str.tostring(longScore, "#") + " | KR " + str.tostring(kaufmanRatioValue, "#.##") + " | ATR " + str.tostring(atrRatio, "#.##") + "x | chop " + str.tostring(chopScore, "#") + " | tight trail/smart exits"
+shortReason = enableHourlyWebhookTest ? "Hourly webhook route test only | alternates every confirmed 1H bar" : shortSetup + " | score " + str.tostring(shortScore, "#") + " | KR " + str.tostring(kaufmanRatioValue, "#.##") + " | ATR " + str.tostring(atrRatio, "#.##") + "x | chop " + str.tostring(chopScore, "#") + " | tight trail/smart exits"
 
-longMessage = '{"source":"tradingview","action":"BUY","ticker":"' + syminfo.ticker + '","timeframe":"' + signalTimeframe + '","chart_timeframe":"' + timeframe.period + '","price":' + money(signalClose) + ',"target":' + money(plannedLongTarget) + ',"profit_mode":"BRACKET_TARGET","stop_mode":"HARD_STOP","stop":' + money(plannedLongStop) + ',"qty":' + str.tostring(qty) + ',"edge":' + str.tostring(edge, "#.##") + ',"score":' + str.tostring(longScore, "#.##") + ',"ai_score":' + str.tostring(longScore, "#.##") + ',"ai_bias":"LONG","entry_style":"' + longSetup + '","grade":"' + longGrade + '","risk_mode":"ProSimple","reason":"' + longReason + '","bar_time":"' + str.tostring(signalTime) + '","tag":"' + webhookTag + '"}'
-shortMessage = '{"source":"tradingview","action":"SELL","ticker":"' + syminfo.ticker + '","timeframe":"' + signalTimeframe + '","chart_timeframe":"' + timeframe.period + '","price":' + money(signalClose) + ',"target":' + money(plannedShortTarget) + ',"profit_mode":"BRACKET_TARGET","stop_mode":"HARD_STOP","stop":' + money(plannedShortStop) + ',"qty":' + str.tostring(qty) + ',"edge":' + str.tostring(edge, "#.##") + ',"score":' + str.tostring(shortScore, "#.##") + ',"ai_score":' + str.tostring(shortScore, "#.##") + ',"ai_bias":"SHORT","entry_style":"' + shortSetup + '","grade":"' + shortGrade + '","risk_mode":"ProSimple","reason":"' + shortReason + '","bar_time":"' + str.tostring(signalTime) + '","tag":"' + webhookTag + '"}'
-exitLongMessage = '{"source":"tradingview","action":"EXIT_LONG","ticker":"' + syminfo.ticker + '","timeframe":"' + signalTimeframe + '","chart_timeframe":"' + timeframe.period + '","price":' + money(signalClose) + ',"qty":' + str.tostring(qty) + ',"edge":' + str.tostring(edge, "#.##") + ',"score":' + str.tostring(longScore, "#.##") + ',"reason":"ProSimple thesis exit","bar_time":"' + str.tostring(signalTime) + '","tag":"' + webhookTag + '"}'
-exitShortMessage = '{"source":"tradingview","action":"EXIT_SHORT","ticker":"' + syminfo.ticker + '","timeframe":"' + signalTimeframe + '","chart_timeframe":"' + timeframe.period + '","price":' + money(signalClose) + ',"qty":' + str.tostring(qty) + ',"edge":' + str.tostring(edge, "#.##") + ',"score":' + str.tostring(shortScore, "#.##") + ',"reason":"ProSimple thesis exit","bar_time":"' + str.tostring(signalTime) + '","tag":"' + webhookTag + '"}'
+longMessage = '{"source":"tradingview","action":"BUY","ticker":"' + syminfo.ticker + '","timeframe":"' + signalTimeframe + '","chart_timeframe":"' + timeframe.period + '","price":' + money(signalClose) + ',"target":' + money(plannedLongTarget) + ',"profit_mode":"BRACKET_TARGET_TIGHT_TRAIL","stop_mode":"SMART_TRAILING_STOP","stop":' + money(plannedLongStop) + ',"qty":' + str.tostring(qty) + ',"edge":' + str.tostring(edge, "#.##") + ',"score":' + str.tostring(longScore, "#.##") + ',"ai_score":' + str.tostring(longScore, "#.##") + ',"ai_bias":"LONG","entry_style":"' + longSetup + '","grade":"' + longGrade + '","risk_mode":"' + riskMode + '","test_mode":' + testModeJson + ',"reason":"' + longReason + '","bar_time":"' + str.tostring(signalTime) + '","tag":"' + webhookTag + '"}'
+shortMessage = '{"source":"tradingview","action":"SELL","ticker":"' + syminfo.ticker + '","timeframe":"' + signalTimeframe + '","chart_timeframe":"' + timeframe.period + '","price":' + money(signalClose) + ',"target":' + money(plannedShortTarget) + ',"profit_mode":"BRACKET_TARGET_TIGHT_TRAIL","stop_mode":"SMART_TRAILING_STOP","stop":' + money(plannedShortStop) + ',"qty":' + str.tostring(qty) + ',"edge":' + str.tostring(edge, "#.##") + ',"score":' + str.tostring(shortScore, "#.##") + ',"ai_score":' + str.tostring(shortScore, "#.##") + ',"ai_bias":"SHORT","entry_style":"' + shortSetup + '","grade":"' + shortGrade + '","risk_mode":"' + riskMode + '","test_mode":' + testModeJson + ',"reason":"' + shortReason + '","bar_time":"' + str.tostring(signalTime) + '","tag":"' + webhookTag + '"}'
+exitLongMessage = '{"source":"tradingview","action":"EXIT_LONG","ticker":"' + syminfo.ticker + '","timeframe":"' + signalTimeframe + '","chart_timeframe":"' + timeframe.period + '","price":' + money(signalClose) + ',"qty":' + str.tostring(qty) + ',"edge":' + str.tostring(edge, "#.##") + ',"score":' + str.tostring(longScore, "#.##") + ',"risk_mode":"' + riskMode + '","test_mode":' + testModeJson + ',"reason":"tight smart exit","bar_time":"' + str.tostring(signalTime) + '","tag":"' + webhookTag + '"}'
+exitShortMessage = '{"source":"tradingview","action":"EXIT_SHORT","ticker":"' + syminfo.ticker + '","timeframe":"' + signalTimeframe + '","chart_timeframe":"' + timeframe.period + '","price":' + money(signalClose) + ',"qty":' + str.tostring(qty) + ',"edge":' + str.tostring(edge, "#.##") + ',"score":' + str.tostring(shortScore, "#.##") + ',"risk_mode":"' + riskMode + '","test_mode":' + testModeJson + ',"reason":"tight smart exit","bar_time":"' + str.tostring(signalTime) + '","tag":"' + webhookTag + '"}'
 
 // ---------------- Strategy Report + Webhook Orders ----------------
 if longSignal
@@ -285,25 +295,40 @@ if shortSignal
 barsInTrade = not na(activeEntryBar) ? bar_index - activeEntryBar : 0
 longHealth = clamp(longScore - shortScore + 55.0 - scoreBool(signalClose < emaPullback, 8) - scoreBool(signalClose < vwapValue, 10) - scoreBool(closeNearLow, 6), 0.0, 100.0)
 shortHealth = clamp(shortScore - longScore + 55.0 - scoreBool(signalClose > emaPullback, 8) - scoreBool(signalClose > vwapValue, 10) - scoreBool(closeNearHigh, 6), 0.0, 100.0)
+safeRiskPoints = math.max(nz(activeRiskPoints, atrValue), syminfo.mintick)
+longOpenR = strategy.position_size > 0 ? (signalClose - strategy.position_avg_price) / safeRiskPoints : 0.0
+shortOpenR = strategy.position_size < 0 ? (strategy.position_avg_price - signalClose) / safeRiskPoints : 0.0
+longBestR = strategy.position_size > 0 and not na(activeBest) ? (activeBest - strategy.position_avg_price) / safeRiskPoints : 0.0
+shortBestR = strategy.position_size < 0 and not na(activeBest) ? (strategy.position_avg_price - activeBest) / safeRiskPoints : 0.0
+longGivebackR = math.max(longBestR - longOpenR, 0.0)
+shortGivebackR = math.max(shortBestR - shortOpenR, 0.0)
 
 if strategy.position_size > 0 and signalReady
     activeBest := na(activeBest) ? signalHigh : math.max(activeBest, signalHigh)
     openProfitPoints = signalClose - strategy.position_avg_price
-    if openProfitPoints >= activeRiskPoints * trailAfterR
+    if openProfitPoints >= safeRiskPoints * trailAfterR
         structureTrail = signalClose - atrValue * trailAtrMult
-        activeStop := math.max(math.max(activeStop, structureTrail), strategy.position_avg_price)
+        profitLockStop = strategy.position_avg_price + safeRiskPoints * 0.05
+        activeStop := math.max(math.max(activeStop, structureTrail), profitLockStop)
     strategy.exit("Long Risk Exit", from_entry="Long", stop=activeStop, limit=activeTarget, alert_message=exitLongMessage)
 
 if strategy.position_size < 0 and signalReady
     activeBest := na(activeBest) ? signalLow : math.min(activeBest, signalLow)
     openProfitPoints = strategy.position_avg_price - signalClose
-    if openProfitPoints >= activeRiskPoints * trailAfterR
+    if openProfitPoints >= safeRiskPoints * trailAfterR
         structureTrail = signalClose + atrValue * trailAtrMult
-        activeStop := math.min(math.min(activeStop, structureTrail), strategy.position_avg_price)
+        profitLockStop = strategy.position_avg_price - safeRiskPoints * 0.05
+        activeStop := math.min(math.min(activeStop, structureTrail), profitLockStop)
     strategy.exit("Short Risk Exit", from_entry="Short", stop=activeStop, limit=activeTarget, alert_message=exitShortMessage)
 
-longThesisExit = strategy.position_size > 0 and confirmedOk and newSignalBar and ((signalClose < emaPullback and longHealth < 58) or signalClose < vwapValue and longHealth < 52 or shortScore > longScore + 12 or barsInTrade >= maxBarsInTrade and longHealth < 62 or testExitLongSignal)
-shortThesisExit = strategy.position_size < 0 and confirmedOk and newSignalBar and ((signalClose > emaPullback and shortHealth < 58) or signalClose > vwapValue and shortHealth < 52 or longScore > shortScore + 12 or barsInTrade >= maxBarsInTrade and shortHealth < 62 or testExitShortSignal)
+longAdverseExit = longOpenR <= -earlyAdverseR and (shortScore > longScore or signalClose < vwapValue or closeNearLow)
+shortAdverseExit = shortOpenR <= -earlyAdverseR and (longScore > shortScore or signalClose > vwapValue or closeNearHigh)
+longGivebackExit = longBestR >= 0.70 and longGivebackR >= profitGivebackR and (longHealth < 66 or shortScore > longScore)
+shortGivebackExit = shortBestR >= 0.70 and shortGivebackR >= profitGivebackR and (shortHealth < 66 or longScore > shortScore)
+longNoFollowThroughExit = barsInTrade >= 2 and longOpenR < 0.20 and longHealth < 60
+shortNoFollowThroughExit = barsInTrade >= 2 and shortOpenR < 0.20 and shortHealth < 60
+longThesisExit = strategy.position_size > 0 and confirmedOk and newSignalBar and (longAdverseExit or longGivebackExit or longNoFollowThroughExit or (signalClose < emaPullback and longHealth < 62) or (signalClose < vwapValue and longHealth < 58) or shortScore > longScore + 8 or barsInTrade >= maxBarsInTrade and longHealth < 66 or testExitLongSignal)
+shortThesisExit = strategy.position_size < 0 and confirmedOk and newSignalBar and (shortAdverseExit or shortGivebackExit or shortNoFollowThroughExit or (signalClose > emaPullback and shortHealth < 62) or (signalClose > vwapValue and shortHealth < 58) or longScore > shortScore + 8 or barsInTrade >= maxBarsInTrade and shortHealth < 66 or testExitShortSignal)
 
 if longThesisExit
     strategy.close("Long", alert_message=exitLongMessage)

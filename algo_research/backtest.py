@@ -20,9 +20,12 @@ class BacktestConfig:
     point_value: float = 20.0
     tick_size: float = 0.25
     atr_stop_mult: float = 1.05
-    reward_multiple: float = 2.2
-    trail_after_r: float = 0.9
-    trail_atr_mult: float = 1.35
+    reward_multiple: float = 2.0
+    trail_after_r: float = 0.45
+    trail_atr_mult: float = 0.85
+    profit_giveback_r: float = 0.35
+    early_adverse_r: float = 0.55
+    max_bars_in_trade: int = 5
     max_trades_per_day: int = 10
     max_losses_per_day: int = 4
     max_consecutive_losses: int = 3
@@ -230,17 +233,46 @@ def run_backtest(
 
         # Exit first using only the previously closed 1H signal row.
         if position:
-            if position["side"] == "BUY" and (
-                signal["close"] < signal["ema_pullback"]
-                or signal["close"] < signal["vwap"]
-                or signal["short_score"] > signal["long_score"] + 12
-            ):
-                close_position(float(bar["open"]), "thesis_exit", bar["time"])
-            elif position and position["side"] == "SELL" and (
-                signal["close"] > signal["ema_pullback"]
-                or signal["close"] > signal["vwap"]
-                or signal["long_score"] > signal["short_score"] + 12
-            ):
+            if position["side"] == "BUY":
+                position["best"] = max(position["best"], float(signal["high"]))
+                open_r = (float(signal["close"]) - position["entry"]) / max(position["risk_points"], config.tick_size)
+                best_r = (position["best"] - position["entry"]) / max(position["risk_points"], config.tick_size)
+                giveback_r = max(best_r - open_r, 0.0)
+                adverse_exit = open_r <= -config.early_adverse_r and (
+                    signal["short_score"] > signal["long_score"] or signal["close"] < signal["vwap"] or bool(signal["close_near_low"])
+                )
+                giveback_exit = best_r >= 0.70 and giveback_r >= config.profit_giveback_r and (
+                    signal["long_score"] - signal["short_score"] < 8
+                )
+                no_followthrough_exit = i - position["entry_index"] >= 2 and open_r < 0.20 and signal["long_score"] < signal["short_score"] + 8
+                weak_time_exit = i - position["entry_index"] >= config.max_bars_in_trade and signal["long_score"] < signal["short_score"] + 8
+                thesis_exit = (
+                    signal["close"] < signal["ema_pullback"]
+                    or signal["close"] < signal["vwap"]
+                    or signal["short_score"] > signal["long_score"] + 8
+                )
+            elif position["side"] == "SELL":
+                position["best"] = min(position["best"], float(signal["low"]))
+                open_r = (position["entry"] - float(signal["close"])) / max(position["risk_points"], config.tick_size)
+                best_r = (position["entry"] - position["best"]) / max(position["risk_points"], config.tick_size)
+                giveback_r = max(best_r - open_r, 0.0)
+                adverse_exit = open_r <= -config.early_adverse_r and (
+                    signal["long_score"] > signal["short_score"] or signal["close"] > signal["vwap"] or bool(signal["close_near_high"])
+                )
+                giveback_exit = best_r >= 0.70 and giveback_r >= config.profit_giveback_r and (
+                    signal["short_score"] - signal["long_score"] < 8
+                )
+                no_followthrough_exit = i - position["entry_index"] >= 2 and open_r < 0.20 and signal["short_score"] < signal["long_score"] + 8
+                weak_time_exit = i - position["entry_index"] >= config.max_bars_in_trade and signal["short_score"] < signal["long_score"] + 8
+                thesis_exit = (
+                    signal["close"] > signal["ema_pullback"]
+                    or signal["close"] > signal["vwap"]
+                    or signal["long_score"] > signal["short_score"] + 8
+                )
+            else:
+                adverse_exit = giveback_exit = no_followthrough_exit = weak_time_exit = thesis_exit = False
+
+            if adverse_exit or giveback_exit or no_followthrough_exit or weak_time_exit or thesis_exit:
                 close_position(float(bar["open"]), "thesis_exit", bar["time"])
 
         # Conservative intrabar order: if stop and target both hit, count the stop.
@@ -263,7 +295,7 @@ def run_backtest(
                     position["stop"] = max(
                         position["stop"],
                         float(bar["close"]) - float(signal["atr"]) * config.trail_atr_mult,
-                        position["entry"],
+                        position["entry"] + position["risk_points"] * 0.05,
                     )
             else:
                 open_profit_points = position["entry"] - float(bar["close"])
@@ -271,7 +303,7 @@ def run_backtest(
                     position["stop"] = min(
                         position["stop"],
                         float(bar["close"]) + float(signal["atr"]) * config.trail_atr_mult,
-                        position["entry"],
+                        position["entry"] - position["risk_points"] * 0.05,
                     )
 
         daily_pnl = cash - day_start_equity
@@ -318,6 +350,8 @@ def run_backtest(
                 "stop": stop,
                 "target": target,
                 "risk_points": risk_points,
+                "best": entry,
+                "entry_index": i,
             }
             trades_today += 1
             last_trade_index = i
@@ -351,7 +385,7 @@ def run_backtest(
     summary.update(
         {
             "symbol": symbol,
-            "logic": "v44_1h_no_leak_kaufman_atr_ema_pullback_pro_simple",
+            "logic": "v44_1h_no_leak_kaufman_atr_ema_pullback_tight_exits",
             "starting_cash": round(config.starting_cash, 2),
             "ending_cash": round(cash, 2),
             "max_drawdown_dollars": round(max_drawdown_dollars, 2),

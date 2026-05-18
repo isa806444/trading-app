@@ -19,15 +19,15 @@ class BacktestConfig:
     contract_qty: int = 1
     point_value: float = 20.0
     tick_size: float = 0.25
-    atr_stop_mult: float = 1.2
-    reward_multiple: float = 2.0
-    trail_after_r: float = 1.0
-    trail_atr_mult: float = 1.6
-    max_trades_per_day: int = 5
-    max_losses_per_day: int = 3
-    max_consecutive_losses: int = 2
-    max_daily_loss_dollars: float = 600.0
-    cooldown_bars: int = 6
+    atr_stop_mult: float = 1.05
+    reward_multiple: float = 2.2
+    trail_after_r: float = 0.9
+    trail_atr_mult: float = 1.35
+    max_trades_per_day: int = 10
+    max_losses_per_day: int = 4
+    max_consecutive_losses: int = 3
+    max_daily_loss_dollars: float = 900.0
+    cooldown_bars: int = 2
     fee_per_contract_side: float = 4.0
     slippage_points: float = 0.5
     validation_fraction: float = 0.30
@@ -230,9 +230,17 @@ def run_backtest(
 
         # Exit first using only the previously closed 1H signal row.
         if position:
-            if position["side"] == "BUY" and signal["close"] < signal["ema_fast"]:
+            if position["side"] == "BUY" and (
+                signal["close"] < signal["ema_pullback"]
+                or signal["close"] < signal["vwap"]
+                or signal["short_score"] > signal["long_score"] + 12
+            ):
                 close_position(float(bar["open"]), "thesis_exit", bar["time"])
-            elif position and position["side"] == "SELL" and signal["close"] > signal["ema_fast"]:
+            elif position and position["side"] == "SELL" and (
+                signal["close"] > signal["ema_pullback"]
+                or signal["close"] > signal["vwap"]
+                or signal["long_score"] > signal["short_score"] + 12
+            ):
                 close_position(float(bar["open"]), "thesis_exit", bar["time"])
 
         # Conservative intrabar order: if stop and target both hit, count the stop.
@@ -343,7 +351,7 @@ def run_backtest(
     summary.update(
         {
             "symbol": symbol,
-            "logic": "v44_1h_no_leak_kaufman_atr_atx",
+            "logic": "v44_1h_no_leak_kaufman_atr_ema_pullback_pro_simple",
             "starting_cash": round(config.starting_cash, 2),
             "ending_cash": round(cash, 2),
             "max_drawdown_dollars": round(max_drawdown_dollars, 2),

@@ -1921,7 +1921,7 @@ def route_tradingview_signal_to_tradovate(payload):
         "enabled": mnq_tradovate_bridge_enabled() and tradovate_auto_trade_enabled(),
         "ready": mnq_tradovate_bridge_ready(),
         "routed": False,
-        "destination": "tradeify_tradovate" if mnq_tradovate_bridge_enabled() else "tradingview_paper_signal",
+        "destination": "lucid_tradovate" if mnq_tradovate_bridge_enabled() else "tradingview_paper_signal",
         "signal": signal,
         "source_signal": signal,
         "verification": None,
@@ -1966,10 +1966,10 @@ def route_tradingview_signal_to_tradovate(payload):
     }
 
     if not mnq_tradovate_bridge_enabled():
-        result["reason"] = f"NQ1 signal logged only. Set {TRADOVATE_NQ_BRIDGE_ENABLED_ENV}=true to route to Tradeify/Tradovate."
+        result["reason"] = f"NQ1 signal logged only. Set {TRADOVATE_NQ_BRIDGE_ENABLED_ENV}=true to route to Lucid/Tradovate."
         return result
     if not tradovate_configured():
-        result["reason"] = "Tradeify/Tradovate credentials are not configured."
+        result["reason"] = "Lucid/Tradovate credentials are not configured."
         return result
     if not tradovate_auto_trade_enabled():
         result["reason"] = "Auto-trading is off. Set TRADOVATE_AUTO_TRADE_ENABLED=true only after demo testing."
@@ -2023,8 +2023,8 @@ def route_tradingview_signal_to_tradovate(payload):
             "order": order_result.get("response"),
             "failure": order_result.get("failure"),
             "reason": order_result.get("failure_text") or (
-                f"NQ1 alert routed to Tradeify/Tradovate as {execution_signal.get('tradovate_symbol')}."
-                if order_result.get("ok") else "Tradeify/Tradovate rejected the order."
+                f"NQ1 alert routed to Lucid/Tradovate as {execution_signal.get('tradovate_symbol')}."
+                if order_result.get("ok") else "Lucid/Tradovate rejected the order."
             )
         })
     except Exception as exc:
@@ -2158,7 +2158,7 @@ def build_bot_trade_message(payload, execution):
         "account_guard": execution.get("account_guard"),
         "account": execution.get("account"),
         "failure": execution.get("failure"),
-        "reason": signal.get("reason") or execution.get("reason") or ("Tradeify/Tradovate order routed." if routed else "Demo trade logged from algorithm alert."),
+        "reason": signal.get("reason") or execution.get("reason") or ("Lucid/Tradovate order routed." if routed else "Demo trade logged from algorithm alert."),
         "routing_reason": execution.get("reason"),
         "order": execution.get("order"),
         "tag": signal.get("tag"),
@@ -3333,7 +3333,7 @@ def build_algorithm_dashboard(tickers):
             "futures_only": True,
             "label": "NQ1 -> Tradovate bridge ready" if mnq_tradovate_bridge_ready() else "NQ1 paper signals armed",
             "summary": (
-                f"TradingView NQ1 alerts route to {get_mnq_execution_symbol() or 'the active NQ contract'} through Tradeify/Tradovate."
+                f"TradingView NQ1 alerts route to {get_mnq_execution_symbol() or 'the active NQ contract'} through Lucid/Tradovate."
                 if mnq_tradovate_bridge_ready()
                 else "TradingView can fire NQ1 strategy alerts into this app. Turn on the NQ Tradovate bridge only after demo testing."
             )
@@ -4316,7 +4316,7 @@ def live_data_status_route():
     return jsonify({
         "live_data": "tradingview_nq1_alerts",
         "futures_only": True,
-        "execution_destination": "tradeify_tradovate" if mnq_tradovate_bridge_enabled() else "tradingview_paper_signal",
+        "execution_destination": "lucid_tradovate" if mnq_tradovate_bridge_enabled() else "tradingview_paper_signal",
         "active_future": get_active_futures_market(),
         "tradovate_configured": tradovate_configured(),
         "tradovate_environment": get_tradovate_env(),

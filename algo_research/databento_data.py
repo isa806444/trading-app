@@ -14,6 +14,22 @@ DEFAULT_DATASET = os.getenv("DATABENTO_DATASET", "GLBX.MDP3")
 DEFAULT_SCHEMA = os.getenv("DATABENTO_SCHEMA", "ohlcv-1m")
 
 
+def load_local_env(path: str = ".env") -> None:
+    """Load simple KEY=VALUE pairs without printing secrets or adding a dependency."""
+    env_path = Path(path)
+    if not env_path.exists():
+        return
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
 def _require_databento():
     try:
         import databento as db
@@ -31,6 +47,7 @@ def fetch_ohlcv(
     stype_in: str = "raw_symbol",
 ) -> pd.DataFrame:
     """Fetch Databento OHLCV bars and return a clean pandas DataFrame."""
+    load_local_env()
     db = _require_databento()
     end_dt = pd.Timestamp(end) if end else pd.Timestamp(datetime.now(timezone.utc))
     start_dt = pd.Timestamp(start) if start else end_dt - pd.Timedelta(days=10)

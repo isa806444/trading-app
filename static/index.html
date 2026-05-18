@@ -2348,7 +2348,7 @@ body {
       <div>
         <div class="hero-eyebrow">AI Algorithm Terminal</div>
         <h1 class="algo-title">NQ1 bot. Paper-first signals.</h1>
-        <div class="algo-copy">TradingView runs the NQ1 futures strategy, this app receives the alerts, and the guarded bridge can route them through Tradeify/Tradovate.</div>
+        <div class="algo-copy">TradingView runs the NQ1 futures strategy, this app receives the alerts, and the guarded bridge can route them through Lucid/Tradovate.</div>
         <div class="hero-chip-row">
           <div class="hero-chip live" id="providerChip">TradingView -> App Paper Signals</div>
           <div class="hero-chip" id="alertsChip">Alerts idle</div>
@@ -2397,7 +2397,7 @@ body {
   </div>
 
   <div id="algoDashboard" class="algo-board">
-    <div class="algo-empty">No routed algorithm orders yet. Real trades will appear here only after TradingView alerts route through Render and Tradeify/Tradovate.</div>
+    <div class="algo-empty">No routed algorithm orders yet. Real trades will appear here only after TradingView alerts route through Render and Lucid/Tradovate.</div>
   </div>
 
   <div id="backtestReport" class="algo-board">
@@ -3869,7 +3869,7 @@ function renderAlgorithmDashboard(payload){
         <div>
           <div class="section-kicker">Algorithm Results</div>
           <div class="section-title">No routed orders yet</div>
-          <div class="compact-copy">This board only shows real bot orders that were sent from TradingView to Render and successfully routed to Tradeify/Tradovate. No model trades or fake P/L are shown here.</div>
+          <div class="compact-copy">This board only shows real bot orders that were sent from TradingView to Render and successfully routed to Lucid/Tradovate. No model trades or fake P/L are shown here.</div>
         </div>
         <button class="algo-secondary" onclick="loadAlgorithmDashboard(true)">Refresh Orders</button>
       </div>
@@ -3882,7 +3882,7 @@ function renderAlgorithmDashboard(payload){
       <div>
         <div class="section-kicker">Algorithm Results</div>
         <div class="section-title">Routed bot orders for ${payload.date || "today"}</div>
-        <div class="compact-copy">Only real routed orders appear here: TradingView alert -> Render webhook -> app -> Tradeify/Tradovate. No simulated trades or fake P/L.</div>
+        <div class="compact-copy">Only real routed orders appear here: TradingView alert -> Render webhook -> app -> Lucid/Tradovate. No simulated trades or fake P/L.</div>
       </div>
       <button class="algo-secondary" onclick="loadAlgorithmDashboard(true)">Refresh Orders</button>
     </div>
@@ -3954,7 +3954,7 @@ function renderAlgorithmDashboard(payload){
 async function loadAlgorithmDashboard(force=false){
   const container = document.getElementById("algoDashboard");
   if(container){
-    container.innerHTML = '<div class="algo-empty">Checking for routed Tradeify/Tradovate bot orders...</div>';
+    container.innerHTML = '<div class="algo-empty">Checking for routed Lucid/Tradovate bot orders...</div>';
   }
 
   try{

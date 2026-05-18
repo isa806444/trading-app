@@ -28,6 +28,8 @@ services:
         value: "1.25"
       - key: TRADINGVIEW_WEBHOOK_SECRET
         sync: false
+      - key: TRADINGVIEW_ALLOWED_TAGS
+        value: nq1-smart-paper-v44
       - key: TRADOVATE_ENV
         value: demo
       - key: TRADOVATE_USERNAME
@@ -50,6 +52,16 @@ services:
         sync: false
       - key: TRADOVATE_AUTO_TRADE_ENABLED
         value: "false"
+      - key: TRADOVATE_NQ_BRIDGE_ENABLED
+        value: "false"
+      - key: TRADOVATE_NQ_EXECUTION_SYMBOL
+        value: NQM6
+      - key: TRADOVATE_NQ_DOLLARS_PER_POINT
+        value: "20"
+      - key: TRADOVATE_TICK_SIZE
+        value: "0.25"
+      - key: TRADOVATE_MAX_ACCOUNT_SIZE_USD
+        value: "100000"
       - key: TRADOVATE_LIVE_TRADING_ACK
         sync: false
       - key: TRADOVATE_DEFAULT_ORDER_QTY

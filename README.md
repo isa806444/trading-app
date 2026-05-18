@@ -1,15 +1,15 @@
 # Trading App
 
-This project is an MNQ-focused AI algorithm paper-signal dashboard built with Flask, TradingView alerts, Tradeify/Tradovate routing hooks, and Databento research hooks.
+This project is an NQ1-focused AI algorithm paper-signal dashboard built with Flask, TradingView alerts, Lucid/Tradovate routing hooks, and Databento research hooks.
 
 ## Current Features
 
-- Run the MNQ AI algorithm board
-- Keep the TradingView Pine Script strategy private in the repo for the Micro E-mini Nasdaq 100 1-hour bot
-- Receive TradingView webhook alerts from the live MNQ strategy chart
-- Keep the bot permanently armed to MNQ so all other alerts are ignored
-- Log MNQ TradingView alerts as app paper signals
-- Optionally route MNQ alerts to Tradeify/Tradovate using the active MNQ futures contract
+- Run the NQ1 AI algorithm board
+- Keep the TradingView Pine Script strategy private in the repo for the E-mini Nasdaq 100 15-minute bot
+- Receive TradingView webhook alerts from the live NQ1 strategy chart
+- Keep the bot permanently armed to NQ1 so all other alerts are ignored
+- Log NQ1 TradingView alerts as app paper signals
+- Optionally route NQ1 alerts to Lucid/Tradovate using the active NQ futures contract
 - Save and remove watchlist tickers with persistence in `watchlist.json`
 - Backtest with Databento in Python, VS Code, and Jupyter
 
@@ -52,21 +52,23 @@ pip install -r requirements.txt
 copy .env.example .env
 ```
 
-For the MNQ paper bot, start with:
+For the NQ1 paper bot, start with:
 
 ```text
 TRADINGVIEW_WEBHOOK_SECRET=make_a_private_secret
 ```
 
-For Tradeify/Tradovate demo routing, add your Tradovate credentials and keep the bridge guarded:
+For Lucid/Tradovate demo routing, add your Tradovate credentials and keep the bridge guarded:
 
 ```text
 TRADOVATE_ENV=demo
-TRADOVATE_MNQ_BRIDGE_ENABLED=true
-TRADOVATE_MNQ_EXECUTION_SYMBOL=MNQM6
+TRADOVATE_NQ_BRIDGE_ENABLED=true
+TRADOVATE_NQ_EXECUTION_SYMBOL=NQM6
+TRADOVATE_NQ_DOLLARS_PER_POINT=20
 TRADOVATE_AUTO_TRADE_ENABLED=true
 TRADOVATE_MAX_ORDER_QTY=1
 TRADOVATE_MAX_DAILY_ORDERS=5
+TRADINGVIEW_ALLOWED_TAGS=nq1-smart-paper-v44
 ```
 
 ## Run
@@ -113,10 +115,10 @@ gunicorn main:app
 
 ## Notes
 
-- TradingView is the live signal source for the MNQ paper bot.
-- Tradeify/Tradovate powers routed execution when the bridge variables are enabled.
+- TradingView is the live signal source for the NQ1 paper bot.
+- Lucid/Tradovate powers routed execution when the bridge variables are enabled.
 - Databento can still power research/backtesting.
-- Pine strategies cannot directly auto-fill TradingView's built-in Paper Trading panel; use TradingView Strategy Tester, app paper-signal tracking, or the guarded Tradeify/Tradovate webhook bridge.
-- The app is locked to MNQ and rejects non-MNQ TradingView alerts.
-- The included Pine strategy is designed for paper testing on an MNQ chart such as `MNQ1!` or the active MNQ contract using the 1-hour timeframe.
+- Pine strategies cannot directly auto-fill TradingView's built-in Paper Trading panel; use TradingView Strategy Tester, app paper-signal tracking, or the guarded Lucid/Tradovate webhook bridge.
+- The app is locked to NQ1 and rejects non-NQ TradingView alerts.
+- The included Pine strategy is designed for paper testing on an NQ chart such as `NQ1!` or the active NQ contract using the 15-minute timeframe.
 - If `python` does not work in PowerShell, try `py` instead.

@@ -1,10 +1,10 @@
-# MNQ Paper Bot Setup
+# NQ1 Paper Bot Setup
 
 The bot now uses this split:
 
-- TradingView Premium: live MNQ strategy candles and alerts.
+- TradingView Premium: live NQ1 strategy candles and alerts.
 - Databento: optional historical research/backtesting.
-- Optional Tradeify/Tradovate bridge: MNQ alerts can route to the active MNQ futures contract.
+- Optional Lucid/Tradovate bridge: NQ1 alerts can route to the active NQ futures contract.
 
 ## Render Environment
 
@@ -21,41 +21,41 @@ DATABENTO_API_KEY=your_databento_key
 DATABENTO_DATASET=GLBX.MDP3
 DATABENTO_SCHEMA=ohlcv-1m
 DATABENTO_STYPE_IN=raw_symbol
-DATABENTO_SYMBOL_MAP=ES=ESM6,NQ=NQM6,MES=MESM6,MNQ=MNQM6,YM=YMM6,RTY=RTYM6,CL=CLM6,GC=GCM6
+DATABENTO_SYMBOL_MAP=ES=ESM6,NQ=NQM6,MES=MESM6,YM=YMM6,RTY=RTYM6,CL=CLM6,GC=GCM6
 DATABENTO_VERIFY_ALERTS_ENABLED=true
 DATABENTO_LOOKBACK_MINUTES=240
 DATABENTO_MIN_RECORDS=40
 DATABENTO_MAX_ALERT_DEVIATION_PCT=1.25
 ```
 
-Optional for Tradeify/Tradovate demo routing:
+Optional for Lucid/Tradovate demo routing:
 
 ```text
 TRADOVATE_ENV=demo
-TRADOVATE_USERNAME=your_tradeify_tradovate_username
-TRADOVATE_PASSWORD=your_tradeify_tradovate_password
+TRADOVATE_USERNAME=your_lucid_tradovate_username
+TRADOVATE_PASSWORD=your_lucid_tradovate_password
 TRADOVATE_APP_ID=your_tradovate_app_id
 TRADOVATE_APP_VERSION=1.0.0
 TRADOVATE_CID=your_tradovate_cid
 TRADOVATE_SECRET=your_tradovate_secret
-TRADOVATE_ACCOUNT_SPEC=your_tradeify_account_name
-TRADOVATE_ACCOUNT_ID=your_tradeify_account_id
-TRADOVATE_SYMBOL_MAP=ES=ESM6,NQ=NQM6,MES=MESM6,MNQ=MNQM6,YM=YMM6,RTY=RTYM6,CL=CLM6,GC=GCM6
+TRADOVATE_ACCOUNT_SPEC=your_lucid_account_name
+TRADOVATE_ACCOUNT_ID=your_lucid_account_id
+TRADOVATE_SYMBOL_MAP=ES=ESM6,NQ=NQM6,MES=MESM6,YM=YMM6,RTY=RTYM6,CL=CLM6,GC=GCM6
 TRADOVATE_AUTO_TRADE_ENABLED=false
-TRADOVATE_MNQ_BRIDGE_ENABLED=false
-TRADOVATE_MNQ_EXECUTION_SYMBOL=MNQM6
+TRADOVATE_NQ_BRIDGE_ENABLED=false
+TRADOVATE_NQ_EXECUTION_SYMBOL=NQM6
 TRADOVATE_TICK_SIZE=0.25
 TRADOVATE_DEFAULT_ORDER_QTY=1
 TRADOVATE_MAX_ORDER_QTY=1
 TRADOVATE_MAX_DAILY_ORDERS=5
 TRADOVATE_MAX_ACCOUNT_SIZE_USD=100000
-TRADOVATE_MNQ_DOLLARS_PER_POINT=2
+TRADOVATE_NQ_DOLLARS_PER_POINT=20
 ALGO_MIN_EDGE_FOR_AUTO_TRADE=18
 ALGO_DEFAULT_TARGET_PCT=0.02
 ALGO_DEFAULT_STOP_PCT=0.01
 ```
 
-MNQ is directly tradable through the active futures contract, such as `MNQM6`. Update the `M6` contract code when the active futures month rolls.
+NQ1 is the TradingView continuous ticker. Tradovate routes to the active NQ futures contract, such as `NQM6`. Update the contract code when the active futures month rolls.
 
 Only after futures demo orders work, live routing also needs:
 
@@ -72,29 +72,22 @@ Open this copy-ready file in TradingView Pine Editor:
 tradingview/PASTE_THIS_IN_TRADINGVIEW.pine
 ```
 
-Use `Ctrl+A` in TradingView first, delete the old script, then paste the full file. The very first line must be exactly `//@version=5`; if that line is missing, TradingView falls back to Pine v1 and fails on lines like `var int tradesToday = 0`.
+That file now exports the clean v44 routing shell. The old trade logic has been removed so the next strategy brain can start fresh.
 
-Run it on an MNQ chart like `MNQ1!` or the active MNQ contract. Keep the chart set to `1H`. The strategy is intentionally single-timeframe and only fires confirmed bar-close alerts, so it does not use multi-timeframe lookups or repainting live-bar signals.
+Use `Ctrl+A` in TradingView first, delete the old script, then paste the full file. The very first line must be exactly `//@version=6`.
 
-The Pine strategy has guardrails built in:
+Run it on the TradingView NQ continuous chart `NQ1!` or the active NQ contract. Keep the chart set to `5m`.
 
-- Maximum of 5 entries per day
-- Targets 2-3 quality entries per day without forcing weak setups
-- v21 regime classifier switches between trend momentum, range mean-reversion, high-volatility scalp defense, and low-volatility breakout-only behavior
-- v21 adaptive learning filter penalizes losing directions after negative trades and raises required scores instead of forcing weak setups
-- v21 keeps the $100 max-loss guard at the 1-contract default, but tries to exit failed trades before the full stop when setup quality breaks
-- Searches harder for the first quality trade of each non-sideways day
-- Current-week-only trading window by default
-- $100,000 account-size guard for MNQ sizing
-- Hard stop-loss on every trade
-- No fixed take-profit cap; winners are managed by the runner trailing stop
-- ATR and structure-based stop sizing
-- Breakeven/trailing stop protection after the trade proves itself
-- Smart adverse-move exits when a trade fails to follow through or starts trending against entry
-- Smart early-exit alerts when trend, VWAP, DI, RSI, or volatility conditions break
-- Symbol guard for MNQ charts
+The v44 shell keeps only the routing guardrails:
 
-Note: Pine Script cannot rewrite its own source code or run an external machine-learning model inside TradingView. The v21 "self-learning" behavior is an in-script adaptive classifier: it reads recent closed trade results, penalizes the setup type/direction that just failed, tightens entry requirements, and lowers early-failure tolerance after losses.
+- It uses the tag `nq1-smart-paper-v44`; set `TRADINGVIEW_ALLOWED_TAGS=nq1-smart-paper-v44` on Render.
+- It locks to NQ1/NQ charts and rejects MNQ charts.
+- It locks to `5m` by default.
+- It uses `SMART_EXIT_ONLY` routing with no fixed profit target.
+- It keeps `strategy.entry`, `strategy.close`, and TradingView alert JSON ready for Render/app/Tradovate.
+- It has no active indicators, entries, exits, filters, scoring, or trade logic.
+
+Note: Pine Script cannot rewrite its own source code, run an external machine-learning model inside TradingView, safely look into future bars, or see real broker order flow/other traders' live positions unless that data is provided on the chart.
 
 Create an alert using `Any alert() function call` and this webhook URL:
 
@@ -102,15 +95,17 @@ Create an alert using `Any alert() function call` and this webhook URL:
 https://trading-app-kb38.onrender.com/tradingview-webhook?secret=make_a_private_secret
 ```
 
-The Pine alert sends `BUY` or `SELL` plus live price, stop, contracts, edge, score, timeframe, profit mode, reason, and bar time. v21 sends `profit_mode=TRAIL_ONLY` with `target=null`.
+The Pine alert sends `BUY` or `SELL` plus live price, stop mode, optional stop, contracts, edge, score, AI score, AI bias, entry style, buyer/seller pressure, pattern, projection, decision zone, crowd-pressure proxy, timeframe, profit mode, reason, and bar time. The v44 bot sends `profit_mode=TRAIL_ONLY`, `target=null`, and defaults to `stop_mode=SMART_EXIT_ONLY`.
 
-Important: Pine strategies simulate fills inside TradingView's broker emulator and can trigger alerts. Pine does not directly take over the TradingView Paper Trading panel by itself. For automated paper execution outside the Strategy Tester, this app receives TradingView webhooks and can route them to Tradeify/Tradovate when all bridge env vars are enabled.
+Live intrabar entries only trigger on realtime forming candles. Historical 5m candles still may not contain the exact tick path, so old candles may show bar-close-style entries unless you test on a lower timeframe or use TradingView Bar Magnifier.
+
+In `SMART_EXIT_ONLY` mode, the app routes entries as plain market orders and waits for TradingView `EXIT_LONG` or `EXIT_SHORT` alerts to close them. If you turn `Use Hard Protective Stop` back on, the app routes bracket orders again and requires a stop.
 
 Safe demo sequence:
 
 1. Keep `TRADOVATE_ENV=demo`.
-2. Set `TRADOVATE_MNQ_EXECUTION_SYMBOL=MNQM6` or the active MNQ contract.
-3. Set `TRADOVATE_MNQ_BRIDGE_ENABLED=true`.
+2. Set `TRADOVATE_NQ_EXECUTION_SYMBOL=NQM6` or the active NQ contract.
+3. Set `TRADOVATE_NQ_BRIDGE_ENABLED=true`.
 4. Set `TRADOVATE_AUTO_TRADE_ENABLED=true`.
 5. Keep `TRADOVATE_MAX_ORDER_QTY=1` and `TRADOVATE_MAX_DAILY_ORDERS=5`.
 
@@ -120,5 +115,13 @@ Run futures-style Databento backtests locally:
 
 ```powershell
 pip install -r requirements-research.txt
-python -m algo_research.run_backtest --symbol MNQM6 --start 2026-05-01T13:30:00Z --end 2026-05-08T20:00:00Z --dataset GLBX.MDP3
+python -m algo_research.run_backtest --symbol NQM6 --start 2026-05-01T13:30:00Z --end 2026-05-08T20:00:00Z --dataset GLBX.MDP3
 ```
+
+Backtests support overfitting checks:
+
+```powershell
+python -m algo_research.run_backtest --symbol NQM6 --start 2026-05-01T13:30:00Z --end 2026-05-08T20:00:00Z --dataset GLBX.MDP3 --slippage-pct 0.0001 --fee-per-trade 4 --validation-fraction 0.30 --monte-carlo-runs 500
+```
+
+The summary includes in-sample results, out-of-sample results, and Monte Carlo trade-resampling stats.

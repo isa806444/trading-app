@@ -10,14 +10,19 @@ strategy("Break And Bounce - Prior Day Retest", overlay=true, initial_capital=10
 contracts = input.int(1, "Contracts", minval=1, maxval=20)
 requireFiveMinute = input.bool(true, "Require 5-Minute Chart")
 sessionTimezone = input.string("America/New_York", "Session Timezone")
-tradeSession = input.session("0930-1600", "Valid Trade Window")
+tradeSession = input.session("0930-1200", "Valid Trade Window")
 exitHour = input.int(16, "End Of Day Exit Hour", minval=0, maxval=23)
 exitMinute = input.int(0, "End Of Day Exit Minute", minval=0, maxval=59)
 breakoutTf = input.timeframe("15", "Breakout Timeframe")
 targetR = input.float(3.0, "Target R", minval=0.5, maxval=10.0, step=0.25)
 stopRangeBuffer = input.float(0.20, "Stop Buffer Of Candle Range", minval=0.0, maxval=2.0, step=0.05)
+pullbackLookbackBars = input.int(4, "Clear Move Into Level Bars", minval=2, maxval=12)
+maxTradesPerDay = input.int(2, "Max Trades Per Day", minval=1, maxval=10)
+minBarsBetweenTrades = input.int(12, "Min Bars Between Trades", minval=1, maxval=100)
+minEntryDistanceAtr = input.float(0.80, "Min Distance From Last Trade ATR", minval=0.0, maxval=5.0, step=0.05)
+oneTradePerBreakout = input.bool(true, "One Trade Per 15m Breakout")
 enableStrategyReportOrders = input.bool(true, "Enable Strategy Report Orders")
-reportEntryMode = input.string("Retest Bounce", "Strategy Report Entry Mode", options=["Retest Bounce", "Pattern Confirmed", "Original PDF"])
+reportEntryMode = input.string("Pattern Confirmed", "Strategy Report Entry Mode", options=["Retest Bounce", "Pattern Confirmed", "Original PDF"])
 entryMode = input.string("Smart", "Entry Confirmation Mode", options=["Smart", "Original PDF"])
 useStrictOriginalEngulf = input.bool(false, "Use Strict Original Engulfing")
 showPriorDayZones = input.bool(true, "Show Yesterday High / Low Boxes")
@@ -28,23 +33,37 @@ showDashboard = input.bool(true, "Show Dashboard")
 
 // ---------------- Daily / MTF Context ----------------
 [prevHigh, prevLow] = request.security(syminfo.tickerid, "D", [high[1], low[1]], barmerge.gaps_off, barmerge.lookahead_off)
-close15 = request.security(syminfo.tickerid, breakoutTf, close, barmerge.gaps_off, barmerge.lookahead_off)
+close15Confirmed = request.security(syminfo.tickerid, breakoutTf, close[1], barmerge.gaps_off, barmerge.lookahead_off)
 
 newDay = ta.change(time("D")) != 0
 validTime = not na(time(timeframe.period, tradeSession, sessionTimezone))
 timeframeOk = not requireFiveMinute or timeframe.period == "5"
 confirmedOk = barstate.isconfirmed
 
-breakoutUp = close15 > prevHigh
-breakoutDown = close15 < prevLow
+breakoutUp = close15Confirmed > prevHigh
+breakoutDown = close15Confirmed < prevLow
+breakoutUpEvent = breakoutUp and not breakoutUp[1]
+breakoutDownEvent = breakoutDown and not breakoutDown[1]
 
 var int dir = 0
+var bool longCycleUsed = false
+var bool shortCycleUsed = false
+var int tradesToday = 0
+var int lastTradeBar = na
+var float lastTradePrice = na
 if newDay
     dir := 0
-if breakoutUp
+    longCycleUsed := false
+    shortCycleUsed := false
+    tradesToday := 0
+    lastTradeBar := na
+    lastTradePrice := na
+if breakoutUpEvent
     dir := 1
-if breakoutDown
+    longCycleUsed := false
+if breakoutDownEvent
     dir := -1
+    shortCycleUsed := false
 
 // ---------------- 5M Retest + Candle Patterns ----------------
 body = math.abs(close - open)
@@ -81,6 +100,12 @@ shortPatternName = invHammer or smartInvHammer ? "Inverted Hammer Bounce" : bear
 reportLongConfirm = reportEntryMode == "Original PDF" ? (hammer or strictBullEngulf) : reportEntryMode == "Pattern Confirmed" ? longPattern : (longPattern or bounceLong)
 reportShortConfirm = reportEntryMode == "Original PDF" ? (invHammer or strictBearEngulf) : reportEntryMode == "Pattern Confirmed" ? shortPattern : (shortPattern or bounceShort)
 
+// A real break-and-bounce entry needs price to move directionally back into the level first.
+// For longs, price broke above PDH and pulls down into it. For shorts, price broke below PDL and pulls up into it.
+levelZone = math.max(ta.atr(14) * priorZoneAtr, syminfo.mintick * 8)
+clearMoveIntoLongLevel = close[pullbackLookbackBars] > prevHigh + levelZone and close[1] < close[pullbackLookbackBars] and low <= prevHigh + levelZone and close > prevHigh
+clearMoveIntoShortLevel = close[pullbackLookbackBars] < prevLow - levelZone and close[1] > close[pullbackLookbackBars] and high >= prevLow - levelZone and close < prevLow
+
 // ---------------- Risk Plan ----------------
 longStop = prevHigh - candleRange * stopRangeBuffer
 shortStop = prevLow + candleRange * stopRangeBuffer
@@ -89,12 +114,17 @@ shortRisk = shortStop - close
 longTarget = close + longRisk * targetR
 shortTarget = close - shortRisk * targetR
 
-canTrade = enableStrategyReportOrders and timeframeOk and confirmedOk and validTime and strategy.position_size == 0
-longSignal = canTrade and dir == 1 and retestLong and reportLongConfirm and longRisk > syminfo.mintick
-shortSignal = canTrade and dir == -1 and retestShort and reportShortConfirm and shortRisk > syminfo.mintick
+spacingOk = na(lastTradeBar) or bar_index - lastTradeBar >= minBarsBetweenTrades
+distanceOk = na(lastTradePrice) or math.abs(close - lastTradePrice) >= ta.atr(14) * minEntryDistanceAtr
+tradeCountOk = tradesToday < maxTradesPerDay
+cycleOkLong = not oneTradePerBreakout or not longCycleUsed
+cycleOkShort = not oneTradePerBreakout or not shortCycleUsed
+canTrade = enableStrategyReportOrders and timeframeOk and confirmedOk and validTime and strategy.position_size == 0 and spacingOk and distanceOk and tradeCountOk
+longSignal = canTrade and dir == 1 and cycleOkLong and retestLong and clearMoveIntoLongLevel and reportLongConfirm and longRisk > syminfo.mintick
+shortSignal = canTrade and dir == -1 and cycleOkShort and retestShort and clearMoveIntoShortLevel and reportShortConfirm and shortRisk > syminfo.mintick
 
-longReason = "15m broke above yesterday high, 5m retested prior high, pattern: " + longPatternName
-shortReason = "15m broke below yesterday low, 5m retested prior low, pattern: " + shortPatternName
+longReason = "Closed 15m candle broke above yesterday high. 5m pulled back directionally into the level, retested, then confirmed with: " + longPatternName
+shortReason = "Closed 15m candle broke below yesterday low. 5m pulled back directionally into the level, retested, then confirmed with: " + shortPatternName
 longAlert = "BREAK AND BOUNCE LONG " + syminfo.ticker + " | Setup: " + longPatternName + " | Entry: " + str.tostring(close, format.mintick) + " | Stop: " + str.tostring(longStop, format.mintick) + " | Take Profit: " + str.tostring(longTarget, format.mintick) + " | Reason: " + longReason
 shortAlert = "BREAK AND BOUNCE SHORT " + syminfo.ticker + " | Setup: " + shortPatternName + " | Entry: " + str.tostring(close, format.mintick) + " | Stop: " + str.tostring(shortStop, format.mintick) + " | Take Profit: " + str.tostring(shortTarget, format.mintick) + " | Reason: " + shortReason
 
@@ -132,15 +162,15 @@ if showPriorDayZones and not na(priorHighBox)
     label.set_x(priorHighLabel, bar_index)
     label.set_x(priorLowLabel, bar_index)
 
-breakoutUpEvent = showStageLabels and validTime and breakoutUp and not breakoutUp[1]
-breakoutDownEvent = showStageLabels and validTime and breakoutDown and not breakoutDown[1]
+showBreakoutUpEvent = showStageLabels and validTime and breakoutUpEvent
+showBreakoutDownEvent = showStageLabels and validTime and breakoutDownEvent
 retestLongEvent = showStageLabels and validTime and dir == 1 and retestLong and not retestLong[1]
 retestShortEvent = showStageLabels and validTime and dir == -1 and retestShort and not retestShort[1]
 
-if breakoutUpEvent
+if showBreakoutUpEvent
     label.new(bar_index, low, "BREAK L", style=label.style_label_up, color=color.new(color.lime, 55), textcolor=color.white, size=size.tiny, tooltip="15m close broke above yesterday high. Now wait for a 5m retest and bounce confirmation.")
 
-if breakoutDownEvent
+if showBreakoutDownEvent
     label.new(bar_index, high, "BREAK S", style=label.style_label_down, color=color.new(color.red, 55), textcolor=color.white, size=size.tiny, tooltip="15m close broke below yesterday low. Now wait for a 5m retest and rejection confirmation.")
 
 if retestLongEvent and not longSignal
@@ -150,6 +180,10 @@ if retestShortEvent and not shortSignal
     label.new(bar_index, high, "RETEST S", style=label.style_label_down, color=color.new(color.red, 72), textcolor=color.white, size=size.tiny, tooltip="Short retest area touched. Waiting for inverted hammer, engulfing, or strong-close rejection confirmation.")
 
 if longSignal
+    tradesToday += 1
+    lastTradeBar := bar_index
+    lastTradePrice := close
+    longCycleUsed := true
     activeEntry := close
     activeStop := longStop
     activeTarget := longTarget
@@ -169,6 +203,10 @@ if longSignal
     label.new(bar_index, low, "B&B LONG", style=label.style_label_up, color=color.new(color.lime, 0), textcolor=color.black, size=size.small, tooltip=longAlert)
 
 if shortSignal
+    tradesToday += 1
+    lastTradeBar := bar_index
+    lastTradePrice := close
+    shortCycleUsed := true
     activeEntry := close
     activeStop := shortStop
     activeTarget := shortTarget
@@ -203,8 +241,8 @@ if strategy.position_size == 0
 // ---------------- Visuals ----------------
 plot(prevHigh, "Yesterday High", color=color.new(color.lime, 20), linewidth=2, style=plot.style_linebr)
 plot(prevLow, "Yesterday Low", color=color.new(color.red, 20), linewidth=2, style=plot.style_linebr)
-plotshape(breakoutUp and validTime, title="15m Breakout Up", style=shape.triangleup, location=location.belowbar, color=color.new(color.lime, 55), size=size.tiny, text="15U")
-plotshape(breakoutDown and validTime, title="15m Breakout Down", style=shape.triangledown, location=location.abovebar, color=color.new(color.red, 55), size=size.tiny, text="15D")
+plotshape(breakoutUpEvent and validTime, title="15m Breakout Up", style=shape.triangleup, location=location.belowbar, color=color.new(color.lime, 55), size=size.tiny, text="15U")
+plotshape(breakoutDownEvent and validTime, title="15m Breakout Down", style=shape.triangledown, location=location.abovebar, color=color.new(color.red, 55), size=size.tiny, text="15D")
 plotshape(retestLong and dir == 1 and validTime, title="Retest Long Zone", style=shape.circle, location=location.belowbar, color=color.new(color.lime, 70), size=size.tiny, text="RT")
 plotshape(retestShort and dir == -1 and validTime, title="Retest Short Zone", style=shape.circle, location=location.abovebar, color=color.new(color.red, 70), size=size.tiny, text="RT")
 

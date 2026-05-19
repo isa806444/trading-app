@@ -2,8 +2,8 @@
 strategy("Personal NQ Setup Radar - VWAP / KAMA / Liquidity", overlay=true, initial_capital=100000, default_qty_type=strategy.fixed, default_qty_value=1, pyramiding=0, process_orders_on_close=false, calc_on_every_tick=true, calc_on_order_fills=true, commission_type=strategy.commission.cash_per_contract, commission_value=4.0, slippage=2, max_lines_count=80, max_labels_count=120)
 
 // Personal TradingView-only setup radar.
-// It does not call Render/app webhooks. It marks clean setups, draws entry/stop/TP,
-// and closes when the setup thesis weakens. Use confirmed bars to avoid repainting.
+// It marks clean setups, draws entry/stop/TP, and closes when the setup thesis weakens.
+// Use confirmed bars to avoid repainting.
 
 // ---------------- Inputs ----------------
 tradeQty = input.int(1, "Contracts / Paper Size", minval=1, maxval=10)
@@ -29,12 +29,16 @@ structureLen = input.int(30, "Liquidity Lookback", minval=10, maxval=150)
 
 stopAtrMult = input.float(1.0, "Stop ATR Multiplier", minval=0.25, maxval=5.0, step=0.05)
 targetR = input.float(2.0, "Take Profit R", minval=0.5, maxval=8.0, step=0.25)
+minRewardR = input.float(1.35, "Minimum Reward R", minval=0.5, maxval=4.0, step=0.05)
+maxTargetAtr = input.float(4.0, "Max TP ATR Stretch", minval=1.0, maxval=12.0, step=0.25)
 trailAfterR = input.float(0.65, "Trail After R", minval=0.1, maxval=5.0, step=0.05)
 trailAtrMult = input.float(0.9, "Trail ATR Multiplier", minval=0.25, maxval=5.0, step=0.05)
 profitGivebackR = input.float(0.45, "Close On Giveback R", minval=0.1, maxval=3.0, step=0.05)
 maxBarsInTrade = input.int(18, "Max Bars If Weak", minval=2, maxval=200)
 
 showLines = input.bool(true, "Show Entry / Stop / TP Lines")
+showPatternLines = input.bool(true, "Show Pattern Lines")
+patternPivotLen = input.int(5, "Pattern Pivot Length", minval=2, maxval=20)
 showDashboard = input.bool(true, "Show Dashboard")
 showAllSetupHints = input.bool(false, "Show Smaller Setup Hints")
 
@@ -46,6 +50,10 @@ useLiquiditySweep = input.bool(true, "Liquidity Sweep Reversals")
 useCompressionBreakout = input.bool(true, "Compression Breakouts")
 usePowerTrendRunner = input.bool(true, "Power Trend Runner")
 useKamaFilter = input.bool(true, "KAMA Smart Filter")
+useKamaReclaimSetup = input.bool(true, "KAMA Reclaim Setups")
+useConfluenceSetup = input.bool(true, "EMA / VWAP Confluence Setups")
+useSecondEntrySetup = input.bool(true, "Second Entry / Retest Setups")
+usePatternSetups = input.bool(true, "Chart Pattern Setups")
 
 // ---------------- Helpers ----------------
 clamp(v, lo, hi) =>
@@ -60,6 +68,9 @@ efficiencyRatio(src, len) =>
     for i = 0 to len - 1
         path += math.abs(src[i] - src[i + 1])
     path > 0 ? change / path : 0.0
+
+doji(o, c, h, l) =>
+    math.abs(c - o) / math.max(h - l, syminfo.mintick) < 0.20
 
 // ---------------- Core Data ----------------
 confirmedOk = not useNoRepaint or barstate.isconfirmed
@@ -142,6 +153,40 @@ if inOpeningRange
     orLow := na(orLow) ? low : math.min(orLow, low)
 orReady = useOpeningRange and afterOpeningRange and not na(orHigh) and not na(orLow)
 
+// ---------------- Chart Pattern Memory ----------------
+// Pivots confirm after patternPivotLen bars, so these pattern lines do not use future bars for live decisions.
+pivotHigh = ta.pivothigh(high, patternPivotLen, patternPivotLen)
+pivotLow = ta.pivotlow(low, patternPivotLen, patternPivotLen)
+var float prevPivotHigh = na
+var float lastPivotHigh = na
+var int prevPivotHighBar = na
+var int lastPivotHighBar = na
+var float prevPivotLow = na
+var float lastPivotLow = na
+var int prevPivotLowBar = na
+var int lastPivotLowBar = na
+
+if not na(pivotHigh)
+    prevPivotHigh := lastPivotHigh
+    prevPivotHighBar := lastPivotHighBar
+    lastPivotHigh := pivotHigh
+    lastPivotHighBar := bar_index - patternPivotLen
+
+if not na(pivotLow)
+    prevPivotLow := lastPivotLow
+    prevPivotLowBar := lastPivotLowBar
+    lastPivotLow := pivotLow
+    lastPivotLowBar := bar_index - patternPivotLen
+
+insideBarPrior = high[1] < high[2] and low[1] > low[2]
+doubleTopShort = usePatternSetups and not na(prevPivotHigh) and not na(lastPivotHigh) and math.abs(lastPivotHigh - prevPivotHigh) <= atr * 0.65 and close < math.min(lastPivotHigh, prevPivotHigh) - atr * 0.10 and upperWick > body * 0.60
+doubleBottomLong = usePatternSetups and not na(prevPivotLow) and not na(lastPivotLow) and math.abs(lastPivotLow - prevPivotLow) <= atr * 0.65 and close > math.max(lastPivotLow, prevPivotLow) + atr * 0.10 and lowerWick > body * 0.60
+triangleReady = usePatternSetups and not na(prevPivotHigh) and not na(lastPivotHigh) and not na(prevPivotLow) and not na(lastPivotLow) and lastPivotHigh < prevPivotHigh and lastPivotLow > prevPivotLow and squeezeOn
+triangleBreakLong = triangleReady and close > lastPivotHigh and closeNearHigh and relVolume >= 0.85
+triangleBreakShort = triangleReady and close < lastPivotLow and closeNearLow and relVolume >= 0.85
+insideBreakLong = usePatternSetups and insideBarPrior and close > high[1] and closeNearHigh and relVolume >= 0.75 and not doji(open[1], close[1], high[1], low[1])
+insideBreakShort = usePatternSetups and insideBarPrior and close < low[1] and closeNearLow and relVolume >= 0.75 and not doji(open[1], close[1], high[1], low[1])
+
 // ---------------- Setups ----------------
 vwapReclaimLong = useVwapReclaim and low <= vwap and close > vwap and close > open and closeNearHigh and relVolume >= 0.75
 vwapRejectShort = useVwapReclaim and high >= vwap and close < vwap and close < open and closeNearLow and relVolume >= 0.75
@@ -166,26 +211,43 @@ compressionBreakoutShort = useCompressionBreakout and squeezeReleaseShort and cl
 powerTrendLong = usePowerTrendRunner and powerBull and close > high[1] and bodyPct >= 0.35 and closeNearHigh
 powerTrendShort = usePowerTrendRunner and powerBear and close < low[1] and bodyPct >= 0.35 and closeNearLow
 
+kamaReclaimLong = useKamaReclaimSetup and low <= kamaValue and close > kamaValue and kamaSlope > 0 and closeNearHigh and close > open and relVolume >= 0.70
+kamaRejectShort = useKamaReclaimSetup and high >= kamaValue and close < kamaValue and kamaSlope < 0 and closeNearLow and close < open and relVolume >= 0.70
+
+confluenceLong = useConfluenceSetup and bullTrend and low <= math.max(emaFast, vwap) + atr * 0.20 and close > math.max(emaFast, vwap) and closeNearHigh and relVolume >= 0.70
+confluenceShort = useConfluenceSetup and bearTrend and high >= math.min(emaFast, vwap) - atr * 0.20 and close < math.min(emaFast, vwap) and closeNearLow and relVolume >= 0.70
+
+barsSinceLongTrap = ta.barssince(fakeBreakoutLong or liquiditySweepLong or orFakeoutLong)
+barsSinceShortTrap = ta.barssince(fakeBreakoutShort or liquiditySweepShort or orFakeoutShort)
+secondEntryLong = useSecondEntrySetup and barsSinceLongTrap > 0 and barsSinceLongTrap <= 5 and close > high[1] and close > vwap and closeNearHigh and relVolume >= 0.70
+secondEntryShort = useSecondEntrySetup and barsSinceShortTrap > 0 and barsSinceShortTrap <= 5 and close < low[1] and close < vwap and closeNearLow and relVolume >= 0.70
+
+chartPatternLong = doubleBottomLong or triangleBreakLong or insideBreakLong
+chartPatternShort = doubleTopShort or triangleBreakShort or insideBreakShort
+chartPatternLongName = doubleBottomLong ? "Double Bottom Reclaim" : triangleBreakLong ? "Triangle Breakout Long" : insideBreakLong ? "Inside Bar Breakout Long" : "Pattern Long"
+chartPatternShortName = doubleTopShort ? "Double Top Rejection" : triangleBreakShort ? "Triangle Breakdown Short" : insideBreakShort ? "Inside Bar Breakdown Short" : "Pattern Short"
+patternEventLong = chartPatternLong and not chartPatternLong[1]
+patternEventShort = chartPatternShort and not chartPatternShort[1]
+
 // ---------------- Scoring ----------------
-locationLong = vwapReclaimLong or trendPullbackLong or fakeBreakoutLong or orFakeoutLong or liquiditySweepLong or compressionBreakoutLong or powerTrendLong
-locationShort = vwapRejectShort or trendPullbackShort or fakeBreakoutShort or orFakeoutShort or liquiditySweepShort or compressionBreakoutShort or powerTrendShort
+locationLong = vwapReclaimLong or trendPullbackLong or fakeBreakoutLong or orFakeoutLong or liquiditySweepLong or compressionBreakoutLong or powerTrendLong or kamaReclaimLong or confluenceLong or secondEntryLong or chartPatternLong
+locationShort = vwapRejectShort or trendPullbackShort or fakeBreakoutShort or orFakeoutShort or liquiditySweepShort or compressionBreakoutShort or powerTrendShort or kamaRejectShort or confluenceShort or secondEntryShort or chartPatternShort
 kamaOkLong = not useKamaFilter or close >= kamaValue or kamaSlope > 0
 kamaOkShort = not useKamaFilter or close <= kamaValue or kamaSlope < 0
 doNotChaseLong = distVwapAtr > 2.6 or (close > priorHigh and upperWick > body * 1.7) or (rangePosition > 0.90 and not powerBull)
 doNotChaseShort = distVwapAtr > 2.6 or (close < priorLow and lowerWick > body * 1.7) or (rangePosition < 0.10 and not powerBear)
 
-longScore = clamp(40 + score(bullTrend, 12) + score(powerBull, 10) + score(close > vwap, 8) + score(vwapSlope > 0, 5) + score(relVolume >= 1.0, 7) + score(closeNearHigh, 6) + score(kamaOkLong, 6) + score(vwapReclaimLong, 12) + score(trendPullbackLong, 12) + score(fakeBreakoutLong or orFakeoutLong or liquiditySweepLong, 14) + score(orBreakoutLong, 10) + score(compressionBreakoutLong, 12) + score(powerTrendLong, 12) - score(chopScore > maxChop, 14) - score(doNotChaseLong, 12) - score(bearTrend, 10), 0, 100)
-shortScore = clamp(40 + score(bearTrend, 12) + score(powerBear, 10) + score(close < vwap, 8) + score(vwapSlope < 0, 5) + score(relVolume >= 1.0, 7) + score(closeNearLow, 6) + score(kamaOkShort, 6) + score(vwapRejectShort, 12) + score(trendPullbackShort, 12) + score(fakeBreakoutShort or orFakeoutShort or liquiditySweepShort, 14) + score(orBreakoutShort, 10) + score(compressionBreakoutShort, 12) + score(powerTrendShort, 12) - score(chopScore > maxChop, 14) - score(doNotChaseShort, 12) - score(bullTrend, 10), 0, 100)
+longScore = clamp(40 + score(bullTrend, 12) + score(powerBull, 10) + score(close > vwap, 8) + score(vwapSlope > 0, 5) + score(relVolume >= 1.0, 7) + score(closeNearHigh, 6) + score(kamaOkLong, 6) + score(vwapReclaimLong, 12) + score(trendPullbackLong, 12) + score(fakeBreakoutLong or orFakeoutLong or liquiditySweepLong, 14) + score(orBreakoutLong, 10) + score(compressionBreakoutLong, 12) + score(powerTrendLong, 12) + score(kamaReclaimLong or confluenceLong, 10) + score(secondEntryLong, 9) + score(chartPatternLong, 10) - score(chopScore > maxChop, 14) - score(doNotChaseLong, 12) - score(bearTrend, 10), 0, 100)
+shortScore = clamp(40 + score(bearTrend, 12) + score(powerBear, 10) + score(close < vwap, 8) + score(vwapSlope < 0, 5) + score(relVolume >= 1.0, 7) + score(closeNearLow, 6) + score(kamaOkShort, 6) + score(vwapRejectShort, 12) + score(trendPullbackShort, 12) + score(fakeBreakoutShort or orFakeoutShort or liquiditySweepShort, 14) + score(orBreakoutShort, 10) + score(compressionBreakoutShort, 12) + score(powerTrendShort, 12) + score(kamaRejectShort or confluenceShort, 10) + score(secondEntryShort, 9) + score(chartPatternShort, 10) - score(chopScore > maxChop, 14) - score(doNotChaseShort, 12) - score(bullTrend, 10), 0, 100)
 edge = longScore - shortScore
 
-longSetup = vwapReclaimLong ? "VWAP Reclaim Long" : trendPullbackLong ? "Trend Pullback Long" : fakeBreakoutLong ? "Fake Breakdown Reclaim" : orFakeoutLong ? "Opening Range Fakeout Long" : orBreakoutLong ? "Opening Range Breakout Long" : liquiditySweepLong ? "Liquidity Sweep Reversal Long" : compressionBreakoutLong ? "Compression Breakout Long" : powerTrendLong ? "Power Trend Runner Long" : "Long Setup"
-shortSetup = vwapRejectShort ? "VWAP Rejection Short" : trendPullbackShort ? "Trend Pullback Short" : fakeBreakoutShort ? "Fake Breakout Short" : orFakeoutShort ? "Opening Range Fakeout Short" : orBreakoutShort ? "Opening Range Breakdown Short" : liquiditySweepShort ? "Liquidity Sweep Reversal Short" : compressionBreakoutShort ? "Compression Breakdown Short" : powerTrendShort ? "Power Trend Runner Short" : "Short Setup"
+longSetup = chartPatternLong ? chartPatternLongName : confluenceLong ? "EMA/VWAP Confluence Long" : kamaReclaimLong ? "KAMA Reclaim Long" : secondEntryLong ? "Second Entry Trap Long" : vwapReclaimLong ? "VWAP Reclaim Long" : trendPullbackLong ? "Trend Pullback Long" : fakeBreakoutLong ? "Fake Breakdown Reclaim" : orFakeoutLong ? "Opening Range Fakeout Long" : orBreakoutLong ? "Opening Range Breakout Long" : liquiditySweepLong ? "Liquidity Sweep Reversal Long" : compressionBreakoutLong ? "Compression Breakout Long" : powerTrendLong ? "Power Trend Runner Long" : "Long Setup"
+shortSetup = chartPatternShort ? chartPatternShortName : confluenceShort ? "EMA/VWAP Confluence Short" : kamaRejectShort ? "KAMA Rejection Short" : secondEntryShort ? "Second Entry Trap Short" : vwapRejectShort ? "VWAP Rejection Short" : trendPullbackShort ? "Trend Pullback Short" : fakeBreakoutShort ? "Fake Breakout Short" : orFakeoutShort ? "Opening Range Fakeout Short" : orBreakoutShort ? "Opening Range Breakdown Short" : liquiditySweepShort ? "Liquidity Sweep Reversal Short" : compressionBreakoutShort ? "Compression Breakdown Short" : powerTrendShort ? "Power Trend Runner Short" : "Short Setup"
 
-var int lastSignalBar = na
-cooldownOk = na(lastSignalBar) or bar_index - lastSignalBar > cooldownBars
-baseGate = confirmedOk and inSession and cooldownOk and chopScore <= maxChop and strategy.position_size == 0
-longSignal = baseGate and longScore >= minScore and edge >= minEdge and locationLong and kamaOkLong and not doNotChaseLong
-shortSignal = baseGate and shortScore >= minScore and edge <= -minEdge and locationShort and kamaOkShort and not doNotChaseShort
+longTrapReason = fakeBreakoutLong ? "Trap: sellers broke prior low, but price reclaimed it with a strong lower wick." : orFakeoutLong ? "Trap: sellers pushed below the opening range low, then price closed back above it." : liquiditySweepLong ? "Trap: sell stops under liquidity were swept, then buyers stepped back in." : secondEntryLong ? "Trap: first reclaim held and the second push confirmed buyers still control it." : ""
+shortTrapReason = fakeBreakoutShort ? "Trap: buyers broke prior high, but price rejected back below it with a strong upper wick." : orFakeoutShort ? "Trap: buyers pushed above the opening range high, then price closed back below it." : liquiditySweepShort ? "Trap: buy stops over liquidity were swept, then sellers stepped back in." : secondEntryShort ? "Trap: first rejection held and the second push confirmed sellers still control it." : ""
+longReason = str.length(longTrapReason) > 0 ? longTrapReason : chartPatternLong ? "Pattern: " + chartPatternLongName + " with score/volume confirmation." : confluenceLong ? "Confluence: EMA, VWAP, and trend bias are stacked under price." : kamaReclaimLong ? "KAMA reclaim: price recovered the adaptive trend line with momentum." : vwapReclaimLong ? "VWAP reclaim: price flushed into VWAP and closed back above it." : trendPullbackLong ? "Trend pullback: bullish trend held the fast EMA support." : compressionBreakoutLong ? "Compression breakout: squeeze released upward with volume." : powerTrendLong ? "Power trend: strong trend momentum is still expanding." : "Long setup passed the score gate."
+shortReason = str.length(shortTrapReason) > 0 ? shortTrapReason : chartPatternShort ? "Pattern: " + chartPatternShortName + " with score/volume confirmation." : confluenceShort ? "Confluence: EMA, VWAP, and trend bias are stacked above price." : kamaRejectShort ? "KAMA rejection: price failed the adaptive trend line with momentum." : vwapRejectShort ? "VWAP rejection: price tested VWAP and closed back below it." : trendPullbackShort ? "Trend pullback: bearish trend held the fast EMA resistance." : compressionBreakoutShort ? "Compression breakdown: squeeze released downward with volume." : powerTrendShort ? "Power trend: strong bearish momentum is still expanding." : "Short setup passed the score gate."
 
 // ---------------- Risk Plan ----------------
 longStopStructure = math.min(nz(swingLow, low), low) - syminfo.mintick * 2
@@ -194,8 +256,30 @@ longStop = math.min(close - syminfo.mintick * 4, math.max(close - atr * stopAtrM
 shortStop = math.max(close + syminfo.mintick * 4, math.min(close + atr * stopAtrMult, shortStopStructure))
 longRisk = math.max(close - longStop, syminfo.mintick)
 shortRisk = math.max(shortStop - close, syminfo.mintick)
-longTarget = close + longRisk * targetR
-shortTarget = close - shortRisk * targetR
+rawLongTarget = close + longRisk * targetR
+rawShortTarget = close - shortRisk * targetR
+nearestLongTarget = close + atr * maxTargetAtr
+nearestLongTarget := not na(priorHigh) and priorHigh > close ? math.min(nearestLongTarget, priorHigh) : nearestLongTarget
+nearestLongTarget := not na(swingHigh) and swingHigh > close ? math.min(nearestLongTarget, swingHigh) : nearestLongTarget
+nearestLongTarget := orReady and orHigh > close ? math.min(nearestLongTarget, orHigh) : nearestLongTarget
+nearestLongTarget := not na(lastPivotHigh) and lastPivotHigh > close ? math.min(nearestLongTarget, lastPivotHigh) : nearestLongTarget
+nearestShortTarget = close - atr * maxTargetAtr
+nearestShortTarget := not na(priorLow) and priorLow < close ? math.max(nearestShortTarget, priorLow) : nearestShortTarget
+nearestShortTarget := not na(swingLow) and swingLow < close ? math.max(nearestShortTarget, swingLow) : nearestShortTarget
+nearestShortTarget := orReady and orLow < close ? math.max(nearestShortTarget, orLow) : nearestShortTarget
+nearestShortTarget := not na(lastPivotLow) and lastPivotLow < close ? math.max(nearestShortTarget, lastPivotLow) : nearestShortTarget
+longTarget = math.min(rawLongTarget, nearestLongTarget)
+shortTarget = math.max(rawShortTarget, nearestShortTarget)
+rewardOkLong = (longTarget - close) / longRisk >= minRewardR or powerTrendLong or compressionBreakoutLong
+rewardOkShort = (close - shortTarget) / shortRisk >= minRewardR or powerTrendShort or compressionBreakoutShort
+
+var int lastSignalBar = na
+cooldownOk = na(lastSignalBar) or bar_index - lastSignalBar > cooldownBars
+baseGate = confirmedOk and inSession and cooldownOk and chopScore <= maxChop and strategy.position_size == 0
+longSignal = baseGate and longScore >= minScore and edge >= minEdge and locationLong and kamaOkLong and not doNotChaseLong and rewardOkLong
+shortSignal = baseGate and shortScore >= minScore and edge <= -minEdge and locationShort and kamaOkShort and not doNotChaseShort and rewardOkShort
+longAlert = "LONG " + syminfo.ticker + " | Setup: " + longSetup + " | Entry: " + str.tostring(close, format.mintick) + " | Stop: " + str.tostring(longStop, format.mintick) + " | Take Profit: " + str.tostring(longTarget, format.mintick) + " | Score: " + str.tostring(longScore, "#") + " | Edge: " + str.tostring(edge, "#") + " | Reason: " + longReason
+shortAlert = "SHORT " + syminfo.ticker + " | Setup: " + shortSetup + " | Entry: " + str.tostring(close, format.mintick) + " | Stop: " + str.tostring(shortStop, format.mintick) + " | Take Profit: " + str.tostring(shortTarget, format.mintick) + " | Score: " + str.tostring(shortScore, "#") + " | Edge: " + str.tostring(edge, "#") + " | Reason: " + shortReason
 
 var float activeEntry = na
 var float activeStop = na
@@ -218,8 +302,9 @@ if longSignal
     activeBest := high
     activeSetup := longSetup
     activeEntryBar := bar_index
-    strategy.entry("Long", strategy.long, qty=tradeQty, alert_message="LONG " + longSetup)
+    strategy.entry("Long", strategy.long, qty=tradeQty, alert_message=longAlert)
     strategy.exit("Long Risk", from_entry="Long", stop=activeStop, limit=activeTarget, alert_message="EXIT LONG risk/target")
+    alert(longAlert, alert.freq_once_per_bar_close)
     if showLines
         if not na(entryLine)
             line.delete(entryLine)
@@ -230,7 +315,7 @@ if longSignal
         entryLine := line.new(bar_index, activeEntry, bar_index + 60, activeEntry, color=color.new(color.white, 0), width=2, extend=extend.right)
         stopLine := line.new(bar_index, activeStop, bar_index + 60, activeStop, color=color.new(color.red, 0), width=2, extend=extend.right)
         targetLine := line.new(bar_index, activeTarget, bar_index + 60, activeTarget, color=color.new(color.lime, 0), width=2, extend=extend.right)
-    label.new(bar_index, low, "LONG\n" + longSetup + "\nScore " + str.tostring(longScore, "#") + "\nSL " + str.tostring(activeStop, format.mintick) + "\nTP " + str.tostring(activeTarget, format.mintick), style=label.style_label_up, color=color.new(color.lime, 0), textcolor=color.black, size=size.small)
+    label.new(bar_index, low, "LONG\n" + longSetup + "\nEntry " + str.tostring(activeEntry, format.mintick) + "\nSL " + str.tostring(activeStop, format.mintick) + "\nTP " + str.tostring(activeTarget, format.mintick) + "\n" + longReason, style=label.style_label_up, color=color.new(color.lime, 0), textcolor=color.black, size=size.small)
 
 if shortSignal
     lastSignalBar := bar_index
@@ -241,8 +326,9 @@ if shortSignal
     activeBest := low
     activeSetup := shortSetup
     activeEntryBar := bar_index
-    strategy.entry("Short", strategy.short, qty=tradeQty, alert_message="SHORT " + shortSetup)
+    strategy.entry("Short", strategy.short, qty=tradeQty, alert_message=shortAlert)
     strategy.exit("Short Risk", from_entry="Short", stop=activeStop, limit=activeTarget, alert_message="EXIT SHORT risk/target")
+    alert(shortAlert, alert.freq_once_per_bar_close)
     if showLines
         if not na(entryLine)
             line.delete(entryLine)
@@ -253,7 +339,7 @@ if shortSignal
         entryLine := line.new(bar_index, activeEntry, bar_index + 60, activeEntry, color=color.new(color.white, 0), width=2, extend=extend.right)
         stopLine := line.new(bar_index, activeStop, bar_index + 60, activeStop, color=color.new(color.red, 0), width=2, extend=extend.right)
         targetLine := line.new(bar_index, activeTarget, bar_index + 60, activeTarget, color=color.new(color.lime, 0), width=2, extend=extend.right)
-    label.new(bar_index, high, "SHORT\n" + shortSetup + "\nScore " + str.tostring(shortScore, "#") + "\nSL " + str.tostring(activeStop, format.mintick) + "\nTP " + str.tostring(activeTarget, format.mintick), style=label.style_label_down, color=color.new(color.red, 0), textcolor=color.white, size=size.small)
+    label.new(bar_index, high, "SHORT\n" + shortSetup + "\nEntry " + str.tostring(activeEntry, format.mintick) + "\nSL " + str.tostring(activeStop, format.mintick) + "\nTP " + str.tostring(activeTarget, format.mintick) + "\n" + shortReason, style=label.style_label_down, color=color.new(color.red, 0), textcolor=color.white, size=size.small)
 
 // ---------------- Trade Management ----------------
 barsInTrade = not na(activeEntryBar) ? bar_index - activeEntryBar : 0
@@ -293,6 +379,41 @@ if strategy.position_size == 0
     activeBest := na
     activeEntryBar := na
 
+// ---------------- Pattern Lines ----------------
+var line patternLineOne = na
+var line patternLineTwo = na
+var label patternLabel = na
+
+if showPatternLines and confirmedOk and (patternEventLong or patternEventShort)
+    if not na(patternLineOne)
+        line.delete(patternLineOne)
+    if not na(patternLineTwo)
+        line.delete(patternLineTwo)
+    if not na(patternLabel)
+        label.delete(patternLabel)
+    if doubleBottomLong and not na(prevPivotLowBar) and not na(lastPivotLowBar)
+        patternLineOne := line.new(prevPivotLowBar, prevPivotLow, lastPivotLowBar, lastPivotLow, color=color.new(color.lime, 0), width=2, extend=extend.right)
+        patternLabel := label.new(bar_index, low, "Pattern: Double Bottom\nReclaim long", style=label.style_label_up, color=color.new(color.lime, 10), textcolor=color.black, size=size.small)
+    else if doubleTopShort and not na(prevPivotHighBar) and not na(lastPivotHighBar)
+        patternLineOne := line.new(prevPivotHighBar, prevPivotHigh, lastPivotHighBar, lastPivotHigh, color=color.new(color.red, 0), width=2, extend=extend.right)
+        patternLabel := label.new(bar_index, high, "Pattern: Double Top\nRejection short", style=label.style_label_down, color=color.new(color.red, 10), textcolor=color.white, size=size.small)
+    else if triangleBreakLong and not na(prevPivotHighBar) and not na(lastPivotHighBar) and not na(prevPivotLowBar) and not na(lastPivotLowBar)
+        patternLineOne := line.new(prevPivotHighBar, prevPivotHigh, lastPivotHighBar, lastPivotHigh, color=color.new(color.lime, 0), width=2, extend=extend.right)
+        patternLineTwo := line.new(prevPivotLowBar, prevPivotLow, lastPivotLowBar, lastPivotLow, color=color.new(color.lime, 35), width=2, extend=extend.right)
+        patternLabel := label.new(bar_index, low, "Pattern: Triangle\nBreakout long", style=label.style_label_up, color=color.new(color.lime, 10), textcolor=color.black, size=size.small)
+    else if triangleBreakShort and not na(prevPivotHighBar) and not na(lastPivotHighBar) and not na(prevPivotLowBar) and not na(lastPivotLowBar)
+        patternLineOne := line.new(prevPivotHighBar, prevPivotHigh, lastPivotHighBar, lastPivotHigh, color=color.new(color.red, 35), width=2, extend=extend.right)
+        patternLineTwo := line.new(prevPivotLowBar, prevPivotLow, lastPivotLowBar, lastPivotLow, color=color.new(color.red, 0), width=2, extend=extend.right)
+        patternLabel := label.new(bar_index, high, "Pattern: Triangle\nBreakdown short", style=label.style_label_down, color=color.new(color.red, 10), textcolor=color.white, size=size.small)
+    else if insideBreakLong
+        patternLineOne := line.new(bar_index - 1, high[1], bar_index + 20, high[1], color=color.new(color.lime, 0), width=2, extend=extend.right)
+        patternLineTwo := line.new(bar_index - 1, low[1], bar_index + 20, low[1], color=color.new(color.lime, 65), width=1, extend=extend.right)
+        patternLabel := label.new(bar_index, low, "Pattern: Inside Bar\nBreakout long", style=label.style_label_up, color=color.new(color.lime, 10), textcolor=color.black, size=size.small)
+    else if insideBreakShort
+        patternLineOne := line.new(bar_index - 1, low[1], bar_index + 20, low[1], color=color.new(color.red, 0), width=2, extend=extend.right)
+        patternLineTwo := line.new(bar_index - 1, high[1], bar_index + 20, high[1], color=color.new(color.red, 65), width=1, extend=extend.right)
+        patternLabel := label.new(bar_index, high, "Pattern: Inside Bar\nBreakdown short", style=label.style_label_down, color=color.new(color.red, 10), textcolor=color.white, size=size.small)
+
 // ---------------- Visuals ----------------
 plot(emaFast, "Fast EMA", color=color.new(color.orange, 0))
 plot(emaMid, "Trend EMA", color=color.new(color.blue, 0), linewidth=2)
@@ -309,12 +430,18 @@ plotshape(showAllSetupHints and vwapRejectShort, title="VWAP Reject Hint", style
 plotshape(showAllSetupHints and (fakeBreakoutLong or liquiditySweepLong or orFakeoutLong), title="Trap Long Hint", style=shape.circle, color=color.new(color.aqua, 45), location=location.belowbar, size=size.tiny, text="TRAP")
 plotshape(showAllSetupHints and (fakeBreakoutShort or liquiditySweepShort or orFakeoutShort), title="Trap Short Hint", style=shape.circle, color=color.new(color.orange, 45), location=location.abovebar, size=size.tiny, text="TRAP")
 
+if showAllSetupHints and confirmedOk and str.length(longTrapReason) > 0
+    label.new(bar_index, low, "TRAP LONG\n" + longTrapReason, style=label.style_label_up, color=color.new(color.aqua, 15), textcolor=color.black, size=size.tiny)
+
+if showAllSetupHints and confirmedOk and str.length(shortTrapReason) > 0
+    label.new(bar_index, high, "TRAP SHORT\n" + shortTrapReason, style=label.style_label_down, color=color.new(color.orange, 15), textcolor=color.black, size=size.tiny)
+
 plotshape(longSignal, title="Clean Long Setup", style=shape.labelup, location=location.belowbar, color=color.new(color.lime, 0), text="LONG", textcolor=color.black, size=size.small)
 plotshape(shortSignal, title="Clean Short Setup", style=shape.labeldown, location=location.abovebar, color=color.new(color.red, 0), text="SHORT", textcolor=color.white, size=size.small)
 
 // ---------------- Alerts ----------------
-alertcondition(longSignal, title="Personal Radar Long", message="LONG {{ticker}} setup fired. Check chart label for setup, stop, and take profit.")
-alertcondition(shortSignal, title="Personal Radar Short", message="SHORT {{ticker}} setup fired. Check chart label for setup, stop, and take profit.")
+alertcondition(longSignal, title="Personal Radar Long", message="LONG setup fired. For dynamic entry/stop/TP, use Any alert() function call or {{strategy.order.alert_message}}.")
+alertcondition(shortSignal, title="Personal Radar Short", message="SHORT setup fired. For dynamic entry/stop/TP, use Any alert() function call or {{strategy.order.alert_message}}.")
 alertcondition(strategy.position_size > 0 and close < activeStop, title="Long Stop Area", message="LONG stop area touched.")
 alertcondition(strategy.position_size < 0 and close > activeStop, title="Short Stop Area", message="SHORT stop area touched.")
 

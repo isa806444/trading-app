@@ -280,6 +280,8 @@ longSignal = baseGate and longScore >= minScore and edge >= minEdge and location
 shortSignal = baseGate and shortScore >= minScore and edge <= -minEdge and locationShort and kamaOkShort and not doNotChaseShort and rewardOkShort
 longAlert = "LONG " + syminfo.ticker + " | Setup: " + longSetup + " | Entry: " + str.tostring(close, format.mintick) + " | Stop: " + str.tostring(longStop, format.mintick) + " | Take Profit: " + str.tostring(longTarget, format.mintick) + " | Score: " + str.tostring(longScore, "#") + " | Edge: " + str.tostring(edge, "#") + " | Reason: " + longReason
 shortAlert = "SHORT " + syminfo.ticker + " | Setup: " + shortSetup + " | Entry: " + str.tostring(close, format.mintick) + " | Stop: " + str.tostring(shortStop, format.mintick) + " | Take Profit: " + str.tostring(shortTarget, format.mintick) + " | Score: " + str.tostring(shortScore, "#") + " | Edge: " + str.tostring(edge, "#") + " | Reason: " + shortReason
+longTooltip = "Setup: " + longSetup + "\nEntry: " + str.tostring(close, format.mintick) + "\nStop Loss: " + str.tostring(longStop, format.mintick) + "\nTake Profit: " + str.tostring(longTarget, format.mintick) + "\nScore: " + str.tostring(longScore, "#") + "\nEdge: " + str.tostring(edge, "#") + "\nReason: " + longReason
+shortTooltip = "Setup: " + shortSetup + "\nEntry: " + str.tostring(close, format.mintick) + "\nStop Loss: " + str.tostring(shortStop, format.mintick) + "\nTake Profit: " + str.tostring(shortTarget, format.mintick) + "\nScore: " + str.tostring(shortScore, "#") + "\nEdge: " + str.tostring(edge, "#") + "\nReason: " + shortReason
 
 var float activeEntry = na
 var float activeStop = na
@@ -315,7 +317,7 @@ if longSignal
         entryLine := line.new(bar_index, activeEntry, bar_index + 60, activeEntry, color=color.new(color.white, 0), width=2, extend=extend.right)
         stopLine := line.new(bar_index, activeStop, bar_index + 60, activeStop, color=color.new(color.red, 0), width=2, extend=extend.right)
         targetLine := line.new(bar_index, activeTarget, bar_index + 60, activeTarget, color=color.new(color.lime, 0), width=2, extend=extend.right)
-    label.new(bar_index, low, "LONG\n" + longSetup + "\nEntry " + str.tostring(activeEntry, format.mintick) + "\nSL " + str.tostring(activeStop, format.mintick) + "\nTP " + str.tostring(activeTarget, format.mintick) + "\n" + longReason, style=label.style_label_up, color=color.new(color.lime, 0), textcolor=color.black, size=size.small)
+    label.new(bar_index, low, "LONG", style=label.style_label_up, color=color.new(color.lime, 0), textcolor=color.black, size=size.small, tooltip=longTooltip)
 
 if shortSignal
     lastSignalBar := bar_index
@@ -339,7 +341,7 @@ if shortSignal
         entryLine := line.new(bar_index, activeEntry, bar_index + 60, activeEntry, color=color.new(color.white, 0), width=2, extend=extend.right)
         stopLine := line.new(bar_index, activeStop, bar_index + 60, activeStop, color=color.new(color.red, 0), width=2, extend=extend.right)
         targetLine := line.new(bar_index, activeTarget, bar_index + 60, activeTarget, color=color.new(color.lime, 0), width=2, extend=extend.right)
-    label.new(bar_index, high, "SHORT\n" + shortSetup + "\nEntry " + str.tostring(activeEntry, format.mintick) + "\nSL " + str.tostring(activeStop, format.mintick) + "\nTP " + str.tostring(activeTarget, format.mintick) + "\n" + shortReason, style=label.style_label_down, color=color.new(color.red, 0), textcolor=color.white, size=size.small)
+    label.new(bar_index, high, "SHORT", style=label.style_label_down, color=color.new(color.red, 0), textcolor=color.white, size=size.small, tooltip=shortTooltip)
 
 // ---------------- Trade Management ----------------
 barsInTrade = not na(activeEntryBar) ? bar_index - activeEntryBar : 0
@@ -357,7 +359,7 @@ if strategy.position_size > 0
     closeLong = (longOpenR <= -0.65 and (close < vwap or shortScore > longScore)) or (bestR >= 0.8 and givebackR >= profitGivebackR and longScore < shortScore + 6) or (barsInTrade >= maxBarsInTrade and longOpenR < 0.25) or (close < emaFast and close < vwap and longScore < 62)
     if closeLong and confirmedOk
         strategy.close("Long", alert_message="CLOSE LONG " + activeSetup)
-        label.new(bar_index, high, "CLOSE LONG\n" + activeSetup, style=label.style_label_down, color=color.new(color.yellow, 0), textcolor=color.black, size=size.tiny)
+        label.new(bar_index, high, "CLOSE", style=label.style_label_down, color=color.new(color.yellow, 0), textcolor=color.black, size=size.tiny, tooltip="Close Long\nSetup: " + activeSetup + "\nReason: thesis weakened or risk/target logic fired.")
 
 if strategy.position_size < 0
     activeBest := na(activeBest) ? low : math.min(activeBest, low)
@@ -369,7 +371,7 @@ if strategy.position_size < 0
     closeShort = (shortOpenR <= -0.65 and (close > vwap or longScore > shortScore)) or (bestR >= 0.8 and givebackR >= profitGivebackR and shortScore < longScore + 6) or (barsInTrade >= maxBarsInTrade and shortOpenR < 0.25) or (close > emaFast and close > vwap and shortScore < 62)
     if closeShort and confirmedOk
         strategy.close("Short", alert_message="CLOSE SHORT " + activeSetup)
-        label.new(bar_index, low, "CLOSE SHORT\n" + activeSetup, style=label.style_label_up, color=color.new(color.yellow, 0), textcolor=color.black, size=size.tiny)
+        label.new(bar_index, low, "CLOSE", style=label.style_label_up, color=color.new(color.yellow, 0), textcolor=color.black, size=size.tiny, tooltip="Close Short\nSetup: " + activeSetup + "\nReason: thesis weakened or risk/target logic fired.")
 
 if strategy.position_size == 0
     activeEntry := na
@@ -393,26 +395,26 @@ if showPatternLines and confirmedOk and (patternEventLong or patternEventShort)
         label.delete(patternLabel)
     if doubleBottomLong and not na(prevPivotLowBar) and not na(lastPivotLowBar)
         patternLineOne := line.new(prevPivotLowBar, prevPivotLow, lastPivotLowBar, lastPivotLow, color=color.new(color.lime, 0), width=2, extend=extend.right)
-        patternLabel := label.new(bar_index, low, "Pattern: Double Bottom\nReclaim long", style=label.style_label_up, color=color.new(color.lime, 10), textcolor=color.black, size=size.small)
+        patternLabel := label.new(bar_index, low, "DB LONG", style=label.style_label_up, color=color.new(color.lime, 10), textcolor=color.black, size=size.tiny, tooltip="Pattern: Double Bottom Reclaim Long\nTwo nearby lows held, price reclaimed above them, and buyers showed rejection.")
     else if doubleTopShort and not na(prevPivotHighBar) and not na(lastPivotHighBar)
         patternLineOne := line.new(prevPivotHighBar, prevPivotHigh, lastPivotHighBar, lastPivotHigh, color=color.new(color.red, 0), width=2, extend=extend.right)
-        patternLabel := label.new(bar_index, high, "Pattern: Double Top\nRejection short", style=label.style_label_down, color=color.new(color.red, 10), textcolor=color.white, size=size.small)
+        patternLabel := label.new(bar_index, high, "DT SHORT", style=label.style_label_down, color=color.new(color.red, 10), textcolor=color.white, size=size.tiny, tooltip="Pattern: Double Top Rejection Short\nTwo nearby highs rejected, price failed back under resistance, and sellers showed rejection.")
     else if triangleBreakLong and not na(prevPivotHighBar) and not na(lastPivotHighBar) and not na(prevPivotLowBar) and not na(lastPivotLowBar)
         patternLineOne := line.new(prevPivotHighBar, prevPivotHigh, lastPivotHighBar, lastPivotHigh, color=color.new(color.lime, 0), width=2, extend=extend.right)
         patternLineTwo := line.new(prevPivotLowBar, prevPivotLow, lastPivotLowBar, lastPivotLow, color=color.new(color.lime, 35), width=2, extend=extend.right)
-        patternLabel := label.new(bar_index, low, "Pattern: Triangle\nBreakout long", style=label.style_label_up, color=color.new(color.lime, 10), textcolor=color.black, size=size.small)
+        patternLabel := label.new(bar_index, low, "TRI LONG", style=label.style_label_up, color=color.new(color.lime, 10), textcolor=color.black, size=size.tiny, tooltip="Pattern: Triangle Breakout Long\nLower highs and higher lows compressed, then price broke the upper line with confirmation.")
     else if triangleBreakShort and not na(prevPivotHighBar) and not na(lastPivotHighBar) and not na(prevPivotLowBar) and not na(lastPivotLowBar)
         patternLineOne := line.new(prevPivotHighBar, prevPivotHigh, lastPivotHighBar, lastPivotHigh, color=color.new(color.red, 35), width=2, extend=extend.right)
         patternLineTwo := line.new(prevPivotLowBar, prevPivotLow, lastPivotLowBar, lastPivotLow, color=color.new(color.red, 0), width=2, extend=extend.right)
-        patternLabel := label.new(bar_index, high, "Pattern: Triangle\nBreakdown short", style=label.style_label_down, color=color.new(color.red, 10), textcolor=color.white, size=size.small)
+        patternLabel := label.new(bar_index, high, "TRI SHORT", style=label.style_label_down, color=color.new(color.red, 10), textcolor=color.white, size=size.tiny, tooltip="Pattern: Triangle Breakdown Short\nLower highs and higher lows compressed, then price broke the lower line with confirmation.")
     else if insideBreakLong
         patternLineOne := line.new(bar_index - 1, high[1], bar_index + 20, high[1], color=color.new(color.lime, 0), width=2, extend=extend.right)
         patternLineTwo := line.new(bar_index - 1, low[1], bar_index + 20, low[1], color=color.new(color.lime, 65), width=1, extend=extend.right)
-        patternLabel := label.new(bar_index, low, "Pattern: Inside Bar\nBreakout long", style=label.style_label_up, color=color.new(color.lime, 10), textcolor=color.black, size=size.small)
+        patternLabel := label.new(bar_index, low, "IB LONG", style=label.style_label_up, color=color.new(color.lime, 10), textcolor=color.black, size=size.tiny, tooltip="Pattern: Inside Bar Breakout Long\nThe prior candle compressed inside the previous range, then price broke upward with confirmation.")
     else if insideBreakShort
         patternLineOne := line.new(bar_index - 1, low[1], bar_index + 20, low[1], color=color.new(color.red, 0), width=2, extend=extend.right)
         patternLineTwo := line.new(bar_index - 1, high[1], bar_index + 20, high[1], color=color.new(color.red, 65), width=1, extend=extend.right)
-        patternLabel := label.new(bar_index, high, "Pattern: Inside Bar\nBreakdown short", style=label.style_label_down, color=color.new(color.red, 10), textcolor=color.white, size=size.small)
+        patternLabel := label.new(bar_index, high, "IB SHORT", style=label.style_label_down, color=color.new(color.red, 10), textcolor=color.white, size=size.tiny, tooltip="Pattern: Inside Bar Breakdown Short\nThe prior candle compressed inside the previous range, then price broke downward with confirmation.")
 
 // ---------------- Visuals ----------------
 plot(emaFast, "Fast EMA", color=color.new(color.orange, 0))
@@ -431,13 +433,13 @@ plotshape(showAllSetupHints and (fakeBreakoutLong or liquiditySweepLong or orFak
 plotshape(showAllSetupHints and (fakeBreakoutShort or liquiditySweepShort or orFakeoutShort), title="Trap Short Hint", style=shape.circle, color=color.new(color.orange, 45), location=location.abovebar, size=size.tiny, text="TRAP")
 
 if showAllSetupHints and confirmedOk and str.length(longTrapReason) > 0
-    label.new(bar_index, low, "TRAP LONG\n" + longTrapReason, style=label.style_label_up, color=color.new(color.aqua, 15), textcolor=color.black, size=size.tiny)
+    label.new(bar_index, low, "TRAP L", style=label.style_label_up, color=color.new(color.aqua, 15), textcolor=color.black, size=size.tiny, tooltip=longTrapReason)
 
 if showAllSetupHints and confirmedOk and str.length(shortTrapReason) > 0
-    label.new(bar_index, high, "TRAP SHORT\n" + shortTrapReason, style=label.style_label_down, color=color.new(color.orange, 15), textcolor=color.black, size=size.tiny)
+    label.new(bar_index, high, "TRAP S", style=label.style_label_down, color=color.new(color.orange, 15), textcolor=color.black, size=size.tiny, tooltip=shortTrapReason)
 
-plotshape(longSignal, title="Clean Long Setup", style=shape.labelup, location=location.belowbar, color=color.new(color.lime, 0), text="LONG", textcolor=color.black, size=size.small)
-plotshape(shortSignal, title="Clean Short Setup", style=shape.labeldown, location=location.abovebar, color=color.new(color.red, 0), text="SHORT", textcolor=color.white, size=size.small)
+plotshape(longSignal, title="Clean Long Setup Marker", style=shape.triangleup, location=location.belowbar, color=color.new(color.lime, 40), text="", size=size.tiny)
+plotshape(shortSignal, title="Clean Short Setup Marker", style=shape.triangledown, location=location.abovebar, color=color.new(color.red, 40), text="", size=size.tiny)
 
 // ---------------- Alerts ----------------
 alertcondition(longSignal, title="Personal Radar Long", message="LONG setup fired. For dynamic entry/stop/TP, use Any alert() function call or {{strategy.order.alert_message}}.")

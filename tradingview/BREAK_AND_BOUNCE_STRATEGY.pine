@@ -16,6 +16,11 @@ exitMinute = input.int(0, "End Of Day Exit Minute", minval=0, maxval=59)
 breakoutTf = input.timeframe("15", "Breakout Timeframe")
 targetR = input.float(3.0, "Target R", minval=0.5, maxval=10.0, step=0.25)
 stopRangeBuffer = input.float(0.20, "Stop Buffer Of Candle Range", minval=0.0, maxval=2.0, step=0.05)
+maxLossDollars = input.float(1000.0, "Max Stop Risk Dollars", minval=50.0, maxval=10000.0, step=50.0)
+smartExitLossDollars = input.float(350.0, "Smart Exit Loss Trigger Dollars", minval=0.0, maxval=5000.0, step=25.0)
+useChartPointValue = input.bool(true, "Use Chart Point Value")
+fallbackDollarsPerPoint = input.float(20.0, "Fallback Dollars Per Point", minval=0.01, step=0.25)
+useSmartInvalidationExit = input.bool(true, "Use Smart Invalidation Exit")
 pullbackLookbackBars = input.int(4, "Clear Move Into Level Bars", minval=2, maxval=12)
 maxTradesPerDay = input.int(2, "Max Trades Per Day", minval=1, maxval=10)
 minBarsBetweenTrades = input.int(12, "Min Bars Between Trades", minval=1, maxval=100)
@@ -107,8 +112,12 @@ clearMoveIntoLongLevel = close[pullbackLookbackBars] > prevHigh + levelZone and 
 clearMoveIntoShortLevel = close[pullbackLookbackBars] < prevLow - levelZone and close[1] > close[pullbackLookbackBars] and high >= prevLow - levelZone and close < prevLow
 
 // ---------------- Risk Plan ----------------
-longStop = prevHigh - candleRange * stopRangeBuffer
-shortStop = prevLow + candleRange * stopRangeBuffer
+pointValue = useChartPointValue and syminfo.pointvalue > 0 ? syminfo.pointvalue : fallbackDollarsPerPoint
+maxStopPoints = maxLossDollars / math.max(contracts * pointValue, 0.01)
+rawLongStop = prevHigh - candleRange * stopRangeBuffer
+rawShortStop = prevLow + candleRange * stopRangeBuffer
+longStop = math.max(rawLongStop, close - maxStopPoints)
+shortStop = math.min(rawShortStop, close + maxStopPoints)
 longRisk = close - longStop
 shortRisk = shortStop - close
 longTarget = close + longRisk * targetR
@@ -132,6 +141,7 @@ shortAlert = "BREAK AND BOUNCE SHORT " + syminfo.ticker + " | Setup: " + shortPa
 var float activeEntry = na
 var float activeStop = na
 var float activeTarget = na
+var int activeEntryBar = na
 var line entryLine = na
 var line stopLine = na
 var line targetLine = na
@@ -187,6 +197,7 @@ if longSignal
     activeEntry := close
     activeStop := longStop
     activeTarget := longTarget
+    activeEntryBar := bar_index
     strategy.entry("B&B Long", strategy.long, qty=contracts, alert_message=longAlert)
     strategy.exit("B&B Long Exit", from_entry="B&B Long", stop=activeStop, limit=activeTarget, alert_message="EXIT B&B LONG stop/target")
     alert(longAlert, alert.freq_once_per_bar_close)
@@ -210,6 +221,7 @@ if shortSignal
     activeEntry := close
     activeStop := shortStop
     activeTarget := shortTarget
+    activeEntryBar := bar_index
     strategy.entry("B&B Short", strategy.short, qty=contracts, alert_message=shortAlert)
     strategy.exit("B&B Short Exit", from_entry="B&B Short", stop=activeStop, limit=activeTarget, alert_message="EXIT B&B SHORT stop/target")
     alert(shortAlert, alert.freq_once_per_bar_close)
@@ -225,6 +237,34 @@ if shortSignal
         targetLine := line.new(bar_index, activeTarget, bar_index + 30, activeTarget, color=color.new(color.lime, 0), width=2, extend=extend.right)
     label.new(bar_index, high, "B&B SHORT", style=label.style_label_down, color=color.new(color.red, 0), textcolor=color.white, size=size.small, tooltip=shortAlert)
 
+// ---------------- Smart Invalidation Exits ----------------
+barsInTrade = not na(activeEntryBar) ? bar_index - activeEntryBar : 0
+activeQty = math.max(math.abs(strategy.position_size), 1)
+longOpenPoints = strategy.position_size > 0 ? close - strategy.position_avg_price : 0.0
+shortOpenPoints = strategy.position_size < 0 ? strategy.position_avg_price - close : 0.0
+longLossDollars = strategy.position_size > 0 ? math.max(-longOpenPoints * pointValue * activeQty, 0.0) : 0.0
+shortLossDollars = strategy.position_size < 0 ? math.max(-shortOpenPoints * pointValue * activeQty, 0.0) : 0.0
+strongBearAgainstLong = close < open and closeNearLow and bodyPct >= 0.45
+strongBullAgainstShort = close > open and closeNearHigh and bodyPct >= 0.45
+longLevelLost = close < prevHigh - levelZone and closeNearLow
+shortLevelLost = close > prevLow + levelZone and closeNearHigh
+longConfirmedBreakFailed = close15Confirmed < prevHigh
+shortConfirmedBreakFailed = close15Confirmed > prevLow
+longEarlyFailure = barsInTrade >= 2 and longLossDollars >= smartExitLossDollars and strongBearAgainstLong
+shortEarlyFailure = barsInTrade >= 2 and shortLossDollars >= smartExitLossDollars and strongBullAgainstShort
+smartExitLong = useSmartInvalidationExit and confirmedOk and strategy.position_size > 0 and (longLevelLost or longConfirmedBreakFailed or longEarlyFailure)
+smartExitShort = useSmartInvalidationExit and confirmedOk and strategy.position_size < 0 and (shortLevelLost or shortConfirmedBreakFailed or shortEarlyFailure)
+smartLongExitReason = longLevelLost ? "BREAK AND BOUNCE smart exit long: retest level failed with bearish close." : longConfirmedBreakFailed ? "BREAK AND BOUNCE smart exit long: confirmed 15m breakout failed back below yesterday high." : "BREAK AND BOUNCE smart exit long: trade is losing and strong bearish candle appeared."
+smartShortExitReason = shortLevelLost ? "BREAK AND BOUNCE smart exit short: retest level failed with bullish close." : shortConfirmedBreakFailed ? "BREAK AND BOUNCE smart exit short: confirmed 15m breakdown failed back above yesterday low." : "BREAK AND BOUNCE smart exit short: trade is losing and strong bullish candle appeared."
+
+if smartExitLong
+    strategy.close("B&B Long", alert_message=smartLongExitReason)
+    label.new(bar_index, high, "SMART EXIT L", style=label.style_label_down, color=color.new(color.yellow, 0), textcolor=color.black, size=size.tiny, tooltip=smartLongExitReason + "\nLoss at signal: $" + str.tostring(longLossDollars, "#"))
+
+if smartExitShort
+    strategy.close("B&B Short", alert_message=smartShortExitReason)
+    label.new(bar_index, low, "SMART EXIT S", style=label.style_label_up, color=color.new(color.yellow, 0), textcolor=color.black, size=size.tiny, tooltip=smartShortExitReason + "\nLoss at signal: $" + str.tostring(shortLossDollars, "#"))
+
 exitMinutes = exitHour * 60 + exitMinute
 currentMinutes = hour(time, sessionTimezone) * 60 + minute(time, sessionTimezone)
 if strategy.position_size > 0 and currentMinutes >= exitMinutes and confirmedOk
@@ -237,6 +277,7 @@ if strategy.position_size == 0
     activeEntry := na
     activeStop := na
     activeTarget := na
+    activeEntryBar := na
 
 // ---------------- Visuals ----------------
 plot(prevHigh, "Yesterday High", color=color.new(color.lime, 20), linewidth=2, style=plot.style_linebr)
@@ -251,7 +292,7 @@ alertcondition(shortSignal, title="Break And Bounce Short", message="Break And B
 
 // ---------------- Dashboard ----------------
 status = not timeframeOk ? "Use 5m chart" : not validTime ? "Outside window" : dir == 1 ? "Waiting long retest" : dir == -1 ? "Waiting short retest" : "Waiting 15m break"
-var table dash = table.new(position.top_right, 2, 7, bgcolor=color.new(color.black, 14), border_color=color.new(color.white, 72), border_width=1)
+var table dash = table.new(position.top_right, 2, 8, bgcolor=color.new(color.black, 14), border_color=color.new(color.white, 72), border_width=1)
 if showDashboard and barstate.islast
     table.cell(dash, 0, 0, "Break & Bounce", text_color=color.white, bgcolor=color.new(color.teal, 55))
     table.cell(dash, 1, 0, status, text_color=dir == 1 ? color.lime : dir == -1 ? color.orange : color.silver, bgcolor=color.new(color.teal, 55))
@@ -267,3 +308,5 @@ if showDashboard and barstate.islast
     table.cell(dash, 1, 5, longPattern ? longPatternName : shortPattern ? shortPatternName : "Waiting", text_color=longPattern ? color.lime : shortPattern ? color.orange : color.silver)
     table.cell(dash, 0, 6, "Report Orders", text_color=color.silver)
     table.cell(dash, 1, 6, enableStrategyReportOrders ? reportEntryMode : "Off", text_color=enableStrategyReportOrders ? color.lime : color.orange)
+    table.cell(dash, 0, 7, "Max Risk", text_color=color.silver)
+    table.cell(dash, 1, 7, "$" + str.tostring(maxLossDollars, "#") + " / " + str.tostring(maxStopPoints, "#.##") + " pts", text_color=color.lime)

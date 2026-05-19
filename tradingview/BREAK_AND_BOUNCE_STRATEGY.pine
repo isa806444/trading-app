@@ -30,6 +30,13 @@ enableStrategyReportOrders = input.bool(true, "Enable Strategy Report Orders")
 reportEntryMode = input.string("Pattern Confirmed", "Strategy Report Entry Mode", options=["Retest Bounce", "Pattern Confirmed", "Original PDF"])
 entryMode = input.string("Smart", "Entry Confirmation Mode", options=["Smart", "Original PDF"])
 useStrictOriginalEngulf = input.bool(false, "Use Strict Original Engulfing")
+useTouchTurn = input.bool(true, "Add Touch & Turn Setup")
+touchTurnCaptureSession = input.session("0930-0945", "T&T Opening Candle")
+touchTurnTradeSession = input.session("0945-1100", "T&T Trade Window")
+touchTurnRiskPercentAtr = input.float(25.0, "T&T Min Range % Daily ATR", minval=1.0, maxval=200.0, step=1.0)
+touchTurnRr = input.float(2.0, "T&T Reward/Risk", minval=0.5, maxval=10.0, step=0.25)
+touchTurnAtrPeriod = input.int(14, "T&T Daily ATR Period", minval=2, maxval=100)
+showTouchTurnLevels = input.bool(true, "Show T&T Levels")
 showPriorDayZones = input.bool(true, "Show Yesterday High / Low Boxes")
 priorZoneAtr = input.float(0.08, "Prior Level Zone ATR", minval=0.01, maxval=0.50, step=0.01)
 showStageLabels = input.bool(true, "Show Breakout / Retest Stage Labels")
@@ -38,6 +45,7 @@ showDashboard = input.bool(true, "Show Dashboard")
 
 // ---------------- Daily / MTF Context ----------------
 [prevHigh, prevLow] = request.security(syminfo.tickerid, "D", [high[1], low[1]], barmerge.gaps_off, barmerge.lookahead_off)
+dailyAtrForTouchTurn = request.security(syminfo.tickerid, "D", ta.atr(touchTurnAtrPeriod)[1], barmerge.gaps_off, barmerge.lookahead_off)
 close15Confirmed = request.security(syminfo.tickerid, breakoutTf, close[1], barmerge.gaps_off, barmerge.lookahead_off)
 
 newDay = ta.change(time("D")) != 0
@@ -69,6 +77,65 @@ if breakoutUpEvent
 if breakoutDownEvent
     dir := -1
     shortCycleUsed := false
+
+// ---------------- Touch & Turn Opening Range ----------------
+ttCaptureWindow = not na(time(timeframe.period, touchTurnCaptureSession, sessionTimezone))
+ttTradeWindow = not na(time(timeframe.period, touchTurnTradeSession, sessionTimezone))
+var float ttHigh = na
+var float ttLow = na
+var float ttOpen = na
+var float ttClose = na
+var float ttFib38 = na
+var int ttDirection = 0
+var bool ttValid = false
+var bool ttOrderPlaced = false
+var line ttHighLine = na
+var line ttLowLine = na
+var line ttFibLine = na
+var label ttLabel = na
+
+if newDay
+    ttHigh := na
+    ttLow := na
+    ttOpen := na
+    ttClose := na
+    ttFib38 := na
+    ttDirection := 0
+    ttValid := false
+    ttOrderPlaced := false
+
+if useTouchTurn and ttCaptureWindow and not ttCaptureWindow[1]
+    ttHigh := high
+    ttLow := low
+    ttOpen := open
+    ttClose := close
+    ttValid := false
+    ttOrderPlaced := false
+
+if useTouchTurn and ttCaptureWindow
+    ttHigh := na(ttHigh) ? high : math.max(ttHigh, high)
+    ttLow := na(ttLow) ? low : math.min(ttLow, low)
+    ttClose := close
+
+ttCaptureFinished = useTouchTurn and not ttCaptureWindow and ttCaptureWindow[1]
+if ttCaptureFinished and not na(ttHigh) and not na(ttLow) and not na(ttOpen) and not na(ttClose)
+    ttRange = ttHigh - ttLow
+    ttValid := ttRange >= dailyAtrForTouchTurn * touchTurnRiskPercentAtr / 100.0
+    ttFib38 := ttLow + ttRange * 0.382
+    ttDirection := ttClose < ttOpen ? -1 : 1
+    if showTouchTurnLevels
+        if not na(ttHighLine)
+            line.delete(ttHighLine)
+        if not na(ttLowLine)
+            line.delete(ttLowLine)
+        if not na(ttFibLine)
+            line.delete(ttFibLine)
+        if not na(ttLabel)
+            label.delete(ttLabel)
+        ttHighLine := line.new(bar_index, ttHigh, bar_index + 30, ttHigh, color=color.new(color.aqua, 0), width=2, extend=extend.right)
+        ttLowLine := line.new(bar_index, ttLow, bar_index + 30, ttLow, color=color.new(color.aqua, 0), width=2, extend=extend.right)
+        ttFibLine := line.new(bar_index, ttFib38, bar_index + 30, ttFib38, color=color.new(color.yellow, 0), width=2, extend=extend.right)
+        ttLabel := label.new(bar_index, ttDirection == -1 ? ttLow : ttHigh, ttDirection == -1 ? "T&T LONG ZONE" : "T&T SHORT ZONE", style=ttDirection == -1 ? label.style_label_up : label.style_label_down, color=color.new(color.aqua, 15), textcolor=color.black, size=size.tiny, tooltip="Touch & Turn\nFirst 15m range: " + str.tostring(ttRange, format.mintick) + "\nDaily ATR filter: " + str.tostring(dailyAtrForTouchTurn * touchTurnRiskPercentAtr / 100.0, format.mintick) + "\nTarget: fib 38.2 = " + str.tostring(ttFib38, format.mintick))
 
 // ---------------- 5M Retest + Candle Patterns ----------------
 body = math.abs(close - open)
@@ -132,10 +199,26 @@ canTrade = enableStrategyReportOrders and timeframeOk and confirmedOk and validT
 longSignal = canTrade and dir == 1 and cycleOkLong and retestLong and clearMoveIntoLongLevel and reportLongConfirm and longRisk > syminfo.mintick
 shortSignal = canTrade and dir == -1 and cycleOkShort and retestShort and clearMoveIntoShortLevel and reportShortConfirm and shortRisk > syminfo.mintick
 
+ttLongEntry = ttLow
+ttShortEntry = ttHigh
+ttLongTarget = ttFib38
+ttShortTarget = ttFib38
+ttLongDistance = not na(ttLongEntry) and not na(ttLongTarget) ? ttLongTarget - ttLongEntry : na
+ttShortDistance = not na(ttShortEntry) and not na(ttShortTarget) ? ttShortEntry - ttShortTarget : na
+ttLongStopDistance = not na(ttLongDistance) ? math.min(ttLongDistance / math.max(touchTurnRr, 0.01), maxStopPoints) : na
+ttShortStopDistance = not na(ttShortDistance) ? math.min(ttShortDistance / math.max(touchTurnRr, 0.01), maxStopPoints) : na
+ttLongStop = not na(ttLongEntry) and not na(ttLongStopDistance) ? ttLongEntry - ttLongStopDistance : na
+ttShortStop = not na(ttShortEntry) and not na(ttShortStopDistance) ? ttShortEntry + ttShortStopDistance : na
+ttCanTrade = useTouchTurn and enableStrategyReportOrders and timeframeOk and confirmedOk and ttTradeWindow and strategy.position_size == 0 and spacingOk and tradeCountOk and ttValid and not ttOrderPlaced
+touchTurnLongSignal = ttCanTrade and ttDirection == -1 and not na(ttLongDistance) and ttLongDistance > syminfo.mintick
+touchTurnShortSignal = ttCanTrade and ttDirection == 1 and not na(ttShortDistance) and ttShortDistance > syminfo.mintick
+
 longReason = "Closed 15m candle broke above yesterday high. 5m pulled back directionally into the level, retested, then confirmed with: " + longPatternName
 shortReason = "Closed 15m candle broke below yesterday low. 5m pulled back directionally into the level, retested, then confirmed with: " + shortPatternName
 longAlert = "BREAK AND BOUNCE LONG " + syminfo.ticker + " | Setup: " + longPatternName + " | Entry: " + str.tostring(close, format.mintick) + " | Stop: " + str.tostring(longStop, format.mintick) + " | Take Profit: " + str.tostring(longTarget, format.mintick) + " | Reason: " + longReason
 shortAlert = "BREAK AND BOUNCE SHORT " + syminfo.ticker + " | Setup: " + shortPatternName + " | Entry: " + str.tostring(close, format.mintick) + " | Stop: " + str.tostring(shortStop, format.mintick) + " | Take Profit: " + str.tostring(shortTarget, format.mintick) + " | Reason: " + shortReason
+touchTurnLongAlert = "TOUCH AND TURN LONG " + syminfo.ticker + " | Entry Limit: " + str.tostring(ttLongEntry, format.mintick) + " | Stop: " + str.tostring(ttLongStop, format.mintick) + " | Take Profit: " + str.tostring(ttLongTarget, format.mintick) + " | Reason: first 15m candle was bearish/liquidity down, fade from range low to fib 38.2."
+touchTurnShortAlert = "TOUCH AND TURN SHORT " + syminfo.ticker + " | Entry Limit: " + str.tostring(ttShortEntry, format.mintick) + " | Stop: " + str.tostring(ttShortStop, format.mintick) + " | Take Profit: " + str.tostring(ttShortTarget, format.mintick) + " | Reason: first 15m candle was bullish/liquidity up, fade from range high to fib 38.2."
 
 // ---------------- Orders ----------------
 var float activeEntry = na
@@ -237,6 +320,58 @@ if shortSignal
         targetLine := line.new(bar_index, activeTarget, bar_index + 30, activeTarget, color=color.new(color.lime, 0), width=2, extend=extend.right)
     label.new(bar_index, high, "B&B SHORT", style=label.style_label_down, color=color.new(color.red, 0), textcolor=color.white, size=size.small, tooltip=shortAlert)
 
+if touchTurnLongSignal
+    tradesToday += 1
+    lastTradeBar := bar_index
+    lastTradePrice := ttLongEntry
+    ttOrderPlaced := true
+    activeEntry := ttLongEntry
+    activeStop := ttLongStop
+    activeTarget := ttLongTarget
+    activeEntryBar := bar_index
+    strategy.entry("T&T Long", strategy.long, qty=contracts, limit=ttLongEntry, alert_message=touchTurnLongAlert)
+    strategy.exit("T&T Long Exit", from_entry="T&T Long", stop=ttLongStop, limit=ttLongTarget, alert_message="EXIT T&T LONG stop/target")
+    alert(touchTurnLongAlert, alert.freq_once_per_bar_close)
+    if showTradePlanLines
+        if not na(entryLine)
+            line.delete(entryLine)
+        if not na(stopLine)
+            line.delete(stopLine)
+        if not na(targetLine)
+            line.delete(targetLine)
+        entryLine := line.new(bar_index, ttLongEntry, bar_index + 30, ttLongEntry, color=color.new(color.white, 0), width=2, extend=extend.right)
+        stopLine := line.new(bar_index, ttLongStop, bar_index + 30, ttLongStop, color=color.new(color.red, 0), width=2, extend=extend.right)
+        targetLine := line.new(bar_index, ttLongTarget, bar_index + 30, ttLongTarget, color=color.new(color.lime, 0), width=2, extend=extend.right)
+    label.new(bar_index, ttLongEntry, "T&T LONG", style=label.style_label_up, color=color.new(color.aqua, 0), textcolor=color.black, size=size.small, tooltip=touchTurnLongAlert)
+
+if touchTurnShortSignal
+    tradesToday += 1
+    lastTradeBar := bar_index
+    lastTradePrice := ttShortEntry
+    ttOrderPlaced := true
+    activeEntry := ttShortEntry
+    activeStop := ttShortStop
+    activeTarget := ttShortTarget
+    activeEntryBar := bar_index
+    strategy.entry("T&T Short", strategy.short, qty=contracts, limit=ttShortEntry, alert_message=touchTurnShortAlert)
+    strategy.exit("T&T Short Exit", from_entry="T&T Short", stop=ttShortStop, limit=ttShortTarget, alert_message="EXIT T&T SHORT stop/target")
+    alert(touchTurnShortAlert, alert.freq_once_per_bar_close)
+    if showTradePlanLines
+        if not na(entryLine)
+            line.delete(entryLine)
+        if not na(stopLine)
+            line.delete(stopLine)
+        if not na(targetLine)
+            line.delete(targetLine)
+        entryLine := line.new(bar_index, ttShortEntry, bar_index + 30, ttShortEntry, color=color.new(color.white, 0), width=2, extend=extend.right)
+        stopLine := line.new(bar_index, ttShortStop, bar_index + 30, ttShortStop, color=color.new(color.red, 0), width=2, extend=extend.right)
+        targetLine := line.new(bar_index, ttShortTarget, bar_index + 30, ttShortTarget, color=color.new(color.lime, 0), width=2, extend=extend.right)
+    label.new(bar_index, ttShortEntry, "T&T SHORT", style=label.style_label_down, color=color.new(color.aqua, 0), textcolor=color.black, size=size.small, tooltip=touchTurnShortAlert)
+
+if useTouchTurn and confirmedOk and not ttTradeWindow
+    strategy.cancel("T&T Long")
+    strategy.cancel("T&T Short")
+
 // ---------------- Smart Invalidation Exits ----------------
 barsInTrade = not na(activeEntryBar) ? bar_index - activeEntryBar : 0
 activeQty = math.max(math.abs(strategy.position_size), 1)
@@ -265,8 +400,24 @@ if smartExitShort
     strategy.close("B&B Short", alert_message=smartShortExitReason)
     label.new(bar_index, low, "SMART EXIT S", style=label.style_label_up, color=color.new(color.yellow, 0), textcolor=color.black, size=size.tiny, tooltip=smartShortExitReason + "\nLoss at signal: $" + str.tostring(shortLossDollars, "#"))
 
+ttSmartExitLong = useTouchTurn and useSmartInvalidationExit and confirmedOk and strategy.position_size > 0 and ttValid and ttDirection == -1 and (close < ttLow - levelZone and strongBearAgainstLong)
+ttSmartExitShort = useTouchTurn and useSmartInvalidationExit and confirmedOk and strategy.position_size < 0 and ttValid and ttDirection == 1 and (close > ttHigh + levelZone and strongBullAgainstShort)
+
+if ttSmartExitLong
+    strategy.close("T&T Long", alert_message="TOUCH AND TURN smart exit long: opening range low failed with bearish confirmation.")
+    label.new(bar_index, high, "T&T EXIT L", style=label.style_label_down, color=color.new(color.yellow, 0), textcolor=color.black, size=size.tiny, tooltip="Touch & Turn smart exit long: opening range low failed with bearish confirmation.")
+
+if ttSmartExitShort
+    strategy.close("T&T Short", alert_message="TOUCH AND TURN smart exit short: opening range high failed with bullish confirmation.")
+    label.new(bar_index, low, "T&T EXIT S", style=label.style_label_up, color=color.new(color.yellow, 0), textcolor=color.black, size=size.tiny, tooltip="Touch & Turn smart exit short: opening range high failed with bullish confirmation.")
+
 exitMinutes = exitHour * 60 + exitMinute
+touchTurnExitMinutes = 11 * 60
 currentMinutes = hour(time, sessionTimezone) * 60 + minute(time, sessionTimezone)
+if useTouchTurn and currentMinutes >= touchTurnExitMinutes and confirmedOk
+    strategy.close("T&T Long", alert_message="TOUCH AND TURN force exit after 11:00 long")
+    strategy.close("T&T Short", alert_message="TOUCH AND TURN force exit after 11:00 short")
+
 if strategy.position_size > 0 and currentMinutes >= exitMinutes and confirmedOk
     strategy.close("B&B Long", alert_message="BREAK AND BOUNCE end-of-day long exit")
 
@@ -289,10 +440,13 @@ plotshape(retestShort and dir == -1 and validTime, title="Retest Short Zone", st
 
 alertcondition(longSignal, title="Break And Bounce Long", message="Break And Bounce LONG fired. Use Any alert() function call or {{strategy.order.alert_message}} for full entry/stop/TP.")
 alertcondition(shortSignal, title="Break And Bounce Short", message="Break And Bounce SHORT fired. Use Any alert() function call or {{strategy.order.alert_message}} for full entry/stop/TP.")
+alertcondition(touchTurnLongSignal, title="Touch And Turn Long", message="Touch And Turn LONG limit order placed. Use Any alert() function call or {{strategy.order.alert_message}} for full entry/stop/TP.")
+alertcondition(touchTurnShortSignal, title="Touch And Turn Short", message="Touch And Turn SHORT limit order placed. Use Any alert() function call or {{strategy.order.alert_message}} for full entry/stop/TP.")
 
 // ---------------- Dashboard ----------------
 status = not timeframeOk ? "Use 5m chart" : not validTime ? "Outside window" : dir == 1 ? "Waiting long retest" : dir == -1 ? "Waiting short retest" : "Waiting 15m break"
-var table dash = table.new(position.top_right, 2, 8, bgcolor=color.new(color.black, 14), border_color=color.new(color.white, 72), border_width=1)
+ttStatus = not useTouchTurn ? "Off" : ttCaptureWindow ? "Building OR" : not ttValid ? "No T&T" : ttOrderPlaced ? "Order placed" : ttDirection == -1 ? "Long at OR low" : ttDirection == 1 ? "Short at OR high" : "Waiting"
+var table dash = table.new(position.top_right, 2, 10, bgcolor=color.new(color.black, 14), border_color=color.new(color.white, 72), border_width=1)
 if showDashboard and barstate.islast
     table.cell(dash, 0, 0, "Break & Bounce", text_color=color.white, bgcolor=color.new(color.teal, 55))
     table.cell(dash, 1, 0, status, text_color=dir == 1 ? color.lime : dir == -1 ? color.orange : color.silver, bgcolor=color.new(color.teal, 55))
@@ -310,3 +464,7 @@ if showDashboard and barstate.islast
     table.cell(dash, 1, 6, enableStrategyReportOrders ? reportEntryMode : "Off", text_color=enableStrategyReportOrders ? color.lime : color.orange)
     table.cell(dash, 0, 7, "Max Risk", text_color=color.silver)
     table.cell(dash, 1, 7, "$" + str.tostring(maxLossDollars, "#") + " / " + str.tostring(maxStopPoints, "#.##") + " pts", text_color=color.lime)
+    table.cell(dash, 0, 8, "T&T", text_color=color.silver)
+    table.cell(dash, 1, 8, ttStatus, text_color=ttValid ? color.aqua : color.silver)
+    table.cell(dash, 0, 9, "T&T Fib38", text_color=color.silver)
+    table.cell(dash, 1, 9, na(ttFib38) ? "Waiting" : str.tostring(ttFib38, format.mintick), text_color=color.yellow)

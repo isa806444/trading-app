@@ -1,5 +1,6 @@
 //@version=6
-strategy("Break And Bounce - Prior Day Retest", overlay=true, initial_capital=100000, default_qty_type=strategy.fixed, default_qty_value=1, pyramiding=0, process_orders_on_close=false, calc_on_every_tick=false, commission_type=strategy.commission.cash_per_contract, commission_value=4.0, slippage=2, max_lines_count=80, max_labels_count=120, max_boxes_count=20)
+//@strategy_alert_message {{strategy.order.alert_message}}
+strategy("Break And Bounce - Prior Day Retest", overlay=true, initial_capital=100000, default_qty_type=strategy.fixed, default_qty_value=1, pyramiding=0, margin_long=10, margin_short=10, process_orders_on_close=false, calc_on_every_tick=true, calc_on_order_fills=true, commission_type=strategy.commission.cash_per_contract, commission_value=4.0, slippage=2, max_lines_count=80, max_labels_count=120, max_boxes_count=20)
 
 // Standalone Pine conversion of the BreakAndBounce PDF logic.
 // Run on a 5-minute chart. Direction comes from a confirmed 15-minute break
@@ -9,12 +10,14 @@ strategy("Break And Bounce - Prior Day Retest", overlay=true, initial_capital=10
 contracts = input.int(1, "Contracts", minval=1, maxval=20)
 requireFiveMinute = input.bool(true, "Require 5-Minute Chart")
 sessionTimezone = input.string("America/New_York", "Session Timezone")
-tradeSession = input.session("0930-1200", "Valid Trade Window")
+tradeSession = input.session("0930-1600", "Valid Trade Window")
 exitHour = input.int(16, "End Of Day Exit Hour", minval=0, maxval=23)
 exitMinute = input.int(0, "End Of Day Exit Minute", minval=0, maxval=59)
 breakoutTf = input.timeframe("15", "Breakout Timeframe")
 targetR = input.float(3.0, "Target R", minval=0.5, maxval=10.0, step=0.25)
 stopRangeBuffer = input.float(0.20, "Stop Buffer Of Candle Range", minval=0.0, maxval=2.0, step=0.05)
+enableStrategyReportOrders = input.bool(true, "Enable Strategy Report Orders")
+reportEntryMode = input.string("Retest Bounce", "Strategy Report Entry Mode", options=["Retest Bounce", "Pattern Confirmed", "Original PDF"])
 entryMode = input.string("Smart", "Entry Confirmation Mode", options=["Smart", "Original PDF"])
 useStrictOriginalEngulf = input.bool(false, "Use Strict Original Engulfing")
 showPriorDayZones = input.bool(true, "Show Yesterday High / Low Boxes")
@@ -75,6 +78,8 @@ longPattern = entryMode == "Original PDF" ? hammer or strictBullEngulf : smartLo
 shortPattern = entryMode == "Original PDF" ? invHammer or strictBearEngulf : smartShortPattern
 longPatternName = hammer or smartHammer ? "Hammer Bounce" : bullEngulf or strictBullEngulf ? "Bull Engulf Bounce" : bounceLong ? "Strong Close Bounce" : "Long Retest"
 shortPatternName = invHammer or smartInvHammer ? "Inverted Hammer Bounce" : bearEngulf or strictBearEngulf ? "Bear Engulf Bounce" : bounceShort ? "Strong Close Reject" : "Short Retest"
+reportLongConfirm = reportEntryMode == "Original PDF" ? (hammer or strictBullEngulf) : reportEntryMode == "Pattern Confirmed" ? longPattern : (longPattern or bounceLong)
+reportShortConfirm = reportEntryMode == "Original PDF" ? (invHammer or strictBearEngulf) : reportEntryMode == "Pattern Confirmed" ? shortPattern : (shortPattern or bounceShort)
 
 // ---------------- Risk Plan ----------------
 longStop = prevHigh - candleRange * stopRangeBuffer
@@ -84,9 +89,9 @@ shortRisk = shortStop - close
 longTarget = close + longRisk * targetR
 shortTarget = close - shortRisk * targetR
 
-canTrade = timeframeOk and confirmedOk and validTime and strategy.position_size == 0
-longSignal = canTrade and dir == 1 and retestLong and longPattern and longRisk > syminfo.mintick
-shortSignal = canTrade and dir == -1 and retestShort and shortPattern and shortRisk > syminfo.mintick
+canTrade = enableStrategyReportOrders and timeframeOk and confirmedOk and validTime and strategy.position_size == 0
+longSignal = canTrade and dir == 1 and retestLong and reportLongConfirm and longRisk > syminfo.mintick
+shortSignal = canTrade and dir == -1 and retestShort and reportShortConfirm and shortRisk > syminfo.mintick
 
 longReason = "15m broke above yesterday high, 5m retested prior high, pattern: " + longPatternName
 shortReason = "15m broke below yesterday low, 5m retested prior low, pattern: " + shortPatternName
@@ -184,8 +189,11 @@ if shortSignal
 
 exitMinutes = exitHour * 60 + exitMinute
 currentMinutes = hour(time, sessionTimezone) * 60 + minute(time, sessionTimezone)
-if strategy.position_size != 0 and currentMinutes >= exitMinutes and confirmedOk
-    strategy.close_all(alert_message="BREAK AND BOUNCE end-of-day exit")
+if strategy.position_size > 0 and currentMinutes >= exitMinutes and confirmedOk
+    strategy.close("B&B Long", alert_message="BREAK AND BOUNCE end-of-day long exit")
+
+if strategy.position_size < 0 and currentMinutes >= exitMinutes and confirmedOk
+    strategy.close("B&B Short", alert_message="BREAK AND BOUNCE end-of-day short exit")
 
 if strategy.position_size == 0
     activeEntry := na
@@ -205,7 +213,7 @@ alertcondition(shortSignal, title="Break And Bounce Short", message="Break And B
 
 // ---------------- Dashboard ----------------
 status = not timeframeOk ? "Use 5m chart" : not validTime ? "Outside window" : dir == 1 ? "Waiting long retest" : dir == -1 ? "Waiting short retest" : "Waiting 15m break"
-var table dash = table.new(position.top_right, 2, 6, bgcolor=color.new(color.black, 14), border_color=color.new(color.white, 72), border_width=1)
+var table dash = table.new(position.top_right, 2, 7, bgcolor=color.new(color.black, 14), border_color=color.new(color.white, 72), border_width=1)
 if showDashboard and barstate.islast
     table.cell(dash, 0, 0, "Break & Bounce", text_color=color.white, bgcolor=color.new(color.teal, 55))
     table.cell(dash, 1, 0, status, text_color=dir == 1 ? color.lime : dir == -1 ? color.orange : color.silver, bgcolor=color.new(color.teal, 55))
@@ -219,3 +227,5 @@ if showDashboard and barstate.islast
     table.cell(dash, 1, 4, validTime ? "Open" : "Closed", text_color=validTime ? color.lime : color.silver)
     table.cell(dash, 0, 5, "Pattern", text_color=color.silver)
     table.cell(dash, 1, 5, longPattern ? longPatternName : shortPattern ? shortPatternName : "Waiting", text_color=longPattern ? color.lime : shortPattern ? color.orange : color.silver)
+    table.cell(dash, 0, 6, "Report Orders", text_color=color.silver)
+    table.cell(dash, 1, 6, enableStrategyReportOrders ? reportEntryMode : "Off", text_color=enableStrategyReportOrders ? color.lime : color.orange)

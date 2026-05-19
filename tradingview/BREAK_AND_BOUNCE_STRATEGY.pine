@@ -1,0 +1,165 @@
+//@version=6
+strategy("Break And Bounce - Prior Day Retest", overlay=true, initial_capital=100000, default_qty_type=strategy.fixed, default_qty_value=1, pyramiding=0, process_orders_on_close=false, calc_on_every_tick=false, commission_type=strategy.commission.cash_per_contract, commission_value=4.0, slippage=2, max_lines_count=60, max_labels_count=80)
+
+// Standalone Pine conversion of the BreakAndBounce PDF logic.
+// Run on a 5-minute chart. Direction comes from a confirmed 15-minute break
+// of yesterday's high/low, then entries come from 5-minute retests and candle patterns.
+
+// ---------------- Inputs ----------------
+contracts = input.int(1, "Contracts", minval=1, maxval=20)
+requireFiveMinute = input.bool(true, "Require 5-Minute Chart")
+sessionTimezone = input.string("America/New_York", "Session Timezone")
+tradeSession = input.session("0930-1200", "Valid Trade Window")
+exitHour = input.int(16, "End Of Day Exit Hour", minval=0, maxval=23)
+exitMinute = input.int(0, "End Of Day Exit Minute", minval=0, maxval=59)
+breakoutTf = input.timeframe("15", "Breakout Timeframe")
+targetR = input.float(3.0, "Target R", minval=0.5, maxval=10.0, step=0.25)
+stopRangeBuffer = input.float(0.20, "Stop Buffer Of Candle Range", minval=0.0, maxval=2.0, step=0.05)
+useStrictOriginalEngulf = input.bool(true, "Use Strict Original Engulfing")
+showTradePlanLines = input.bool(true, "Show Entry / Stop / Target Lines")
+showDashboard = input.bool(true, "Show Dashboard")
+
+// ---------------- Daily / MTF Context ----------------
+[prevHigh, prevLow] = request.security(syminfo.tickerid, "D", [high[1], low[1]], barmerge.gaps_off, barmerge.lookahead_off)
+close15 = request.security(syminfo.tickerid, breakoutTf, close, barmerge.gaps_off, barmerge.lookahead_off)
+
+newDay = ta.change(time("D")) != 0
+validTime = not na(time(timeframe.period, tradeSession, sessionTimezone))
+timeframeOk = not requireFiveMinute or timeframe.period == "5"
+confirmedOk = barstate.isconfirmed
+
+breakoutUp = close15 > prevHigh
+breakoutDown = close15 < prevLow
+
+var int dir = 0
+if newDay
+    dir := 0
+if breakoutUp
+    dir := 1
+if breakoutDown
+    dir := -1
+
+// ---------------- 5M Retest + Candle Patterns ----------------
+body = math.abs(close - open)
+candleRange = math.max(high - low, syminfo.mintick)
+upperWick = high - math.max(open, close)
+lowerWick = math.min(open, close) - low
+
+hammer = lowerWick > body * 2.0 and upperWick < body
+invHammer = upperWick > body * 2.0 and lowerWick < body
+
+strictBullEngulf = close > open and close > high[1] and open < low[1]
+strictBearEngulf = close < open and close < low[1] and open > high[1]
+classicBullEngulf = close > open and close[1] < open[1] and close >= open[1] and open <= close[1]
+classicBearEngulf = close < open and close[1] > open[1] and close <= open[1] and open >= close[1]
+bullEngulf = useStrictOriginalEngulf ? strictBullEngulf : classicBullEngulf
+bearEngulf = useStrictOriginalEngulf ? strictBearEngulf : classicBearEngulf
+
+retestLong = low <= prevHigh and close > prevHigh
+retestShort = high >= prevLow and close < prevLow
+
+longPattern = hammer or bullEngulf
+shortPattern = invHammer or bearEngulf
+longPatternName = hammer ? "Hammer Retest" : bullEngulf ? "Bull Engulf Retest" : "Long Retest"
+shortPatternName = invHammer ? "Inverted Hammer Retest" : bearEngulf ? "Bear Engulf Retest" : "Short Retest"
+
+// ---------------- Risk Plan ----------------
+longStop = prevHigh - candleRange * stopRangeBuffer
+shortStop = prevLow + candleRange * stopRangeBuffer
+longRisk = close - longStop
+shortRisk = shortStop - close
+longTarget = close + longRisk * targetR
+shortTarget = close - shortRisk * targetR
+
+canTrade = timeframeOk and confirmedOk and validTime and strategy.position_size == 0
+longSignal = canTrade and dir == 1 and retestLong and longPattern and longRisk > syminfo.mintick
+shortSignal = canTrade and dir == -1 and retestShort and shortPattern and shortRisk > syminfo.mintick
+
+longReason = "15m broke above yesterday high, 5m retested prior high, pattern: " + longPatternName
+shortReason = "15m broke below yesterday low, 5m retested prior low, pattern: " + shortPatternName
+longAlert = "BREAK AND BOUNCE LONG " + syminfo.ticker + " | Setup: " + longPatternName + " | Entry: " + str.tostring(close, format.mintick) + " | Stop: " + str.tostring(longStop, format.mintick) + " | Take Profit: " + str.tostring(longTarget, format.mintick) + " | Reason: " + longReason
+shortAlert = "BREAK AND BOUNCE SHORT " + syminfo.ticker + " | Setup: " + shortPatternName + " | Entry: " + str.tostring(close, format.mintick) + " | Stop: " + str.tostring(shortStop, format.mintick) + " | Take Profit: " + str.tostring(shortTarget, format.mintick) + " | Reason: " + shortReason
+
+// ---------------- Orders ----------------
+var float activeEntry = na
+var float activeStop = na
+var float activeTarget = na
+var line entryLine = na
+var line stopLine = na
+var line targetLine = na
+
+if longSignal
+    activeEntry := close
+    activeStop := longStop
+    activeTarget := longTarget
+    strategy.entry("B&B Long", strategy.long, qty=contracts, alert_message=longAlert)
+    strategy.exit("B&B Long Exit", from_entry="B&B Long", stop=activeStop, limit=activeTarget, alert_message="EXIT B&B LONG stop/target")
+    alert(longAlert, alert.freq_once_per_bar_close)
+    if showTradePlanLines
+        if not na(entryLine)
+            line.delete(entryLine)
+        if not na(stopLine)
+            line.delete(stopLine)
+        if not na(targetLine)
+            line.delete(targetLine)
+        entryLine := line.new(bar_index, activeEntry, bar_index + 30, activeEntry, color=color.new(color.white, 0), width=2, extend=extend.right)
+        stopLine := line.new(bar_index, activeStop, bar_index + 30, activeStop, color=color.new(color.red, 0), width=2, extend=extend.right)
+        targetLine := line.new(bar_index, activeTarget, bar_index + 30, activeTarget, color=color.new(color.lime, 0), width=2, extend=extend.right)
+    label.new(bar_index, low, "B&B LONG", style=label.style_label_up, color=color.new(color.lime, 0), textcolor=color.black, size=size.small, tooltip=longAlert)
+
+if shortSignal
+    activeEntry := close
+    activeStop := shortStop
+    activeTarget := shortTarget
+    strategy.entry("B&B Short", strategy.short, qty=contracts, alert_message=shortAlert)
+    strategy.exit("B&B Short Exit", from_entry="B&B Short", stop=activeStop, limit=activeTarget, alert_message="EXIT B&B SHORT stop/target")
+    alert(shortAlert, alert.freq_once_per_bar_close)
+    if showTradePlanLines
+        if not na(entryLine)
+            line.delete(entryLine)
+        if not na(stopLine)
+            line.delete(stopLine)
+        if not na(targetLine)
+            line.delete(targetLine)
+        entryLine := line.new(bar_index, activeEntry, bar_index + 30, activeEntry, color=color.new(color.white, 0), width=2, extend=extend.right)
+        stopLine := line.new(bar_index, activeStop, bar_index + 30, activeStop, color=color.new(color.red, 0), width=2, extend=extend.right)
+        targetLine := line.new(bar_index, activeTarget, bar_index + 30, activeTarget, color=color.new(color.lime, 0), width=2, extend=extend.right)
+    label.new(bar_index, high, "B&B SHORT", style=label.style_label_down, color=color.new(color.red, 0), textcolor=color.white, size=size.small, tooltip=shortAlert)
+
+exitMinutes = exitHour * 60 + exitMinute
+currentMinutes = hour(time, sessionTimezone) * 60 + minute(time, sessionTimezone)
+if strategy.position_size != 0 and currentMinutes >= exitMinutes and confirmedOk
+    strategy.close_all(alert_message="BREAK AND BOUNCE end-of-day exit")
+
+if strategy.position_size == 0
+    activeEntry := na
+    activeStop := na
+    activeTarget := na
+
+// ---------------- Visuals ----------------
+plot(prevHigh, "Yesterday High", color=color.new(color.lime, 20), linewidth=2, style=plot.style_linebr)
+plot(prevLow, "Yesterday Low", color=color.new(color.red, 20), linewidth=2, style=plot.style_linebr)
+plotshape(breakoutUp and validTime, title="15m Breakout Up", style=shape.triangleup, location=location.belowbar, color=color.new(color.lime, 55), size=size.tiny, text="15U")
+plotshape(breakoutDown and validTime, title="15m Breakout Down", style=shape.triangledown, location=location.abovebar, color=color.new(color.red, 55), size=size.tiny, text="15D")
+plotshape(retestLong and dir == 1 and validTime, title="Retest Long Zone", style=shape.circle, location=location.belowbar, color=color.new(color.lime, 70), size=size.tiny, text="RT")
+plotshape(retestShort and dir == -1 and validTime, title="Retest Short Zone", style=shape.circle, location=location.abovebar, color=color.new(color.red, 70), size=size.tiny, text="RT")
+
+alertcondition(longSignal, title="Break And Bounce Long", message="Break And Bounce LONG fired. Use Any alert() function call or {{strategy.order.alert_message}} for full entry/stop/TP.")
+alertcondition(shortSignal, title="Break And Bounce Short", message="Break And Bounce SHORT fired. Use Any alert() function call or {{strategy.order.alert_message}} for full entry/stop/TP.")
+
+// ---------------- Dashboard ----------------
+status = not timeframeOk ? "Use 5m chart" : not validTime ? "Outside window" : dir == 1 ? "Waiting long retest" : dir == -1 ? "Waiting short retest" : "Waiting 15m break"
+var table dash = table.new(position.top_right, 2, 6, bgcolor=color.new(color.black, 14), border_color=color.new(color.white, 72), border_width=1)
+if showDashboard and barstate.islast
+    table.cell(dash, 0, 0, "Break & Bounce", text_color=color.white, bgcolor=color.new(color.teal, 55))
+    table.cell(dash, 1, 0, status, text_color=dir == 1 ? color.lime : dir == -1 ? color.orange : color.silver, bgcolor=color.new(color.teal, 55))
+    table.cell(dash, 0, 1, "Prev High", text_color=color.silver)
+    table.cell(dash, 1, 1, str.tostring(prevHigh, format.mintick), text_color=color.lime)
+    table.cell(dash, 0, 2, "Prev Low", text_color=color.silver)
+    table.cell(dash, 1, 2, str.tostring(prevLow, format.mintick), text_color=color.orange)
+    table.cell(dash, 0, 3, "Direction", text_color=color.silver)
+    table.cell(dash, 1, 3, dir == 1 ? "Long" : dir == -1 ? "Short" : "None", text_color=dir == 1 ? color.lime : dir == -1 ? color.orange : color.silver)
+    table.cell(dash, 0, 4, "Window", text_color=color.silver)
+    table.cell(dash, 1, 4, validTime ? "Open" : "Closed", text_color=validTime ? color.lime : color.silver)
+    table.cell(dash, 0, 5, "Pattern", text_color=color.silver)
+    table.cell(dash, 1, 5, longPattern ? longPatternName : shortPattern ? shortPatternName : "Waiting", text_color=longPattern ? color.lime : shortPattern ? color.orange : color.silver)

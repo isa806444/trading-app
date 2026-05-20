@@ -35,8 +35,10 @@ trailAfterR = input.float(0.65, "Trail After R", minval=0.1, maxval=5.0, step=0.
 trailAtrMult = input.float(0.9, "Trail ATR Multiplier", minval=0.25, maxval=5.0, step=0.05)
 profitGivebackR = input.float(0.45, "Close On Giveback R", minval=0.1, maxval=3.0, step=0.05)
 maxBarsInTrade = input.int(18, "Max Bars If Weak", minval=2, maxval=200)
+useSmartTradeManagement = input.bool(false, "Optional Smart Early / Trailing Exits")
 
 showLines = input.bool(true, "Show Entry / Stop / TP Lines")
+showPreviousDayLines = input.bool(true, "Show Previous Day High / Low")
 showPatternLines = input.bool(true, "Show Pattern Lines")
 patternPivotLen = input.int(5, "Pattern Pivot Length", minval=2, maxval=20)
 showDashboard = input.bool(true, "Show Dashboard")
@@ -113,6 +115,7 @@ closeNearLow = (high - close) / candleRange >= 0.62
 
 priorHigh = ta.highest(high, structureLen)[1]
 priorLow = ta.lowest(low, structureLen)[1]
+[prevDayHigh, prevDayLow] = request.security(syminfo.tickerid, "D", [high[1], low[1]], barmerge.gaps_off, barmerge.lookahead_off)
 swingHigh = ta.highest(high, 8)[1]
 swingLow = ta.lowest(low, 8)[1]
 rangeHigh = ta.highest(high, structureLen)
@@ -368,25 +371,29 @@ if strategy.position_size > 0
     activeBest := na(activeBest) ? high : math.max(activeBest, high)
     bestR = (activeBest - strategy.position_avg_price) / safeRisk
     givebackR = math.max(bestR - longOpenR, 0.0)
-    if longOpenR >= trailAfterR
-        activeStop := math.max(activeStop, close - atr * trailAtrMult, strategy.position_avg_price + safeRisk * 0.05)
-        strategy.exit("Long Risk", from_entry="Long", stop=activeStop, limit=activeTarget, alert_message="EXIT LONG trailing/target")
-    closeLong = (longOpenR <= -0.65 and (close < vwap or shortScore > longScore)) or (bestR >= 0.8 and givebackR >= profitGivebackR and longScore < shortScore + 6) or (barsInTrade >= maxBarsInTrade and longOpenR < 0.25) or (close < emaFast and close < vwap and longScore < 62)
-    if closeLong and confirmedOk
-        strategy.close("Long", alert_message="CLOSE LONG " + activeSetup)
-        label.new(bar_index, high, "CLOSE", style=label.style_label_down, color=color.new(color.yellow, 0), textcolor=color.black, size=size.tiny, tooltip="Close Long\nSetup: " + activeSetup + "\nReason: thesis weakened or risk/target logic fired.")
+    strategy.exit("Long Risk", from_entry="Long", stop=activeStop, limit=activeTarget, alert_message="EXIT LONG stop/target")
+    if useSmartTradeManagement
+        if longOpenR >= trailAfterR
+            activeStop := math.max(activeStop, close - atr * trailAtrMult, strategy.position_avg_price + safeRisk * 0.05)
+            strategy.exit("Long Risk", from_entry="Long", stop=activeStop, limit=activeTarget, alert_message="EXIT LONG trailing/target")
+        closeLong = (longOpenR <= -0.65 and (close < vwap or shortScore > longScore)) or (bestR >= 0.8 and givebackR >= profitGivebackR and longScore < shortScore + 6) or (barsInTrade >= maxBarsInTrade and longOpenR < 0.25) or (close < emaFast and close < vwap and longScore < 62)
+        if closeLong and confirmedOk
+            strategy.close("Long", alert_message="CLOSE LONG " + activeSetup)
+            label.new(bar_index, high, "CLOSE", style=label.style_label_down, color=color.new(color.yellow, 0), textcolor=color.black, size=size.tiny, tooltip="Close Long\nSetup: " + activeSetup + "\nReason: thesis weakened or risk/target logic fired.")
 
 if strategy.position_size < 0
     activeBest := na(activeBest) ? low : math.min(activeBest, low)
     bestR = (strategy.position_avg_price - activeBest) / safeRisk
     givebackR = math.max(bestR - shortOpenR, 0.0)
-    if shortOpenR >= trailAfterR
-        activeStop := math.min(activeStop, close + atr * trailAtrMult, strategy.position_avg_price - safeRisk * 0.05)
-        strategy.exit("Short Risk", from_entry="Short", stop=activeStop, limit=activeTarget, alert_message="EXIT SHORT trailing/target")
-    closeShort = (shortOpenR <= -0.65 and (close > vwap or longScore > shortScore)) or (bestR >= 0.8 and givebackR >= profitGivebackR and shortScore < longScore + 6) or (barsInTrade >= maxBarsInTrade and shortOpenR < 0.25) or (close > emaFast and close > vwap and shortScore < 62)
-    if closeShort and confirmedOk
-        strategy.close("Short", alert_message="CLOSE SHORT " + activeSetup)
-        label.new(bar_index, low, "CLOSE", style=label.style_label_up, color=color.new(color.yellow, 0), textcolor=color.black, size=size.tiny, tooltip="Close Short\nSetup: " + activeSetup + "\nReason: thesis weakened or risk/target logic fired.")
+    strategy.exit("Short Risk", from_entry="Short", stop=activeStop, limit=activeTarget, alert_message="EXIT SHORT stop/target")
+    if useSmartTradeManagement
+        if shortOpenR >= trailAfterR
+            activeStop := math.min(activeStop, close + atr * trailAtrMult, strategy.position_avg_price - safeRisk * 0.05)
+            strategy.exit("Short Risk", from_entry="Short", stop=activeStop, limit=activeTarget, alert_message="EXIT SHORT trailing/target")
+        closeShort = (shortOpenR <= -0.65 and (close > vwap or longScore > shortScore)) or (bestR >= 0.8 and givebackR >= profitGivebackR and shortScore < longScore + 6) or (barsInTrade >= maxBarsInTrade and shortOpenR < 0.25) or (close > emaFast and close > vwap and shortScore < 62)
+        if closeShort and confirmedOk
+            strategy.close("Short", alert_message="CLOSE SHORT " + activeSetup)
+            label.new(bar_index, low, "CLOSE", style=label.style_label_up, color=color.new(color.yellow, 0), textcolor=color.black, size=size.tiny, tooltip="Close Short\nSetup: " + activeSetup + "\nReason: thesis weakened or risk/target logic fired.")
 
 if strategy.position_size == 0
     activeEntry := na
@@ -439,6 +446,8 @@ plot(kamaValue, "KAMA", color=color.new(color.yellow, 0), linewidth=2)
 plot(vwap, "VWAP", color=color.new(color.white, 0), linewidth=2)
 plot(orHigh, "Opening Range High", color=color.new(color.lime, 55), style=plot.style_linebr)
 plot(orLow, "Opening Range Low", color=color.new(color.red, 55), style=plot.style_linebr)
+plot(showPreviousDayLines ? prevDayHigh : na, "Previous Day High", color=color.new(color.lime, 15), linewidth=2, style=plot.style_linebr)
+plot(showPreviousDayLines ? prevDayLow : na, "Previous Day Low", color=color.new(color.red, 15), linewidth=2, style=plot.style_linebr)
 plot(priorHigh, "Liquidity High", color=color.new(color.red, 82), style=plot.style_linebr)
 plot(priorLow, "Liquidity Low", color=color.new(color.lime, 82), style=plot.style_linebr)
 

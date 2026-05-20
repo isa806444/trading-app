@@ -1,0 +1,249 @@
+//@version=6
+//@strategy_alert_message {{strategy.order.alert_message}}
+strategy("Touch And Turn - Opening Range Fade", overlay=true, initial_capital=100000, default_qty_type=strategy.fixed, default_qty_value=1, pyramiding=0, margin_long=10, margin_short=10, process_orders_on_close=false, calc_on_every_tick=true, calc_on_order_fills=true, commission_type=strategy.commission.cash_per_contract, commission_value=4.0, slippage=2, max_lines_count=80, max_labels_count=120)
+
+// Standalone Touch & Turn setup.
+// Run on a 5-minute chart. It captures the first 15-minute opening candle,
+// then fades a touch of that candle's high/low back toward its 38.2% fib level.
+
+// ---------------- Inputs ----------------
+contracts = input.int(1, "Contracts", minval=1, maxval=20)
+requireFiveMinute = input.bool(true, "Require 5-Minute Chart")
+sessionTimezone = input.string("America/New_York", "Session Timezone")
+captureSession = input.session("0930-0945", "Opening Candle Capture")
+tradeSession = input.session("0945-1100", "Valid Trade Window")
+forceExitHour = input.int(11, "Force Exit Hour", minval=0, maxval=23)
+forceExitMinute = input.int(0, "Force Exit Minute", minval=0, maxval=59)
+
+dailyAtrPeriod = input.int(14, "Daily ATR Period", minval=2, maxval=100)
+minRangePercentDailyAtr = input.float(25.0, "Min Opening Range % Daily ATR", minval=1.0, maxval=200.0, step=1.0)
+rewardRisk = input.float(2.0, "Reward/Risk", minval=0.5, maxval=10.0, step=0.25)
+maxLossDollars = input.float(800.0, "Max Stop Risk Dollars", minval=50.0, maxval=10000.0, step=50.0)
+smartExitLossDollars = input.float(350.0, "Smart Exit Loss Trigger Dollars", minval=0.0, maxval=5000.0, step=25.0)
+useChartPointValue = input.bool(true, "Use Chart Point Value")
+fallbackDollarsPerPoint = input.float(20.0, "Fallback Dollars Per Point", minval=0.01, step=0.25)
+useSmartInvalidationExit = input.bool(true, "Use Smart Invalidation Exit")
+
+maxTradesPerDay = input.int(1, "Max Trades Per Day", minval=1, maxval=5)
+minBarsBetweenTrades = input.int(12, "Min Bars Between Trades", minval=1, maxval=100)
+levelZoneAtr = input.float(0.08, "Level Failure Zone ATR", minval=0.01, maxval=0.50, step=0.01)
+
+showOpeningLevels = input.bool(true, "Show Opening Range Levels")
+showTradePlanLines = input.bool(true, "Show Entry / Stop / Target Lines")
+showDashboard = input.bool(true, "Show Dashboard")
+
+// ---------------- Session State ----------------
+dailyAtr = request.security(syminfo.tickerid, "D", ta.atr(dailyAtrPeriod)[1], barmerge.gaps_off, barmerge.lookahead_off)
+newDay = ta.change(time("D")) != 0
+timeframeOk = not requireFiveMinute or timeframe.period == "5"
+confirmedOk = barstate.isconfirmed
+captureWindow = not na(time(timeframe.period, captureSession, sessionTimezone))
+tradeWindow = not na(time(timeframe.period, tradeSession, sessionTimezone))
+
+var float orHigh = na
+var float orLow = na
+var float orOpen = na
+var float orClose = na
+var float fib38 = na
+var int direction = 0
+var bool rangeValid = false
+var bool orderPlaced = false
+var int tradesToday = 0
+var int lastTradeBar = na
+
+if newDay
+    orHigh := na
+    orLow := na
+    orOpen := na
+    orClose := na
+    fib38 := na
+    direction := 0
+    rangeValid := false
+    orderPlaced := false
+    tradesToday := 0
+    lastTradeBar := na
+
+if captureWindow and not captureWindow[1]
+    orHigh := high
+    orLow := low
+    orOpen := open
+    orClose := close
+    fib38 := na
+    direction := 0
+    rangeValid := false
+    orderPlaced := false
+
+if captureWindow
+    orHigh := na(orHigh) ? high : math.max(orHigh, high)
+    orLow := na(orLow) ? low : math.min(orLow, low)
+    orClose := close
+
+captureFinished = not captureWindow and captureWindow[1]
+if captureFinished and confirmedOk and not na(orHigh) and not na(orLow) and not na(orOpen) and not na(orClose)
+    orRange = orHigh - orLow
+    rangeValid := orRange >= dailyAtr * minRangePercentDailyAtr / 100.0
+    fib38 := orLow + orRange * 0.382
+    direction := orClose < orOpen ? -1 : 1
+
+// ---------------- Risk Plan ----------------
+pointValue = useChartPointValue and syminfo.pointvalue > 0 ? syminfo.pointvalue : fallbackDollarsPerPoint
+maxStopPoints = maxLossDollars / math.max(contracts * pointValue, 0.01)
+levelZone = math.max(ta.atr(14) * levelZoneAtr, syminfo.mintick * 8)
+
+longEntry = orLow
+shortEntry = orHigh
+longTarget = fib38
+shortTarget = fib38
+longDistance = not na(longEntry) and not na(longTarget) ? longTarget - longEntry : na
+shortDistance = not na(shortEntry) and not na(shortTarget) ? shortEntry - shortTarget : na
+longStopDistance = not na(longDistance) ? math.min(longDistance / math.max(rewardRisk, 0.01), maxStopPoints) : na
+shortStopDistance = not na(shortDistance) ? math.min(shortDistance / math.max(rewardRisk, 0.01), maxStopPoints) : na
+longStop = not na(longEntry) and not na(longStopDistance) ? longEntry - longStopDistance : na
+shortStop = not na(shortEntry) and not na(shortStopDistance) ? shortEntry + shortStopDistance : na
+
+spacingOk = na(lastTradeBar) or bar_index - lastTradeBar >= minBarsBetweenTrades
+tradeCountOk = tradesToday < maxTradesPerDay
+canTrade = timeframeOk and confirmedOk and tradeWindow and strategy.position_size == 0 and spacingOk and tradeCountOk and rangeValid and not orderPlaced
+longSignal = canTrade and direction == -1 and not na(longDistance) and longDistance > syminfo.mintick
+shortSignal = canTrade and direction == 1 and not na(shortDistance) and shortDistance > syminfo.mintick
+
+longAlert = "TOUCH AND TURN LONG " + syminfo.ticker + " | Entry Limit: " + str.tostring(longEntry, format.mintick) + " | Stop: " + str.tostring(longStop, format.mintick) + " | Take Profit: " + str.tostring(longTarget, format.mintick) + " | Reason: first 15m candle was bearish/liquidity down, fade from opening range low to fib 38.2."
+shortAlert = "TOUCH AND TURN SHORT " + syminfo.ticker + " | Entry Limit: " + str.tostring(shortEntry, format.mintick) + " | Stop: " + str.tostring(shortStop, format.mintick) + " | Take Profit: " + str.tostring(shortTarget, format.mintick) + " | Reason: first 15m candle was bullish/liquidity up, fade from opening range high to fib 38.2."
+
+// ---------------- Orders ----------------
+var float activeEntry = na
+var float activeStop = na
+var float activeTarget = na
+var int activeEntryBar = na
+var line highLine = na
+var line lowLine = na
+var line fibLine = na
+var line entryLine = na
+var line stopLine = na
+var line targetLine = na
+var label setupLabel = na
+
+if longSignal
+    tradesToday += 1
+    lastTradeBar := bar_index
+    orderPlaced := true
+    activeEntry := longEntry
+    activeStop := longStop
+    activeTarget := longTarget
+    activeEntryBar := bar_index
+    strategy.entry("T&T Long", strategy.long, qty=contracts, limit=longEntry, alert_message=longAlert)
+    strategy.exit("T&T Long Exit", from_entry="T&T Long", stop=longStop, limit=longTarget, alert_message="EXIT T&T LONG stop/target")
+    alert(longAlert, alert.freq_once_per_bar_close)
+    label.new(bar_index, longEntry, "T&T LONG", style=label.style_label_up, color=color.new(color.aqua, 0), textcolor=color.black, size=size.small, tooltip=longAlert)
+
+if shortSignal
+    tradesToday += 1
+    lastTradeBar := bar_index
+    orderPlaced := true
+    activeEntry := shortEntry
+    activeStop := shortStop
+    activeTarget := shortTarget
+    activeEntryBar := bar_index
+    strategy.entry("T&T Short", strategy.short, qty=contracts, limit=shortEntry, alert_message=shortAlert)
+    strategy.exit("T&T Short Exit", from_entry="T&T Short", stop=shortStop, limit=shortTarget, alert_message="EXIT T&T SHORT stop/target")
+    alert(shortAlert, alert.freq_once_per_bar_close)
+    label.new(bar_index, shortEntry, "T&T SHORT", style=label.style_label_down, color=color.new(color.aqua, 0), textcolor=color.black, size=size.small, tooltip=shortAlert)
+
+if confirmedOk and not tradeWindow
+    strategy.cancel("T&T Long")
+    strategy.cancel("T&T Short")
+
+// ---------------- Smart Invalidation Exits ----------------
+body = math.abs(close - open)
+candleRange = math.max(high - low, syminfo.mintick)
+bodyPct = body / candleRange
+closeNearHigh = (close - low) / candleRange >= 0.58
+closeNearLow = (high - close) / candleRange >= 0.58
+strongBearAgainstLong = close < open and closeNearLow and bodyPct >= 0.45
+strongBullAgainstShort = close > open and closeNearHigh and bodyPct >= 0.45
+activeQty = math.max(math.abs(strategy.position_size), 1)
+longOpenPoints = strategy.position_size > 0 ? close - strategy.position_avg_price : 0.0
+shortOpenPoints = strategy.position_size < 0 ? strategy.position_avg_price - close : 0.0
+longLossDollars = strategy.position_size > 0 ? math.max(-longOpenPoints * pointValue * activeQty, 0.0) : 0.0
+shortLossDollars = strategy.position_size < 0 ? math.max(-shortOpenPoints * pointValue * activeQty, 0.0) : 0.0
+
+smartExitLong = useSmartInvalidationExit and confirmedOk and strategy.position_size > 0 and ((close < orLow - levelZone and strongBearAgainstLong) or (longLossDollars >= smartExitLossDollars and strongBearAgainstLong))
+smartExitShort = useSmartInvalidationExit and confirmedOk and strategy.position_size < 0 and ((close > orHigh + levelZone and strongBullAgainstShort) or (shortLossDollars >= smartExitLossDollars and strongBullAgainstShort))
+
+if smartExitLong
+    strategy.close("T&T Long", alert_message="TOUCH AND TURN smart exit long: opening range low failed with bearish confirmation.")
+    label.new(bar_index, high, "T&T EXIT L", style=label.style_label_down, color=color.new(color.yellow, 0), textcolor=color.black, size=size.tiny)
+
+if smartExitShort
+    strategy.close("T&T Short", alert_message="TOUCH AND TURN smart exit short: opening range high failed with bullish confirmation.")
+    label.new(bar_index, low, "T&T EXIT S", style=label.style_label_up, color=color.new(color.yellow, 0), textcolor=color.black, size=size.tiny)
+
+forceExitMinutes = forceExitHour * 60 + forceExitMinute
+currentMinutes = hour(time, sessionTimezone) * 60 + minute(time, sessionTimezone)
+if confirmedOk and currentMinutes >= forceExitMinutes
+    strategy.close("T&T Long", alert_message="TOUCH AND TURN force exit long")
+    strategy.close("T&T Short", alert_message="TOUCH AND TURN force exit short")
+
+if strategy.position_size == 0
+    activeEntry := na
+    activeStop := na
+    activeTarget := na
+    activeEntryBar := na
+
+// ---------------- Visuals ----------------
+if showOpeningLevels and captureFinished and not na(orHigh) and not na(orLow) and not na(fib38)
+    if not na(highLine)
+        line.delete(highLine)
+    if not na(lowLine)
+        line.delete(lowLine)
+    if not na(fibLine)
+        line.delete(fibLine)
+    if not na(setupLabel)
+        label.delete(setupLabel)
+    highLine := line.new(bar_index, orHigh, bar_index + 30, orHigh, color=color.new(color.aqua, 0), width=2, extend=extend.right)
+    lowLine := line.new(bar_index, orLow, bar_index + 30, orLow, color=color.new(color.aqua, 0), width=2, extend=extend.right)
+    fibLine := line.new(bar_index, fib38, bar_index + 30, fib38, color=color.new(color.yellow, 0), width=2, extend=extend.right)
+    setupLabel := label.new(bar_index, direction == -1 ? orLow : orHigh, direction == -1 ? "T&T LONG ZONE" : "T&T SHORT ZONE", style=direction == -1 ? label.style_label_up : label.style_label_down, color=color.new(color.aqua, 15), textcolor=color.black, size=size.tiny, tooltip="Touch & Turn\nOpening range: " + str.tostring(orHigh - orLow, format.mintick) + "\nDaily ATR filter: " + str.tostring(dailyAtr * minRangePercentDailyAtr / 100.0, format.mintick) + "\nTarget fib 38.2: " + str.tostring(fib38, format.mintick))
+
+if showTradePlanLines and (longSignal or shortSignal)
+    if not na(entryLine)
+        line.delete(entryLine)
+    if not na(stopLine)
+        line.delete(stopLine)
+    if not na(targetLine)
+        line.delete(targetLine)
+    entryLine := line.new(bar_index, activeEntry, bar_index + 30, activeEntry, color=color.new(color.white, 0), width=2, extend=extend.right)
+    stopLine := line.new(bar_index, activeStop, bar_index + 30, activeStop, color=color.new(color.red, 0), width=2, extend=extend.right)
+    targetLine := line.new(bar_index, activeTarget, bar_index + 30, activeTarget, color=color.new(color.lime, 0), width=2, extend=extend.right)
+
+plot(orHigh, "Opening Range High", color=color.new(color.aqua, 40), linewidth=2, style=plot.style_linebr)
+plot(orLow, "Opening Range Low", color=color.new(color.aqua, 40), linewidth=2, style=plot.style_linebr)
+plot(fib38, "Opening Range Fib 38.2", color=color.new(color.yellow, 15), linewidth=2, style=plot.style_linebr)
+plotshape(longSignal, title="Touch And Turn Long", style=shape.labelup, location=location.belowbar, color=color.new(color.aqua, 0), text="T&T LONG", textcolor=color.black, size=size.small)
+plotshape(shortSignal, title="Touch And Turn Short", style=shape.labeldown, location=location.abovebar, color=color.new(color.aqua, 0), text="T&T SHORT", textcolor=color.black, size=size.small)
+
+alertcondition(longSignal, title="Touch And Turn Long", message="Touch And Turn LONG limit order placed. Use Any alert() function call or {{strategy.order.alert_message}} for full entry/stop/TP.")
+alertcondition(shortSignal, title="Touch And Turn Short", message="Touch And Turn SHORT limit order placed. Use Any alert() function call or {{strategy.order.alert_message}} for full entry/stop/TP.")
+alertcondition(smartExitLong, title="Touch And Turn Exit Long", message="Touch And Turn smart long exit.")
+alertcondition(smartExitShort, title="Touch And Turn Exit Short", message="Touch And Turn smart short exit.")
+
+// ---------------- Dashboard ----------------
+status = not timeframeOk ? "Use 5m chart" : captureWindow ? "Building OR" : not rangeValid ? "No setup" : orderPlaced ? "Order placed" : direction == -1 ? "Long at OR low" : direction == 1 ? "Short at OR high" : "Waiting"
+var table dash = table.new(position.top_right, 2, 8, bgcolor=color.new(color.black, 14), border_color=color.new(color.white, 72), border_width=1)
+if showDashboard and barstate.islast
+    table.cell(dash, 0, 0, "Touch & Turn", text_color=color.white, bgcolor=color.new(color.teal, 55))
+    table.cell(dash, 1, 0, status, text_color=rangeValid ? color.aqua : color.silver, bgcolor=color.new(color.teal, 55))
+    table.cell(dash, 0, 1, "OR High", text_color=color.silver)
+    table.cell(dash, 1, 1, na(orHigh) ? "Waiting" : str.tostring(orHigh, format.mintick), text_color=color.aqua)
+    table.cell(dash, 0, 2, "OR Low", text_color=color.silver)
+    table.cell(dash, 1, 2, na(orLow) ? "Waiting" : str.tostring(orLow, format.mintick), text_color=color.aqua)
+    table.cell(dash, 0, 3, "Fib 38.2", text_color=color.silver)
+    table.cell(dash, 1, 3, na(fib38) ? "Waiting" : str.tostring(fib38, format.mintick), text_color=color.yellow)
+    table.cell(dash, 0, 4, "Direction", text_color=color.silver)
+    table.cell(dash, 1, 4, direction == -1 ? "Fade Long" : direction == 1 ? "Fade Short" : "None", text_color=direction == -1 ? color.lime : direction == 1 ? color.orange : color.silver)
+    table.cell(dash, 0, 5, "Window", text_color=color.silver)
+    table.cell(dash, 1, 5, tradeWindow ? "Open" : "Closed", text_color=tradeWindow ? color.lime : color.silver)
+    table.cell(dash, 0, 6, "Max Risk", text_color=color.silver)
+    table.cell(dash, 1, 6, "$" + str.tostring(maxLossDollars, "#") + " / " + str.tostring(maxStopPoints, "#.##") + " pts", text_color=color.lime)
+    table.cell(dash, 0, 7, "Trades", text_color=color.silver)
+    table.cell(dash, 1, 7, str.tostring(tradesToday) + "/" + str.tostring(maxTradesPerDay), text_color=tradeCountOk ? color.white : color.orange)

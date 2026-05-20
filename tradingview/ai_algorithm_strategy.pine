@@ -21,7 +21,7 @@ rollingBacktestYears = input.int(4, "Rolling Backtest Years", minval=1, maxval=2
 // ---------------- Strategy Inputs ----------------
 emaFastLen = input.int(50, "Fast EMA", minval=5, maxval=200)
 emaSlowLen = input.int(200, "Slow EMA", minval=20, maxval=500)
-emaPullbackLen = input.int(21, "EMA Pullback EMA", minval=5, maxval=100)
+emaPullbackLen = input.int(21, "Reversal EMA", minval=5, maxval=100)
 structureLen = input.int(20, "Structure Lookback", minval=5, maxval=100)
 kaufmanLen = input.int(10, "Kaufman Ratio Length", minval=3, maxval=80)
 minKaufmanRatio = input.float(0.30, "Minimum Kaufman Ratio", minval=0.05, maxval=1.0, step=0.01)
@@ -33,7 +33,7 @@ atrLen = input.int(14, "ATR Length", minval=2, maxval=100)
 volumeLen = input.int(30, "Volume Baseline", minval=5, maxval=100)
 minRelativeVolume = input.float(0.65, "Minimum Relative Volume", minval=0.1, maxval=5.0, step=0.05)
 minBodyPct = input.float(0.25, "Minimum Candle Body %", minval=0.05, maxval=0.95, step=0.05)
-pullbackAtrBuffer = input.float(0.35, "EMA Pullback ATR Buffer", minval=0.05, maxval=2.0, step=0.05)
+pullbackAtrBuffer = input.float(0.35, "Reversal Level ATR Buffer", minval=0.05, maxval=2.0, step=0.05)
 useHtfBias = input.bool(true, "Use Confirmed 4H Bias")
 htfConfirmTf = input.timeframe("240", "HTF Bias Timeframe")
 minSetupScore = input.float(62.0, "Minimum Setup Score", minval=30.0, maxval=95.0, step=1.0)
@@ -210,23 +210,23 @@ fakeoutLongRisk = signalHigh > priorHigh and signalClose < priorHigh and upperWi
 fakeoutShortRisk = signalLow < priorLow and signalClose > priorLow and lowerWick > math.max(math.abs(signalClose - signalOpen), syminfo.mintick) * 1.2
 doNotChaseLong = distVwapAtr > 2.4 or (signalClose > priorHigh and upperWick > math.max(math.abs(signalClose - signalOpen), syminfo.mintick) * 1.5)
 doNotChaseShort = distVwapAtr > 2.4 or (signalClose < priorLow and lowerWick > math.max(math.abs(signalClose - signalOpen), syminfo.mintick) * 1.5)
-emaPullbackLong = bullTrend and htfBull and signalLow <= emaPullback + atrValue * pullbackAtrBuffer and signalClose > emaPullback and signalClose > signalOpen and closeNearHigh and volumeOk
-emaPullbackShort = bearTrend and htfBear and signalHigh >= emaPullback - atrValue * pullbackAtrBuffer and signalClose < emaPullback and signalClose < signalOpen and closeNearLow and volumeOk
+reversalLong = (sweepLong or reclaimLong or (signalLow <= emaPullback + atrValue * pullbackAtrBuffer and signalClose > emaPullback)) and signalClose > signalOpen and closeNearHigh and lowerWick > upperWick and volumeOk and (not useHtfBias or htfBull or sweepLong)
+reversalShort = (sweepShort or rejectShort or (signalHigh >= emaPullback - atrValue * pullbackAtrBuffer and signalClose < emaPullback)) and signalClose < signalOpen and closeNearLow and upperWick > lowerWick and volumeOk and (not useHtfBias or htfBear or sweepShort)
 kaufmanLong = bullTrend and htfBull and kaufmanRatioValue >= minKaufmanRatio and signalClose > emaFast and signalClose > signalOpen and volumeOk
 kaufmanShort = bearTrend and htfBear and kaufmanRatioValue >= minKaufmanRatio and signalClose < emaFast and signalClose < signalOpen and volumeOk
 atrLong = bullTrend and htfBull and atrRatio >= atrExpansionMult and candleOk and closeNearHigh and volumeOk and (breakLong or reclaimLong or signalClose > emaFast)
 atrShort = bearTrend and htfBear and atrRatio >= atrExpansionMult and candleOk and closeNearLow and volumeOk and (breakShort or rejectShort or signalClose < emaFast)
 
-longScore = clamp(42.0 + scoreBool(bullTrend, 12) + scoreBool(htfBull, 10) + scoreBool(signalClose > vwapValue, 8) + scoreBool(vwapSlope > 0, 5) + scoreBool(volumeOk, 7) + scoreBool(relativeVolume >= 1.1, 5) + scoreBool(kaufmanRatioValue >= minKaufmanRatio, 8) + scoreBool(trendStrength >= minTrendStrength, 6) + scoreBool(closeNearHigh, 5) + scoreBool(reclaimLong or sweepLong, 8) + scoreBool(emaPullbackLong, 9) + scoreBool(breakLong, 6) - scoreBool(chopScore > maxChopScore, 12) - scoreBool(fakeoutLongRisk, 12) - scoreBool(doNotChaseLong, 10) - scoreBool(bearTrend and htfBear, 12), 0.0, 100.0)
-shortScore = clamp(42.0 + scoreBool(bearTrend, 12) + scoreBool(htfBear, 10) + scoreBool(signalClose < vwapValue, 8) + scoreBool(vwapSlope < 0, 5) + scoreBool(volumeOk, 7) + scoreBool(relativeVolume >= 1.1, 5) + scoreBool(kaufmanRatioValue >= minKaufmanRatio, 8) + scoreBool(trendStrength >= minTrendStrength, 6) + scoreBool(closeNearLow, 5) + scoreBool(rejectShort or sweepShort, 8) + scoreBool(emaPullbackShort, 9) + scoreBool(breakShort, 6) - scoreBool(chopScore > maxChopScore, 12) - scoreBool(fakeoutShortRisk, 12) - scoreBool(doNotChaseShort, 10) - scoreBool(bullTrend and htfBull, 12), 0.0, 100.0)
+longScore = clamp(42.0 + scoreBool(bullTrend, 12) + scoreBool(htfBull, 10) + scoreBool(signalClose > vwapValue, 8) + scoreBool(vwapSlope > 0, 5) + scoreBool(volumeOk, 7) + scoreBool(relativeVolume >= 1.1, 5) + scoreBool(kaufmanRatioValue >= minKaufmanRatio, 8) + scoreBool(trendStrength >= minTrendStrength, 6) + scoreBool(closeNearHigh, 5) + scoreBool(reclaimLong or sweepLong, 8) + scoreBool(reversalLong, 9) + scoreBool(breakLong, 6) - scoreBool(chopScore > maxChopScore, 12) - scoreBool(fakeoutLongRisk, 12) - scoreBool(doNotChaseLong, 10) - scoreBool(bearTrend and htfBear, 12), 0.0, 100.0)
+shortScore = clamp(42.0 + scoreBool(bearTrend, 12) + scoreBool(htfBear, 10) + scoreBool(signalClose < vwapValue, 8) + scoreBool(vwapSlope < 0, 5) + scoreBool(volumeOk, 7) + scoreBool(relativeVolume >= 1.1, 5) + scoreBool(kaufmanRatioValue >= minKaufmanRatio, 8) + scoreBool(trendStrength >= minTrendStrength, 6) + scoreBool(closeNearLow, 5) + scoreBool(rejectShort or sweepShort, 8) + scoreBool(reversalShort, 9) + scoreBool(breakShort, 6) - scoreBool(chopScore > maxChopScore, 12) - scoreBool(fakeoutShortRisk, 12) - scoreBool(doNotChaseShort, 10) - scoreBool(bullTrend and htfBull, 12), 0.0, 100.0)
 edge = longScore - shortScore
 opportunityBoost = targetTradesPerDay > 0 and tradesToday < targetTradesPerDay and minutesNow >= 690 and minutesNow < 930 and lossStreak == 0 ? 6.0 : 0.0
 adaptiveMinScore = minSetupScore + scoreBool(chopScore > maxChopScore, 5) + lossStreak * 3.0 - opportunityBoost
-chopOk = chopScore <= maxChopScore or sweepLong or sweepShort or emaPullbackLong or emaPullbackShort
+chopOk = chopScore <= maxChopScore or reversalLong or reversalShort
 
 baseGate = symbolOk and timeframeOk and chartTimeframeSafe and confirmedOk and signalReady and newSignalBar and backtestWindowOk and signalSessionOk and not signalNearSessionClose and not dailyLossLock and not lossLock and not tradeCountLock and cooldownOk and volatilityOk and chopOk
-newLongSignal = baseGate and strategy.position_size == 0 and longScore >= adaptiveMinScore and longScore >= shortScore + 4 and not fakeoutLongRisk and not doNotChaseLong and (kaufmanLong or atrLong or emaPullbackLong or sweepLong)
-newShortSignal = baseGate and strategy.position_size == 0 and shortScore >= adaptiveMinScore and shortScore >= longScore + 4 and not fakeoutShortRisk and not doNotChaseShort and (kaufmanShort or atrShort or emaPullbackShort or sweepShort)
+newLongSignal = baseGate and strategy.position_size == 0 and longScore >= adaptiveMinScore and longScore >= shortScore + 4 and not fakeoutLongRisk and not doNotChaseLong and (kaufmanLong or atrLong or reversalLong)
+newShortSignal = baseGate and strategy.position_size == 0 and shortScore >= adaptiveMinScore and shortScore >= longScore + 4 and not fakeoutShortRisk and not doNotChaseShort and (kaufmanShort or atrShort or reversalShort)
 
 testLongSignal = enableManualTest and manualTestAction == "BUY" and chartTimeframeSafe and confirmedOk and backtestWindowOk
 testShortSignal = enableManualTest and manualTestAction == "SELL" and chartTimeframeSafe and confirmedOk and backtestWindowOk
@@ -255,8 +255,8 @@ plannedShortRisk = math.max(plannedShortStop - signalClose, syminfo.mintick)
 plannedLongTarget = signalClose + plannedLongRisk * rewardMultiple
 plannedShortTarget = signalClose - plannedShortRisk * rewardMultiple
 
-longSetup = enableHourlyWebhookTest ? "HourlyWebhookTest" : kaufmanLong ? "KaufmanRatio" : atrLong ? "ATRExpansion" : emaPullbackLong ? "EMAPullback" : sweepLong ? "EMAPullback" : "ManualTest"
-shortSetup = enableHourlyWebhookTest ? "HourlyWebhookTest" : kaufmanShort ? "KaufmanRatio" : atrShort ? "ATRExpansion" : emaPullbackShort ? "EMAPullback" : sweepShort ? "EMAPullback" : "ManualTest"
+longSetup = enableHourlyWebhookTest ? "HourlyWebhookTest" : kaufmanLong ? "KaufmanRatio" : atrLong ? "ATRExpansion" : reversalLong ? "Reversal" : "ManualTest"
+shortSetup = enableHourlyWebhookTest ? "HourlyWebhookTest" : kaufmanShort ? "KaufmanRatio" : atrShort ? "ATRExpansion" : reversalShort ? "Reversal" : "ManualTest"
 longGrade = longScore >= 84 ? "A+" : longScore >= 74 ? "A" : "B"
 shortGrade = shortScore >= 84 ? "A+" : shortScore >= 74 ? "A" : "B"
 riskMode = enableHourlyWebhookTest ? "WebhookTestHourly" : "ProSimpleTight"
@@ -347,7 +347,7 @@ if strategy.position_size == 0 and not longSignal and not shortSignal
 
 // ---------------- Visuals / Status ----------------
 plot(emaFast, "Fast EMA", color=color.new(color.orange, 0), linewidth=1)
-plot(emaPullback, "Pullback EMA", color=color.new(color.white, 0), linewidth=1)
+plot(emaPullback, "Reversal EMA", color=color.new(color.white, 0), linewidth=1)
 plot(emaSlow, "Slow EMA", color=color.new(color.blue, 0), linewidth=2)
 plot(vwapValue, "VWAP", color=color.new(color.aqua, 15), linewidth=1)
 plot(priorHigh, "Structure High", color=color.new(color.lime, 78), style=plot.style_linebr)
@@ -362,7 +362,7 @@ plotshape(shortThesisExit, title="Pro Exit Short", style=shape.xcross, location=
 
 statusText = not symbolOk ? "Wrong symbol" : not chartTimeframeSafe ? "Chart TF too high" : not signalReady ? "Building 1H data" : not backtestWindowOk ? "Before 4Y window" : not signalSessionOk ? "Outside 1H session" : dailyLossLock ? "Daily loss lock" : lossLock ? "Loss lock" : tradeCountLock ? "Trade cap" : signalNearSessionClose ? "1H close buffer" : "No-leak 1H armed"
 positionText = strategy.position_size > 0 ? "Long" : strategy.position_size < 0 ? "Short" : "Flat"
-setupText = kaufmanLong or kaufmanShort ? "Kaufman" : atrLong or atrShort ? "ATR" : emaPullbackLong or emaPullbackShort ? "EMA Pullback" : "Waiting"
+setupText = kaufmanLong or kaufmanShort ? "Kaufman" : atrLong or atrShort ? "ATR" : reversalLong or reversalShort ? "Reversal" : "Waiting"
 var table dash = table.new(position.top_right, 2, 9, bgcolor=color.new(color.black, 12), border_color=color.new(color.white, 70), border_width=1)
 if barstate.islast
     table.cell(dash, 0, 0, "NQ v44 Pro", text_color=color.white, bgcolor=color.new(color.teal, 58))

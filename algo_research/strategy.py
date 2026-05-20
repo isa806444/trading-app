@@ -166,23 +166,29 @@ def add_v44_indicators(
     out["fakeout_short_risk"] = (out["low"] < out["prior_low"]) & (out["close"] > out["prior_low"]) & (out["lower_wick"] > body * 1.2)
     out["do_not_chase_long"] = (out["dist_vwap_atr"] > 2.4) | ((out["close"] > out["prior_high"]) & (out["upper_wick"] > body * 1.5))
     out["do_not_chase_short"] = (out["dist_vwap_atr"] > 2.4) | ((out["close"] < out["prior_low"]) & (out["lower_wick"] > body * 1.5))
-    out["ema_pullback_long"] = (
-        out["bull_trend"]
-        & out["htf_bull"]
-        & (out["low"] <= out["ema_pullback"] + out["atr"] * 0.35)
-        & (out["close"] > out["ema_pullback"])
+    out["reversal_long"] = (
+        (
+            out["sweep_long"]
+            | out["reclaim_long"]
+            | ((out["low"] <= out["ema_pullback"] + out["atr"] * 0.35) & (out["close"] > out["ema_pullback"]))
+        )
         & (out["close"] > out["open"])
         & out["close_near_high"]
+        & (out["lower_wick"] > out["upper_wick"])
         & out["volume_ok"]
+        & (out["htf_bull"] | out["sweep_long"])
     )
-    out["ema_pullback_short"] = (
-        out["bear_trend"]
-        & out["htf_bear"]
-        & (out["high"] >= out["ema_pullback"] - out["atr"] * 0.35)
-        & (out["close"] < out["ema_pullback"])
+    out["reversal_short"] = (
+        (
+            out["sweep_short"]
+            | out["reject_short"]
+            | ((out["high"] >= out["ema_pullback"] - out["atr"] * 0.35) & (out["close"] < out["ema_pullback"]))
+        )
         & (out["close"] < out["open"])
         & out["close_near_low"]
+        & (out["upper_wick"] > out["lower_wick"])
         & out["volume_ok"]
+        & (out["htf_bear"] | out["sweep_short"])
     )
     out["kaufman_long"] = (
         out["bull_trend"]
@@ -230,7 +236,7 @@ def add_v44_indicators(
         + (out["trend_strength"] >= min_trend_strength).astype(float) * 6
         + out["close_near_high"].astype(float) * 5
         + (out["reclaim_long"] | out["sweep_long"]).astype(float) * 8
-        + out["ema_pullback_long"].astype(float) * 9
+        + out["reversal_long"].astype(float) * 9
         + out["break_long"].astype(float) * 6
         - (out["chop_score"] > max_chop_score).astype(float) * 12
         - out["fakeout_long_risk"].astype(float) * 12
@@ -249,7 +255,7 @@ def add_v44_indicators(
         + (out["trend_strength"] >= min_trend_strength).astype(float) * 6
         + out["close_near_low"].astype(float) * 5
         + (out["reject_short"] | out["sweep_short"]).astype(float) * 8
-        + out["ema_pullback_short"].astype(float) * 9
+        + out["reversal_short"].astype(float) * 9
         + out["break_short"].astype(float) * 6
         - (out["chop_score"] > max_chop_score).astype(float) * 12
         - out["fakeout_short_risk"].astype(float) * 12
@@ -258,10 +264,8 @@ def add_v44_indicators(
     ).clip(lower=0, upper=100)
     out["chop_ok"] = (
         (out["chop_score"] <= max_chop_score)
-        | out["sweep_long"]
-        | out["sweep_short"]
-        | out["ema_pullback_long"]
-        | out["ema_pullback_short"]
+        | out["reversal_long"]
+        | out["reversal_short"]
     )
     out["long_valid"] = (
         (out["long_score"] >= min_setup_score)
@@ -269,7 +273,7 @@ def add_v44_indicators(
         & ~out["fakeout_long_risk"]
         & ~out["do_not_chase_long"]
         & out["chop_ok"]
-        & (out["kaufman_long"] | out["atr_long"] | out["ema_pullback_long"] | out["sweep_long"])
+        & (out["kaufman_long"] | out["atr_long"] | out["reversal_long"])
     )
     out["short_valid"] = (
         (out["short_score"] >= min_setup_score)
@@ -277,13 +281,13 @@ def add_v44_indicators(
         & ~out["fakeout_short_risk"]
         & ~out["do_not_chase_short"]
         & out["chop_ok"]
-        & (out["kaufman_short"] | out["atr_short"] | out["ema_pullback_short"] | out["sweep_short"])
+        & (out["kaufman_short"] | out["atr_short"] | out["reversal_short"])
     )
     out["signal"] = "WAIT"
     out.loc[out["long_valid"], "signal"] = "BUY"
     out.loc[out["short_valid"], "signal"] = "SELL"
     out["setup"] = "WAIT"
-    out.loc[out["ema_pullback_long"] | out["ema_pullback_short"] | out["sweep_long"] | out["sweep_short"], "setup"] = "EMAPullback"
+    out.loc[out["reversal_long"] | out["reversal_short"], "setup"] = "Reversal"
     out.loc[out["atr_long"] | out["atr_short"], "setup"] = "ATRExpansion"
     out.loc[out["kaufman_long"] | out["kaufman_short"], "setup"] = "KaufmanRatio"
     return out

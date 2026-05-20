@@ -385,7 +385,7 @@ def run_backtest(
     summary.update(
         {
             "symbol": symbol,
-            "logic": "v44_1h_no_leak_kaufman_atr_ema_pullback_tight_exits",
+            "logic": "v44_1h_no_leak_kaufman_atr_reversal_tight_exits",
             "starting_cash": round(config.starting_cash, 2),
             "ending_cash": round(cash, 2),
             "max_drawdown_dollars": round(max_drawdown_dollars, 2),

@@ -15,6 +15,7 @@ var string GRP_INST = "Instruments"
 var string GRP_BANDS = "Std Dev Bands"
 var string GRP_DIV = "Divergence"
 var string GRP_RISK = "Risk / Exits"
+var string GRP_LIVE = "Live Supertrend Signal Bot"
 var string GRP_DISP = "Display"
 
 // ---------------- Strategy Inputs ----------------
@@ -28,6 +29,12 @@ requiredChartTf = input.timeframe("5", "Required Chart TF", group=GRP_STRAT)
 cooldownBars = input.int(4, "Cooldown Bars", minval=0, maxval=100, group=GRP_STRAT)
 minCompositeEdge = input.float(0.05, "Minimum Composite Edge", minval=0.0, maxval=10.0, step=0.01, group=GRP_STRAT)
 minBandExtreme = input.float(1.0, "Band Reversion Extreme", minval=0.25, maxval=4.0, step=0.25, group=GRP_STRAT)
+
+// ---------------- Live Supertrend Signal Bot ----------------
+useLiveSignalBot = input.bool(true, "Enable Live Signal Bot", group=GRP_LIVE)
+liveAtrLen = input.int(10, "Speed", minval=1, maxval=100, group=GRP_LIVE)
+liveSensitivity = input.float(1.5, "Sensitivity", minval=0.1, maxval=10.0, step=0.1, group=GRP_LIVE)
+showLiveSignalLabels = input.bool(true, "Show BUY / SELL Labels", group=GRP_LIVE)
 
 // ---------------- Resolution / Source Inputs ----------------
 srcRes = input.timeframe("5", "Data Resolution", group=GRP_RES)
@@ -245,6 +252,10 @@ compositeShortCross = ta.crossunder(composite, 0.0) and composite < -minComposit
 bandReversionLong = bandPos <= -minBandExtreme and ta.rising(composite, 2)
 bandReversionShort = bandPos >= minBandExtreme and ta.falling(composite, 2)
 
+[liveTrend, liveDir] = ta.supertrend(liveSensitivity, liveAtrLen)
+liveBuyTrigger = useLiveSignalBot and ta.change(liveDir) < 0
+liveSellTrigger = useLiveSignalBot and ta.change(liveDir) > 0
+
 modeUsesDiv = strategyMode == "Divergence Only" or strategyMode == "Divergence + Composite Cross"
 modeUsesCross = strategyMode == "Composite Cross" or strategyMode == "Divergence + Composite Cross"
 modeUsesBand = strategyMode == "Band Reversion"
@@ -388,6 +399,8 @@ plotshape(bearDiv and showPriceLvl, "Bear Div Price", shape.labeldown, location.
 plotshape(bullDiv and showPriceLvl, "Bull Div Price", shape.labelup, location.belowbar, color.new(color.lime, 10), offset=-divBarsR, text="CMC Bull", textcolor=color.white, force_overlay=true, size=size.small)
 plotshape(longSignal, "CMC Long", shape.labelup, location.bottom, color.new(color.lime, 0), text="CMC LONG", textcolor=color.black, size=size.small)
 plotshape(shortSignal, "CMC Short", shape.labeldown, location.top, color.new(color.red, 0), text="CMC SHORT", textcolor=color.white, size=size.small)
+plotshape(showLiveSignalLabels and liveBuyTrigger, "Live Signal Buy", shape.labelup, location.belowbar, color.new(#00ff88, 0), text="BUY", textcolor=color.black, force_overlay=true, size=size.small)
+plotshape(showLiveSignalLabels and liveSellTrigger, "Live Signal Sell", shape.labeldown, location.abovebar, color.new(#ff3d00, 0), text="SELL", textcolor=color.white, force_overlay=true, size=size.small)
 
 var line entryLine = na
 var line stopLine = na
@@ -462,3 +475,5 @@ alertcondition(longSignal, "CMC Strategy Long", "CMC strategy long signal")
 alertcondition(shortSignal, "CMC Strategy Short", "CMC strategy short signal")
 alertcondition(longSmartExit, "CMC Strategy Exit Long", "CMC strategy exit long")
 alertcondition(shortSmartExit, "CMC Strategy Exit Short", "CMC strategy exit short")
+alertcondition(liveBuyTrigger, "Buy Alert", "Enter Long")
+alertcondition(liveSellTrigger, "Sell Alert", "Enter Short")

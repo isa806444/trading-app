@@ -7,6 +7,7 @@ strategy("FVG Quality Grading Strategy", overlay=true, initial_capital=100000, d
 
 // ---------------- Inputs ----------------
 contracts = input.int(1, "Contracts", minval=1, maxval=20, group="Strategy")
+strategyEntryMode = input.string("Fresh Gap + Retest", "Strategy Report Orders", options=["Retest Only", "Fresh Gap Only", "Fresh Gap + Retest"], group="Strategy")
 useNoRepaint = input.bool(true, "Strict No-Repaint", group="Strategy")
 useSessionFilter = input.bool(true, "Use Trading Session", group="Strategy")
 tradeSession = input.session("0930-1600", "Valid Entry Session", group="Strategy")
@@ -128,6 +129,19 @@ calcScore(float _dispRatio, float _dispATR, float _volPctile, float _gapATR, int
     math.round(math.min(composite, 100.0), 1)
 
 minScoreFilter = gradeToMin(minGrade)
+useFreshGapOrders = strategyEntryMode == "Fresh Gap Only" or strategyEntryMode == "Fresh Gap + Retest"
+useRetestOrders = strategyEntryMode == "Retest Only" or strategyEntryMode == "Fresh Gap + Retest"
+
+bool freshLongCandidate = false
+bool freshShortCandidate = false
+float freshLongStop = na
+float freshLongTarget = na
+float freshShortStop = na
+float freshShortTarget = na
+float freshLongScore = na
+float freshShortScore = na
+string freshLongGrade = ""
+string freshShortGrade = ""
 
 // ---------------- FVG Detection ----------------
 bullGap = low > high[2] and (low - high[2]) > minGapATR * atrVal
@@ -169,6 +183,12 @@ if bullGap
         newFVG.ceLine := showMidline ? line.new(bar_index - 2, midCE, bar_index, midCE, color=color.new(#00C853, 50), style=line.style_dotted, width=1) : na
         newFVG.gradeLbl := showScoreLabel ? label.new(bar_index, midCE, " " + gr + " (" + str.tostring(sc, "#.0") + ")", style=label.style_none, textcolor=color.new(#00C853, 20), size=size.tiny, textalign=text.align_left) : na
         array.push(fvgs, newFVG)
+        float freshRiskLong = close - (gapBot - atrVal * stopBufferAtr)
+        freshLongStop := gapBot - atrVal * stopBufferAtr
+        freshLongTarget := close + freshRiskLong * targetR
+        freshLongScore := sc
+        freshLongGrade := gr
+        freshLongCandidate := sc >= minTradeScore and freshRiskLong > syminfo.mintick
 
 if bearGap
     float gapTop = low[2]
@@ -206,6 +226,12 @@ if bearGap
         newFVG.ceLine := showMidline ? line.new(bar_index - 2, midCE, bar_index, midCE, color=color.new(#FF1744, 50), style=line.style_dotted, width=1) : na
         newFVG.gradeLbl := showScoreLabel ? label.new(bar_index, midCE, " " + gr + " (" + str.tostring(sc, "#.0") + ")", style=label.style_none, textcolor=color.new(#FF1744, 20), size=size.tiny, textalign=text.align_left) : na
         array.push(fvgs, newFVG)
+        float freshRiskShort = (gapTop + atrVal * stopBufferAtr) - close
+        freshShortStop := gapTop + atrVal * stopBufferAtr
+        freshShortTarget := close - freshRiskShort * targetR
+        freshShortScore := sc
+        freshShortGrade := gr
+        freshShortCandidate := sc >= minTradeScore and freshRiskShort > syminfo.mintick
 
 // ---------------- Active FVG Updates + Trade Candidates ----------------
 var int tradesToday = 0
@@ -320,25 +346,40 @@ while array.size(fvgs) > maxFVGs * 4
 cooldownOk = na(lastTradeBar) or bar_index - lastTradeBar > cooldownBars
 tradeCountOk = tradesToday < maxTradesPerDay
 canTrade = confirmedOk and inSession and cooldownOk and tradeCountOk and strategy.position_size == 0
-longSignal = canTrade and longCandidate and not shortCandidate
-shortSignal = canTrade and shortCandidate and not longCandidate
+longFromFresh = useFreshGapOrders and freshLongCandidate
+shortFromFresh = useFreshGapOrders and freshShortCandidate
+longFromRetest = useRetestOrders and longCandidate
+shortFromRetest = useRetestOrders and shortCandidate
+longSignal = canTrade and (longFromFresh or longFromRetest) and not (shortFromFresh or shortFromRetest)
+shortSignal = canTrade and (shortFromFresh or shortFromRetest) and not (longFromFresh or longFromRetest)
 
-longAlert = "FVG LONG " + syminfo.ticker + " | Grade: " + candidateLongGrade + " | Score: " + str.tostring(candidateLongScore, "#.0") + " | Entry: " + str.tostring(close, format.mintick) + " | Stop: " + str.tostring(candidateLongStop, format.mintick) + " | Target: " + str.tostring(candidateLongTarget, format.mintick) + " | Reason: bullish FVG retest held above CE."
-shortAlert = "FVG SHORT " + syminfo.ticker + " | Grade: " + candidateShortGrade + " | Score: " + str.tostring(candidateShortScore, "#.0") + " | Entry: " + str.tostring(close, format.mintick) + " | Stop: " + str.tostring(candidateShortStop, format.mintick) + " | Target: " + str.tostring(candidateShortTarget, format.mintick) + " | Reason: bearish FVG retest rejected below CE."
+orderLongStop = longFromFresh ? freshLongStop : candidateLongStop
+orderLongTarget = longFromFresh ? freshLongTarget : candidateLongTarget
+orderLongScore = longFromFresh ? freshLongScore : candidateLongScore
+orderLongGrade = longFromFresh ? freshLongGrade : candidateLongGrade
+orderShortStop = shortFromFresh ? freshShortStop : candidateShortStop
+orderShortTarget = shortFromFresh ? freshShortTarget : candidateShortTarget
+orderShortScore = shortFromFresh ? freshShortScore : candidateShortScore
+orderShortGrade = shortFromFresh ? freshShortGrade : candidateShortGrade
+longReason = longFromFresh ? "fresh bullish FVG formed with enough score to backtest immediately" : "bullish FVG retest held above CE"
+shortReason = shortFromFresh ? "fresh bearish FVG formed with enough score to backtest immediately" : "bearish FVG retest rejected below CE"
+
+longAlert = "FVG LONG " + syminfo.ticker + " | Grade: " + orderLongGrade + " | Score: " + str.tostring(orderLongScore, "#.0") + " | Entry: " + str.tostring(close, format.mintick) + " | Stop: " + str.tostring(orderLongStop, format.mintick) + " | Target: " + str.tostring(orderLongTarget, format.mintick) + " | Reason: " + longReason + "."
+shortAlert = "FVG SHORT " + syminfo.ticker + " | Grade: " + orderShortGrade + " | Score: " + str.tostring(orderShortScore, "#.0") + " | Entry: " + str.tostring(close, format.mintick) + " | Stop: " + str.tostring(orderShortStop, format.mintick) + " | Target: " + str.tostring(orderShortTarget, format.mintick) + " | Reason: " + shortReason + "."
 
 if longSignal
     tradesToday += 1
     lastTradeBar := bar_index
     strategy.entry("FVG Long", strategy.long, qty=contracts, alert_message=longAlert)
-    strategy.exit("FVG Long Exit", from_entry="FVG Long", stop=candidateLongStop, limit=candidateLongTarget, alert_message="EXIT FVG LONG stop/target")
-    label.new(bar_index, low, "FVG LONG " + candidateLongGrade, style=label.style_label_up, color=color.new(#00C853, 0), textcolor=color.black, size=size.small, tooltip=longAlert)
+    strategy.exit("FVG Long Exit", from_entry="FVG Long", stop=orderLongStop, limit=orderLongTarget, alert_message="EXIT FVG LONG stop/target")
+    label.new(bar_index, low, "FVG LONG " + orderLongGrade, style=label.style_label_up, color=color.new(#00C853, 0), textcolor=color.black, size=size.small, tooltip=longAlert)
 
 if shortSignal
     tradesToday += 1
     lastTradeBar := bar_index
     strategy.entry("FVG Short", strategy.short, qty=contracts, alert_message=shortAlert)
-    strategy.exit("FVG Short Exit", from_entry="FVG Short", stop=candidateShortStop, limit=candidateShortTarget, alert_message="EXIT FVG SHORT stop/target")
-    label.new(bar_index, high, "FVG SHORT " + candidateShortGrade, style=label.style_label_down, color=color.new(#FF1744, 0), textcolor=color.white, size=size.small, tooltip=shortAlert)
+    strategy.exit("FVG Short Exit", from_entry="FVG Short", stop=orderShortStop, limit=orderShortTarget, alert_message="EXIT FVG SHORT stop/target")
+    label.new(bar_index, high, "FVG SHORT " + orderShortGrade, style=label.style_label_down, color=color.new(#FF1744, 0), textcolor=color.white, size=size.small, tooltip=shortAlert)
 
 plotshape(bullGap, title="Bullish FVG Detected", style=shape.triangleup, location=location.belowbar, color=color.new(#00C853, 40), size=size.tiny, text="FVG")
 plotshape(bearGap, title="Bearish FVG Detected", style=shape.triangledown, location=location.abovebar, color=color.new(#FF1744, 40), size=size.tiny, text="FVG")

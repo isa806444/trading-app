@@ -21,6 +21,7 @@ var string GRP_DISP = "Display"
 // ---------------- Strategy Inputs ----------------
 tradeQty = input.int(1, "Contracts / Paper Size", minval=1, maxval=10, group=GRP_STRAT)
 strategyMode = input.string("Divergence + Composite Cross", "Entry Mode", options=["Divergence Only", "Composite Cross", "Divergence + Composite Cross", "Band Reversion"], group=GRP_STRAT)
+strategyOrderSource = input.string("CMC + Live Signal Bot", "Strategy Report Orders", options=["CMC Signals Only", "Live Signal Bot Only", "CMC + Live Signal Bot"], group=GRP_STRAT)
 useNoRepaint = input.bool(true, "Strict No-Repaint", group=GRP_STRAT)
 useSessionFilter = input.bool(true, "RTH Only", group=GRP_STRAT)
 tradeSession = input.session("0930-1600", "Trading Session", group=GRP_STRAT)
@@ -259,14 +260,18 @@ liveSellTrigger = useLiveSignalBot and ta.change(liveDir) > 0
 modeUsesDiv = strategyMode == "Divergence Only" or strategyMode == "Divergence + Composite Cross"
 modeUsesCross = strategyMode == "Composite Cross" or strategyMode == "Divergence + Composite Cross"
 modeUsesBand = strategyMode == "Band Reversion"
+useCmcStrategyOrders = strategyOrderSource == "CMC Signals Only" or strategyOrderSource == "CMC + Live Signal Bot"
+useLiveStrategyOrders = strategyOrderSource == "Live Signal Bot Only" or strategyOrderSource == "CMC + Live Signal Bot"
 
-longSignalRaw = (modeUsesDiv and bullDiv) or (modeUsesCross and compositeLongCross) or (modeUsesBand and bandReversionLong)
-shortSignalRaw = (modeUsesDiv and bearDiv) or (modeUsesCross and compositeShortCross) or (modeUsesBand and bandReversionShort)
-longSignal = baseGate and longSignalRaw and not shortSignalRaw
-shortSignal = baseGate and shortSignalRaw and not longSignalRaw
+cmcLongSignalRaw = (modeUsesDiv and bullDiv) or (modeUsesCross and compositeLongCross) or (modeUsesBand and bandReversionLong)
+cmcShortSignalRaw = (modeUsesDiv and bearDiv) or (modeUsesCross and compositeShortCross) or (modeUsesBand and bandReversionShort)
+orderLongRaw = (useCmcStrategyOrders and cmcLongSignalRaw) or (useLiveStrategyOrders and liveBuyTrigger)
+orderShortRaw = (useCmcStrategyOrders and cmcShortSignalRaw) or (useLiveStrategyOrders and liveSellTrigger)
+longSignal = baseGate and orderLongRaw and not orderShortRaw
+shortSignal = baseGate and orderShortRaw and not orderLongRaw
 
-longSetup = bullDiv ? "CMC Bull Divergence" : bandReversionLong ? "CMC Band Reversion Long" : "CMC Composite Cross Long"
-shortSetup = bearDiv ? "CMC Bear Divergence" : bandReversionShort ? "CMC Band Reversion Short" : "CMC Composite Cross Short"
+longSetup = useLiveStrategyOrders and liveBuyTrigger ? "Live Supertrend Buy" : bullDiv ? "CMC Bull Divergence" : bandReversionLong ? "CMC Band Reversion Long" : "CMC Composite Cross Long"
+shortSetup = useLiveStrategyOrders and liveSellTrigger ? "Live Supertrend Sell" : bearDiv ? "CMC Bear Divergence" : bandReversionShort ? "CMC Band Reversion Short" : "CMC Composite Cross Short"
 riskPoints = math.max(atr * stopAtrMult, syminfo.mintick * 4.0)
 longStop = close - riskPoints
 longTarget = close + riskPoints * targetR
@@ -303,8 +308,8 @@ if strategy.position_size < 0 and not na(activeStop) and not na(activeTarget)
     strategy.exit("CMC Short Risk", from_entry="CMC Short", stop=activeStop, limit=activeTarget, alert_message=exitShortMessage)
 
 barsInTrade = strategy.position_size != 0 and not na(activeEntryBar) ? bar_index - activeEntryBar : 0
-longSmartExit = useSmartExit and strategy.position_size > 0 and barsInTrade >= minBarsBeforeSmartExit and (bearDiv or ta.crossunder(composite, bandMean) or barsInTrade >= maxBarsInTrade)
-shortSmartExit = useSmartExit and strategy.position_size < 0 and barsInTrade >= minBarsBeforeSmartExit and (bullDiv or ta.crossover(composite, bandMean) or barsInTrade >= maxBarsInTrade)
+longSmartExit = useSmartExit and strategy.position_size > 0 and barsInTrade >= minBarsBeforeSmartExit and (bearDiv or liveSellTrigger or ta.crossunder(composite, bandMean) or barsInTrade >= maxBarsInTrade)
+shortSmartExit = useSmartExit and strategy.position_size < 0 and barsInTrade >= minBarsBeforeSmartExit and (bullDiv or liveBuyTrigger or ta.crossover(composite, bandMean) or barsInTrade >= maxBarsInTrade)
 
 if longSmartExit
     strategy.close("CMC Long", alert_message=exitLongMessage)

@@ -10,6 +10,7 @@ tradeQty = input.int(1, "Contracts / Paper Size", minval=1, maxval=10)
 useNoRepaint = input.bool(true, "Strict No-Repaint")
 useSessionFilter = input.bool(true, "RTH Only")
 tradeSession = input.session("0930-1600", "Trading Session")
+requiredStrategyTimeframe = input.timeframe("1", "Required Strategy Chart TF")
 openingRangeMinutes = input.int(15, "Opening Range Minutes", minval=5, maxval=60)
 
 minScore = input.float(72, "Minimum Setup Score", minval=40, maxval=100, step=1)
@@ -81,6 +82,7 @@ doji(o, c, h, l) =>
 
 // ---------------- Core Data ----------------
 confirmedOk = not useNoRepaint or barstate.isconfirmed
+timeframeOk = timeframe.period == requiredStrategyTimeframe
 inSession = not useSessionFilter or not na(time(timeframe.period, tradeSession))
 nyHour = hour(time, "America/New_York")
 nyMinute = minute(time, "America/New_York")
@@ -286,7 +288,7 @@ rewardOkShort = (close - shortTarget) / shortRisk >= minRewardR or powerTrendSho
 
 var int lastSignalBar = na
 cooldownOk = na(lastSignalBar) or bar_index - lastSignalBar > cooldownBars
-baseGate = confirmedOk and inSession and cooldownOk and chopScore <= maxChop and strategy.position_size == 0
+baseGate = confirmedOk and timeframeOk and inSession and cooldownOk and chopScore <= maxChop and strategy.position_size == 0
 longSignal = baseGate and longScore >= minScore and edge >= minEdge and locationLong and kamaOkLong and not doNotChaseLong and rewardOkLong
 shortSignal = baseGate and shortScore >= minScore and edge <= -minEdge and locationShort and kamaOkShort and not doNotChaseShort and rewardOkShort
 longAlert = "LONG " + syminfo.ticker + " | Setup: " + longSetup + " | Entry: " + str.tostring(close, format.mintick) + " | Stop: " + str.tostring(longStop, format.mintick) + " | Take Profit: " + str.tostring(longTarget, format.mintick) + " | Score: " + str.tostring(longScore, "#") + " | Edge: " + str.tostring(edge, "#") + " | Reason: " + longReason
@@ -297,7 +299,7 @@ shortTooltip = "Setup: " + shortSetup + "\nEntry: " + str.tostring(close, format
 var int lastOpportunityBar = na
 reportWatchTrades = strategyReportMode == "Clean + Watch Boxes"
 opportunityCooldownOk = na(lastOpportunityBar) or bar_index - lastOpportunityBar > opportunityCooldownBars
-watchBase = showSmartOpportunities and confirmedOk and inSession and opportunityCooldownOk and strategy.position_size == 0 and chopScore <= maxChop + 8 and cooldownOk
+watchBase = showSmartOpportunities and confirmedOk and timeframeOk and inSession and opportunityCooldownOk and strategy.position_size == 0 and chopScore <= maxChop + 8 and cooldownOk
 watchLongCandidate = watchBase and not longSignal and locationLong and kamaOkLong and not doNotChaseLong and rewardOkLong and longScore >= minScore - opportunityScoreBuffer and edge >= minEdge - opportunityEdgeBuffer and longScore > shortScore
 watchShortCandidate = watchBase and not shortSignal and locationShort and kamaOkShort and not doNotChaseShort and rewardOkShort and shortScore >= minScore - opportunityScoreBuffer and edge <= -minEdge + opportunityEdgeBuffer and shortScore > longScore
 longTradeSignal = longSignal or (reportWatchTrades and watchLongCandidate)
@@ -486,12 +488,12 @@ alertcondition(strategy.position_size > 0 and close < activeStop, title="Long St
 alertcondition(strategy.position_size < 0 and close > activeStop, title="Short Stop Area", message="SHORT stop area touched.")
 
 // ---------------- Dashboard ----------------
-status = not inSession ? "Outside session" : chopScore > maxChop ? "Chop / wait" : longScore > shortScore ? "Long watch" : shortScore > longScore ? "Short watch" : "Neutral"
+status = not timeframeOk ? "Switch chart to 1m" : not inSession ? "Outside session" : chopScore > maxChop ? "Chop / wait" : longScore > shortScore ? "Long watch" : shortScore > longScore ? "Short watch" : "Neutral"
 bestSetup = longScore >= shortScore ? longSetup : shortSetup
-var table dash = table.new(position.top_right, 2, 9, bgcolor=color.new(color.black, 12), border_color=color.new(color.white, 72), border_width=1)
+var table dash = table.new(position.top_right, 2, 10, bgcolor=color.new(color.black, 12), border_color=color.new(color.white, 72), border_width=1)
 if showDashboard and barstate.islast
     table.cell(dash, 0, 0, "Setup Radar", text_color=color.white, bgcolor=color.new(color.teal, 55))
-    table.cell(dash, 1, 0, status, text_color=chopScore <= maxChop ? color.lime : color.orange, bgcolor=color.new(color.teal, 55))
+    table.cell(dash, 1, 0, status, text_color=timeframeOk and chopScore <= maxChop ? color.lime : color.orange, bgcolor=color.new(color.teal, 55))
     table.cell(dash, 0, 1, "Best Setup", text_color=color.silver)
     table.cell(dash, 1, 1, bestSetup, text_color=longScore >= shortScore ? color.lime : color.orange)
     table.cell(dash, 0, 2, "Scores L/S", text_color=color.silver)
@@ -508,3 +510,5 @@ if showDashboard and barstate.islast
     table.cell(dash, 1, 7, str.tostring(trapLongScore, "#") + " / " + str.tostring(trapShortScore, "#"), text_color=trapLongScore >= trapShortScore ? color.lime : color.orange)
     table.cell(dash, 0, 8, "Risk Lines", text_color=color.silver)
     table.cell(dash, 1, 8, strategy.position_size == 0 ? "Waiting" : "Active", text_color=strategy.position_size == 0 ? color.silver : color.lime)
+    table.cell(dash, 0, 9, "Chart TF", text_color=color.silver)
+    table.cell(dash, 1, 9, timeframe.period + " / needs " + requiredStrategyTimeframe, text_color=timeframeOk ? color.lime : color.orange)

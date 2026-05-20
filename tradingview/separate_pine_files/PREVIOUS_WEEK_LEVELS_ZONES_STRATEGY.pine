@@ -1,0 +1,313 @@
+//@version=6
+//@strategy_alert_message {{strategy.order.alert_message}}
+strategy("Previous Week Levels + Zones Strategy", overlay=true, initial_capital=100000, default_qty_type=strategy.fixed, default_qty_value=1, pyramiding=0, process_orders_on_close=false, calc_on_every_tick=true, calc_on_order_fills=true, commission_type=strategy.commission.cash_per_contract, commission_value=4.0, slippage=2, max_lines_count=500, max_labels_count=500, max_boxes_count=500)
+
+// Standalone strategy version of Previous Week Levels + Zones.
+// It draws previous week/day levels and trades confirmed bounces/reclaims from valid zones.
+
+// ---------------- Inputs ----------------
+contracts = input.int(1, "Contracts", minval=1, maxval=20, group="Strategy")
+useNoRepaint = input.bool(true, "Strict No-Repaint", group="Strategy")
+useSessionFilter = input.bool(true, "Use Trading Session", group="Strategy")
+tradeSession = input.session("0930-1100", "Valid Entry Session", group="Strategy")
+sessionTimezone = input.string("America/New_York", "Session Timezone", group="Strategy")
+maxTradesPerDay = input.int(3, "Max Trades Per Day", minval=1, maxval=20, group="Strategy")
+cooldownBars = input.int(8, "Cooldown Bars", minval=0, maxval=100, group="Strategy")
+
+showPWH = input.bool(true, "Show Previous Week High", inline="pwh", group="Levels")
+pwhColor = input.color(color.new(color.red, 20), "", inline="pwh", group="Levels")
+showPWL = input.bool(true, "Show Previous Week Low", inline="pwl", group="Levels")
+pwlColor = input.color(color.new(color.green, 20), "", inline="pwl", group="Levels")
+showPWO = input.bool(true, "Show Previous Week Open", inline="pwo", group="Levels")
+pwoColor = input.color(color.new(color.orange, 20), "", inline="pwo", group="Levels")
+showPWC = input.bool(true, "Show Previous Week Close", inline="pwc", group="Levels")
+pwcColor = input.color(color.new(color.purple, 20), "", inline="pwc", group="Levels")
+showPDH = input.bool(true, "Show Previous Day High", inline="pdh", group="Levels")
+pdhColor = input.color(color.new(color.red, 40), "", inline="pdh", group="Levels")
+showPDL = input.bool(true, "Show Previous Day Low", inline="pdl", group="Levels")
+pdlColor = input.color(color.new(color.green, 40), "", inline="pdl", group="Levels")
+
+weeksToShow = input.int(3, "Weeks Of History", minval=1, maxval=52, group="Style")
+lineWidth = input.int(3, "Line Width", minval=1, maxval=4, group="Style")
+lineStyle = input.string("Dashed", "Line Style", options=["Solid", "Dashed", "Dotted"], group="Style")
+showLabels = input.bool(true, "Show Price Labels", group="Style")
+labelOffset = input.int(5, "Label Offset Bars", minval=0, maxval=50, group="Style")
+fadeOlder = input.bool(true, "Fade Older Weeks", group="Style")
+
+showZones = input.bool(true, "Show Zones", group="Zones")
+targetRatio = input.float(1.5, "Minimum R:R Ratio", minval=0.5, maxval=10.0, step=0.25, group="Zones")
+atrPeriod = input.int(14, "ATR Period", minval=1, maxval=200, group="Zones")
+zoneAtr = input.float(0.12, "Zone Width ATR", minval=0.02, maxval=1.0, step=0.01, group="Zones")
+stopAtr = input.float(0.45, "Stop Buffer ATR", minval=0.05, maxval=3.0, step=0.05, group="Zones")
+fallbackTargetR = input.float(2.0, "Fallback Target R", minval=0.5, maxval=8.0, step=0.25, group="Zones")
+longZoneColor = input.color(color.new(color.green, 84), "Long Zone Color", group="Zones")
+shortZoneColor = input.color(color.new(color.red, 84), "Short Zone Color", group="Zones")
+
+showCutoff = input.bool(true, "Show Cutoff Line", group="Cutoff")
+cutoffHour = input.int(11, "Cutoff Hour", minval=0, maxval=23, group="Cutoff")
+cutoffMinute = input.int(0, "Cutoff Minute", minval=0, maxval=59, group="Cutoff")
+cutoffColor = input.color(color.new(color.yellow, 20), "Cutoff Line Color", group="Cutoff")
+cutoffText = input.string("No Entries Beyond This Point", "Cutoff Label Text", group="Cutoff")
+
+// ---------------- Helpers ----------------
+lstyle = switch lineStyle
+    "Solid" => line.style_solid
+    "Dotted" => line.style_dotted
+    => line.style_dashed
+
+cleanupLines(array<line> arr, int maxSize) =>
+    while array.size(arr) > maxSize
+        line.delete(array.shift(arr))
+
+cleanupLabels(array<label> arr, int maxSize) =>
+    while array.size(arr) > maxSize
+        label.delete(array.shift(arr))
+
+weekTag(int age) =>
+    age == 0 ? "W0" : "W-" + str.tostring(age)
+
+addLevel(array<float> arr, bool enabled, float value) =>
+    if enabled and not na(value)
+        array.push(arr, value)
+
+// ---------------- Higher-Timeframe Levels ----------------
+[pwHigh, pwLow, pwOpen, pwClose] = request.security(syminfo.tickerid, "W", [high[1], low[1], open[1], close[1]], barmerge.gaps_off, barmerge.lookahead_off)
+[pdHigh, pdLow] = request.security(syminfo.tickerid, "D", [high[1], low[1]], barmerge.gaps_off, barmerge.lookahead_off)
+
+newWeek = ta.change(time("W")) != 0
+newDay = ta.change(time("D")) != 0
+atrValue = ta.atr(atrPeriod)
+zoneWidth = math.max(atrValue * zoneAtr, syminfo.mintick * 8)
+stopBuffer = math.max(atrValue * stopAtr, syminfo.mintick * 8)
+
+// ---------------- Draw Weekly / Daily Levels ----------------
+var array<line> pwhLines = array.new_line()
+var array<line> pwlLines = array.new_line()
+var array<line> pwoLines = array.new_line()
+var array<line> pwcLines = array.new_line()
+var array<label> pwhLabels = array.new_label()
+var array<label> pwlLabels = array.new_label()
+var array<label> pwoLabels = array.new_label()
+var array<label> pwcLabels = array.new_label()
+var line pdhLine = na
+var line pdlLine = na
+var label pdhLabel = na
+var label pdlLabel = na
+
+if newWeek and not na(pwHigh)
+    if showPWH
+        array.push(pwhLines, line.new(bar_index, pwHigh, bar_index + 1, pwHigh, color=pwhColor, width=lineWidth, style=lstyle))
+        if showLabels
+            array.push(pwhLabels, label.new(bar_index + labelOffset, pwHigh, "", style=label.style_none, textcolor=pwhColor, size=size.small, textalign=text.align_left))
+    if showPWL
+        array.push(pwlLines, line.new(bar_index, pwLow, bar_index + 1, pwLow, color=pwlColor, width=lineWidth, style=lstyle))
+        if showLabels
+            array.push(pwlLabels, label.new(bar_index + labelOffset, pwLow, "", style=label.style_none, textcolor=pwlColor, size=size.small, textalign=text.align_left))
+    if showPWO
+        array.push(pwoLines, line.new(bar_index, pwOpen, bar_index + 1, pwOpen, color=pwoColor, width=lineWidth, style=lstyle))
+        if showLabels
+            array.push(pwoLabels, label.new(bar_index + labelOffset, pwOpen, "", style=label.style_none, textcolor=pwoColor, size=size.small, textalign=text.align_left))
+    if showPWC
+        array.push(pwcLines, line.new(bar_index, pwClose, bar_index + 1, pwClose, color=pwcColor, width=lineWidth, style=lstyle))
+        if showLabels
+            array.push(pwcLabels, label.new(bar_index + labelOffset, pwClose, "", style=label.style_none, textcolor=pwcColor, size=size.small, textalign=text.align_left))
+
+    cleanupLines(pwhLines, weeksToShow)
+    cleanupLines(pwlLines, weeksToShow)
+    cleanupLines(pwoLines, weeksToShow)
+    cleanupLines(pwcLines, weeksToShow)
+    cleanupLabels(pwhLabels, weeksToShow)
+    cleanupLabels(pwlLabels, weeksToShow)
+    cleanupLabels(pwoLabels, weeksToShow)
+    cleanupLabels(pwcLabels, weeksToShow)
+
+if newDay and not na(pdHigh)
+    if showPDH
+        if not na(pdhLine)
+            line.delete(pdhLine)
+        if not na(pdhLabel)
+            label.delete(pdhLabel)
+        pdhLine := line.new(bar_index, pdHigh, bar_index + 1, pdHigh, color=pdhColor, width=lineWidth, style=lstyle)
+        if showLabels
+            pdhLabel := label.new(bar_index + labelOffset, pdHigh, "", style=label.style_none, textcolor=pdhColor, size=size.small, textalign=text.align_left)
+    if showPDL
+        if not na(pdlLine)
+            line.delete(pdlLine)
+        if not na(pdlLabel)
+            label.delete(pdlLabel)
+        pdlLine := line.new(bar_index, pdLow, bar_index + 1, pdLow, color=pdlColor, width=lineWidth, style=lstyle)
+        if showLabels
+            pdlLabel := label.new(bar_index + labelOffset, pdLow, "", style=label.style_none, textcolor=pdlColor, size=size.small, textalign=text.align_left)
+
+if array.size(pwhLines) > 0
+    for i = 0 to array.size(pwhLines) - 1
+        line.set_x2(array.get(pwhLines, i), bar_index + 1)
+        if fadeOlder
+            age = array.size(pwhLines) - 1 - i
+            line.set_color(array.get(pwhLines, i), color.new(color.red, math.min(20 + age * 25, 85)))
+if array.size(pwlLines) > 0
+    for i = 0 to array.size(pwlLines) - 1
+        line.set_x2(array.get(pwlLines, i), bar_index + 1)
+        if fadeOlder
+            age = array.size(pwlLines) - 1 - i
+            line.set_color(array.get(pwlLines, i), color.new(color.green, math.min(20 + age * 25, 85)))
+if array.size(pwoLines) > 0
+    for i = 0 to array.size(pwoLines) - 1
+        line.set_x2(array.get(pwoLines, i), bar_index + 1)
+if array.size(pwcLines) > 0
+    for i = 0 to array.size(pwcLines) - 1
+        line.set_x2(array.get(pwcLines, i), bar_index + 1)
+if showPDH and not na(pdhLine)
+    line.set_x2(pdhLine, bar_index + 1)
+if showPDL and not na(pdlLine)
+    line.set_x2(pdlLine, bar_index + 1)
+
+if showLabels
+    rightX = bar_index + labelOffset
+    if showPWH and array.size(pwhLabels) > 0
+        for i = 0 to array.size(pwhLabels) - 1
+            age = array.size(pwhLabels) - 1 - i
+            price = line.get_y1(array.get(pwhLines, i))
+            label.set_x(array.get(pwhLabels, i), rightX)
+            label.set_text(array.get(pwhLabels, i), "PWH " + weekTag(age) + " " + str.tostring(price, format.mintick))
+    if showPWL and array.size(pwlLabels) > 0
+        for i = 0 to array.size(pwlLabels) - 1
+            age = array.size(pwlLabels) - 1 - i
+            price = line.get_y1(array.get(pwlLines, i))
+            label.set_x(array.get(pwlLabels, i), rightX)
+            label.set_text(array.get(pwlLabels, i), "PWL " + weekTag(age) + " " + str.tostring(price, format.mintick))
+    if showPWO and array.size(pwoLabels) > 0
+        for i = 0 to array.size(pwoLabels) - 1
+            age = array.size(pwoLabels) - 1 - i
+            price = line.get_y1(array.get(pwoLines, i))
+            label.set_x(array.get(pwoLabels, i), rightX)
+            label.set_text(array.get(pwoLabels, i), "PWO " + weekTag(age) + " " + str.tostring(price, format.mintick))
+    if showPWC and array.size(pwcLabels) > 0
+        for i = 0 to array.size(pwcLabels) - 1
+            age = array.size(pwcLabels) - 1 - i
+            price = line.get_y1(array.get(pwcLines, i))
+            label.set_x(array.get(pwcLabels, i), rightX)
+            label.set_text(array.get(pwcLabels, i), "PWC " + weekTag(age) + " " + str.tostring(price, format.mintick))
+    if showPDH and not na(pdhLabel)
+        label.set_x(pdhLabel, rightX)
+        label.set_text(pdhLabel, "PDH " + str.tostring(pdHigh, format.mintick))
+    if showPDL and not na(pdlLabel)
+        label.set_x(pdlLabel, rightX)
+        label.set_text(pdlLabel, "PDL " + str.tostring(pdLow, format.mintick))
+
+// ---------------- Zone Map ----------------
+levels = array.new_float()
+addLevel(levels, showPWH, pwHigh)
+addLevel(levels, showPWL, pwLow)
+addLevel(levels, showPWO, pwOpen)
+addLevel(levels, showPWC, pwClose)
+addLevel(levels, showPDH, pdHigh)
+addLevel(levels, showPDL, pdLow)
+array.sort(levels, order.ascending)
+
+float support = na
+float resistance = na
+float lowerTarget = na
+float upperTarget = na
+if array.size(levels) > 0
+    for i = 0 to array.size(levels) - 1
+        lvl = array.get(levels, i)
+        if lvl < close
+            lowerTarget := support
+            support := lvl
+        if lvl > close and na(resistance)
+            resistance := lvl
+        else if lvl > close and not na(resistance) and na(upperTarget)
+            upperTarget := lvl
+
+var box longZoneBox = na
+var box shortZoneBox = na
+if showZones and barstate.islast
+    if not na(longZoneBox)
+        box.delete(longZoneBox)
+    if not na(shortZoneBox)
+        box.delete(shortZoneBox)
+    if not na(support)
+        longZoneBox := box.new(bar_index - 80, support + zoneWidth, bar_index + labelOffset, support - zoneWidth, bgcolor=longZoneColor, border_color=color.new(color.green, 45))
+    if not na(resistance)
+        shortZoneBox := box.new(bar_index - 80, resistance + zoneWidth, bar_index + labelOffset, resistance - zoneWidth, bgcolor=shortZoneColor, border_color=color.new(color.red, 45))
+
+// ---------------- Strategy Logic ----------------
+confirmedOk = not useNoRepaint or barstate.isconfirmed
+inSession = not useSessionFilter or not na(time(timeframe.period, tradeSession, sessionTimezone))
+currentMinutes = hour(time, sessionTimezone) * 60 + minute(time, sessionTimezone)
+cutoffMinutes = cutoffHour * 60 + cutoffMinute
+beforeCutoff = not showCutoff or currentMinutes < cutoffMinutes
+
+var int tradesToday = 0
+var int lastTradeBar = na
+if newDay
+    tradesToday := 0
+
+body = math.abs(close - open)
+candleRange = math.max(high - low, syminfo.mintick)
+closeNearHigh = (close - low) / candleRange >= 0.58
+closeNearLow = (high - close) / candleRange >= 0.58
+longBounce = not na(support) and low <= support + zoneWidth and close > support and close > open and closeNearHigh
+shortReject = not na(resistance) and high >= resistance - zoneWidth and close < resistance and close < open and closeNearLow
+
+longStop = not na(support) ? support - stopBuffer : na
+shortStop = not na(resistance) ? resistance + stopBuffer : na
+longRisk = not na(longStop) ? close - longStop : na
+shortRisk = not na(shortStop) ? shortStop - close : na
+longTarget = not na(upperTarget) ? upperTarget : close + nz(longRisk, atrValue) * fallbackTargetR
+shortTarget = not na(lowerTarget) ? lowerTarget : close - nz(shortRisk, atrValue) * fallbackTargetR
+longRr = not na(longRisk) and longRisk > syminfo.mintick ? (longTarget - close) / longRisk : 0.0
+shortRr = not na(shortRisk) and shortRisk > syminfo.mintick ? (close - shortTarget) / shortRisk : 0.0
+
+cooldownOk = na(lastTradeBar) or bar_index - lastTradeBar > cooldownBars
+tradeCountOk = tradesToday < maxTradesPerDay
+canTrade = confirmedOk and inSession and beforeCutoff and cooldownOk and tradeCountOk and strategy.position_size == 0
+longSignal = canTrade and longBounce and longRr >= targetRatio
+shortSignal = canTrade and shortReject and shortRr >= targetRatio
+
+longAlert = "PW/PW ZONE LONG " + syminfo.ticker + " | Entry: " + str.tostring(close, format.mintick) + " | Stop: " + str.tostring(longStop, format.mintick) + " | Target: " + str.tostring(longTarget, format.mintick) + " | Reason: confirmed bounce/reclaim from previous week/day support zone."
+shortAlert = "PW/PW ZONE SHORT " + syminfo.ticker + " | Entry: " + str.tostring(close, format.mintick) + " | Stop: " + str.tostring(shortStop, format.mintick) + " | Target: " + str.tostring(shortTarget, format.mintick) + " | Reason: confirmed rejection from previous week/day resistance zone."
+
+if longSignal
+    tradesToday += 1
+    lastTradeBar := bar_index
+    strategy.entry("PW Zone Long", strategy.long, qty=contracts, alert_message=longAlert)
+    strategy.exit("PW Zone Long Exit", from_entry="PW Zone Long", stop=longStop, limit=longTarget, alert_message="EXIT PW ZONE LONG stop/target")
+    label.new(bar_index, low, "PW LONG", style=label.style_label_up, color=color.new(color.green, 0), textcolor=color.black, size=size.small, tooltip=longAlert)
+
+if shortSignal
+    tradesToday += 1
+    lastTradeBar := bar_index
+    strategy.entry("PW Zone Short", strategy.short, qty=contracts, alert_message=shortAlert)
+    strategy.exit("PW Zone Short Exit", from_entry="PW Zone Short", stop=shortStop, limit=shortTarget, alert_message="EXIT PW ZONE SHORT stop/target")
+    label.new(bar_index, high, "PW SHORT", style=label.style_label_down, color=color.new(color.red, 0), textcolor=color.white, size=size.small, tooltip=shortAlert)
+
+if showCutoff and hour(time, sessionTimezone) == cutoffHour and minute(time, sessionTimezone) == cutoffMinute
+    line.new(bar_index, high, bar_index, low, color=cutoffColor, width=2, style=line.style_dotted, extend=extend.both)
+    label.new(bar_index, high, cutoffText, style=label.style_none, textcolor=cutoffColor, size=size.normal, yloc=yloc.abovebar)
+
+plotshape(longSignal, title="Previous Levels Long", style=shape.labelup, location=location.belowbar, color=color.new(color.green, 0), text="PW LONG", textcolor=color.black, size=size.small)
+plotshape(shortSignal, title="Previous Levels Short", style=shape.labeldown, location=location.abovebar, color=color.new(color.red, 0), text="PW SHORT", textcolor=color.white, size=size.small)
+
+alertcondition(longSignal, title="Previous Week/Day Zone Long", message="Previous week/day zone long fired. Use Any alert() function call or {{strategy.order.alert_message}}.")
+alertcondition(shortSignal, title="Previous Week/Day Zone Short", message="Previous week/day zone short fired. Use Any alert() function call or {{strategy.order.alert_message}}.")
+
+// ---------------- Dashboard ----------------
+var table dash = table.new(position.top_right, 2, 7, bgcolor=color.new(color.black, 15), border_color=color.new(color.white, 72), border_width=1)
+if barstate.islast
+    status = not inSession ? "Session wait" : not beforeCutoff ? "Cutoff" : longSignal ? "Long fired" : shortSignal ? "Short fired" : "Scanning"
+    table.cell(dash, 0, 0, "Prev Levels", text_color=color.white, bgcolor=color.new(color.teal, 55))
+    table.cell(dash, 1, 0, status, text_color=color.white, bgcolor=color.new(color.teal, 55))
+    table.cell(dash, 0, 1, "Support", text_color=color.silver)
+    table.cell(dash, 1, 1, na(support) ? "None" : str.tostring(support, format.mintick), text_color=color.lime)
+    table.cell(dash, 0, 2, "Resistance", text_color=color.silver)
+    table.cell(dash, 1, 2, na(resistance) ? "None" : str.tostring(resistance, format.mintick), text_color=color.orange)
+    table.cell(dash, 0, 3, "Long R:R", text_color=color.silver)
+    table.cell(dash, 1, 3, str.tostring(longRr, "#.##"), text_color=longRr >= targetRatio ? color.lime : color.silver)
+    table.cell(dash, 0, 4, "Short R:R", text_color=color.silver)
+    table.cell(dash, 1, 4, str.tostring(shortRr, "#.##"), text_color=shortRr >= targetRatio ? color.lime : color.silver)
+    table.cell(dash, 0, 5, "Trades", text_color=color.silver)
+    table.cell(dash, 1, 5, str.tostring(tradesToday) + "/" + str.tostring(maxTradesPerDay), text_color=tradeCountOk ? color.white : color.orange)
+    table.cell(dash, 0, 6, "Cutoff", text_color=color.silver)
+    table.cell(dash, 1, 6, beforeCutoff ? "Open" : "Closed", text_color=beforeCutoff ? color.lime : color.orange)

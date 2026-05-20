@@ -1,0 +1,424 @@
+//@version=6
+//@strategy_alert_message {{strategy.order.alert_message}}
+strategy("FVG Quality Grading Strategy", overlay=true, initial_capital=100000, default_qty_type=strategy.fixed, default_qty_value=1, pyramiding=0, process_orders_on_close=false, calc_on_every_tick=true, calc_on_order_fills=true, commission_type=strategy.commission.cash_per_contract, commission_value=4.0, slippage=2, max_boxes_count=500, max_labels_count=500, max_lines_count=500)
+
+// Standalone strategy version of FVG Quality Grading.
+// It grades fair value gaps, draws active zones, and trades confirmed retests of high-quality FVGs.
+
+// ---------------- Inputs ----------------
+contracts = input.int(1, "Contracts", minval=1, maxval=20, group="Strategy")
+useNoRepaint = input.bool(true, "Strict No-Repaint", group="Strategy")
+useSessionFilter = input.bool(true, "Use Trading Session", group="Strategy")
+tradeSession = input.session("0930-1600", "Valid Entry Session", group="Strategy")
+sessionTimezone = input.string("America/New_York", "Session Timezone", group="Strategy")
+maxTradesPerDay = input.int(5, "Max Trades Per Day", minval=1, maxval=30, group="Strategy")
+cooldownBars = input.int(5, "Cooldown Bars", minval=0, maxval=100, group="Strategy")
+minTradeScore = input.float(55.0, "Minimum Trade Score", minval=0.0, maxval=100.0, step=1.0, group="Strategy")
+targetR = input.float(2.0, "Take Profit R", minval=0.5, maxval=8.0, step=0.25, group="Strategy")
+stopBufferAtr = input.float(0.10, "Stop Buffer ATR", minval=0.0, maxval=2.0, step=0.05, group="Strategy")
+
+grp1 = "Detection"
+atrLen = input.int(14, "ATR Length", minval=5, maxval=50, group=grp1)
+volLen = input.int(20, "Volume Lookback", minval=10, maxval=100, group=grp1)
+minGapATR = input.float(0.1, "Min Gap Width x ATR", minval=0.01, step=0.05, group=grp1)
+maxFVGs = input.int(20, "Max Active FVGs", minval=5, maxval=50, group=grp1)
+
+grp2 = "Scoring Weights"
+wDisplacement = input.float(30.0, "Displacement Weight", minval=0, maxval=100, group=grp2)
+wVolume = input.float(25.0, "Volume Weight", minval=0, maxval=100, group=grp2)
+wGapWidth = input.float(20.0, "Gap Width Weight", minval=0, maxval=100, group=grp2)
+wAge = input.float(15.0, "Age Decay Weight", minval=0, maxval=100, group=grp2)
+wTouches = input.float(10.0, "Touch Penalty Weight", minval=0, maxval=100, group=grp2)
+
+grp3 = "Age & Touch Parameters"
+ageBars = input.int(200, "Full Decay Bars", minval=50, maxval=1000, group=grp3)
+ceThreshold = input.float(0.5, "CE Defense Threshold", minval=0.1, maxval=0.9, step=0.05, group=grp3)
+maxTouches = input.int(3, "Max Touches Before Kill", minval=1, maxval=10, group=grp3)
+sweptLookback = input.int(200, "Historical Zone Bars", minval=50, maxval=1000, group=grp3)
+touchBuffer = input.float(0.25, "Touch Detection Buffer Pts", minval=0, step=0.25, group=grp3)
+
+grp4 = "Display"
+minGrade = input.string("C", "Minimum Grade To Show", options=["A+", "A", "B", "C", "D"], group=grp4)
+showMidline = input.bool(true, "Show CE 50% Line", group=grp4)
+showScoreLabel = input.bool(true, "Show Score Label", group=grp4)
+showTable = input.bool(true, "Show Summary Table", group=grp4)
+showDashboard = input.bool(true, "Show Strategy Dashboard", group=grp4)
+bullColorA = input.color(color.new(#00C853, 60), "Bull A+/A", group=grp4)
+bullColorB = input.color(color.new(#00C853, 75), "Bull B/C", group=grp4)
+bearColorA = input.color(color.new(#FF1744, 60), "Bear A+/A", group=grp4)
+bearColorB = input.color(color.new(#FF1744, 75), "Bear B/C", group=grp4)
+
+// ---------------- Types ----------------
+type FVG
+    bool isBull
+    float top
+    float bot
+    float ce
+    float gapWidth
+    float dispRatio
+    float dispATR
+    float volPctile
+    int birthBar
+    int touches
+    int lastTouchBar
+    bool ceBreached
+    bool killed
+    int sweptBar
+    float score
+    string grade
+    box fvgBox
+    line ceLine
+    label gradeLbl
+
+// ---------------- State ----------------
+var array<FVG> fvgs = array.new<FVG>()
+atrVal = ta.atr(atrLen)
+confirmedOk = not useNoRepaint or barstate.isconfirmed
+inSession = not useSessionFilter or not na(time(timeframe.period, tradeSession, sessionTimezone))
+newDay = ta.change(time("D")) != 0
+
+// ---------------- Helpers ----------------
+volRank(int lookback) =>
+    float rank = 0.0
+    if lookback > 0 and not na(volume)
+        int count = 0
+        for k = 1 to lookback
+            if not na(volume[k]) and volume > volume[k]
+                count += 1
+        rank := count / lookback * 100.0
+    rank
+
+scoreToGrade(float s) =>
+    string g = "D"
+    if s >= 85
+        g := "A+"
+    else if s >= 70
+        g := "A"
+    else if s >= 55
+        g := "B"
+    else if s >= 40
+        g := "C"
+    g
+
+gradeToMin(string g) =>
+    float m = 0.0
+    if g == "A+"
+        m := 85.0
+    else if g == "A"
+        m := 70.0
+    else if g == "B"
+        m := 55.0
+    else if g == "C"
+        m := 40.0
+    m
+
+calcScore(float _dispRatio, float _dispATR, float _volPctile, float _gapATR, int _age, int _touches) =>
+    float totalW = wDisplacement + wVolume + wGapWidth + wAge + wTouches
+    float nD = totalW > 0 ? wDisplacement / totalW : 0.2
+    float nV = totalW > 0 ? wVolume / totalW : 0.2
+    float nG = totalW > 0 ? wGapWidth / totalW : 0.2
+    float nA = totalW > 0 ? wAge / totalW : 0.2
+    float nT = totalW > 0 ? wTouches / totalW : 0.2
+    float dispScore = math.min(_dispRatio * 100.0 + math.min(_dispATR / 2.0, 1.0) * 30.0, 100.0)
+    float volScore = math.min(_volPctile, 100.0)
+    float gapScore = math.min(_gapATR / 1.5 * 100.0, 100.0)
+    float ageScore = math.max(100.0 - (_age / ageBars * 100.0), 0.0)
+    float touchScore = math.max(100.0 - (_touches * (100.0 / maxTouches)), 0.0)
+    float composite = dispScore * nD + volScore * nV + gapScore * nG + ageScore * nA + touchScore * nT
+    math.round(math.min(composite, 100.0), 1)
+
+minScoreFilter = gradeToMin(minGrade)
+
+// ---------------- FVG Detection ----------------
+bullGap = low > high[2] and (low - high[2]) > minGapATR * atrVal
+bearGap = high < low[2] and (low[2] - high) > minGapATR * atrVal
+
+if bullGap
+    float gapTop = low
+    float gapBot = high[2]
+    float gapW = gapTop - gapBot
+    float midCE = gapBot + gapW * ceThreshold
+    float dispBody = math.abs(close[1] - open[1])
+    float dispRange = math.max(high[1] - low[1], syminfo.mintick)
+    float bodyRatio = dispBody / dispRange
+    float bodyATR = atrVal > 0 ? dispBody / atrVal : 0.0
+    float vPct = volRank(volLen)
+    float gapATR = atrVal > 0 ? gapW / atrVal : 0.0
+    float sc = calcScore(bodyRatio, bodyATR, vPct, gapATR, 0, 0)
+    string gr = scoreToGrade(sc)
+    if sc >= minScoreFilter
+        FVG newFVG = FVG.new()
+        newFVG.isBull := true
+        newFVG.top := gapTop
+        newFVG.bot := gapBot
+        newFVG.ce := midCE
+        newFVG.gapWidth := gapW
+        newFVG.dispRatio := bodyRatio
+        newFVG.dispATR := bodyATR
+        newFVG.volPctile := vPct
+        newFVG.birthBar := bar_index - 1
+        newFVG.touches := 0
+        newFVG.lastTouchBar := na
+        newFVG.ceBreached := false
+        newFVG.killed := false
+        newFVG.sweptBar := 0
+        newFVG.score := sc
+        newFVG.grade := gr
+        color boxCol = sc >= 70 ? bullColorA : bullColorB
+        newFVG.fvgBox := box.new(bar_index - 2, gapTop, bar_index, gapBot, border_color=color.new(#00C853, 50), bgcolor=boxCol, border_width=1)
+        newFVG.ceLine := showMidline ? line.new(bar_index - 2, midCE, bar_index, midCE, color=color.new(#00C853, 50), style=line.style_dotted, width=1) : na
+        newFVG.gradeLbl := showScoreLabel ? label.new(bar_index, midCE, " " + gr + " (" + str.tostring(sc, "#.0") + ")", style=label.style_none, textcolor=color.new(#00C853, 20), size=size.tiny, textalign=text.align_left) : na
+        array.push(fvgs, newFVG)
+
+if bearGap
+    float gapTop = low[2]
+    float gapBot = high
+    float gapW = gapTop - gapBot
+    float midCE = gapBot + gapW * (1.0 - ceThreshold)
+    float dispBody = math.abs(close[1] - open[1])
+    float dispRange = math.max(high[1] - low[1], syminfo.mintick)
+    float bodyRatio = dispBody / dispRange
+    float bodyATR = atrVal > 0 ? dispBody / atrVal : 0.0
+    float vPct = volRank(volLen)
+    float gapATR = atrVal > 0 ? gapW / atrVal : 0.0
+    float sc = calcScore(bodyRatio, bodyATR, vPct, gapATR, 0, 0)
+    string gr = scoreToGrade(sc)
+    if sc >= minScoreFilter
+        FVG newFVG = FVG.new()
+        newFVG.isBull := false
+        newFVG.top := gapTop
+        newFVG.bot := gapBot
+        newFVG.ce := midCE
+        newFVG.gapWidth := gapW
+        newFVG.dispRatio := bodyRatio
+        newFVG.dispATR := bodyATR
+        newFVG.volPctile := vPct
+        newFVG.birthBar := bar_index - 1
+        newFVG.touches := 0
+        newFVG.lastTouchBar := na
+        newFVG.ceBreached := false
+        newFVG.killed := false
+        newFVG.sweptBar := 0
+        newFVG.score := sc
+        newFVG.grade := gr
+        color boxCol = sc >= 70 ? bearColorA : bearColorB
+        newFVG.fvgBox := box.new(bar_index - 2, gapTop, bar_index, gapBot, border_color=color.new(#FF1744, 50), bgcolor=boxCol, border_width=1)
+        newFVG.ceLine := showMidline ? line.new(bar_index - 2, midCE, bar_index, midCE, color=color.new(#FF1744, 50), style=line.style_dotted, width=1) : na
+        newFVG.gradeLbl := showScoreLabel ? label.new(bar_index, midCE, " " + gr + " (" + str.tostring(sc, "#.0") + ")", style=label.style_none, textcolor=color.new(#FF1744, 20), size=size.tiny, textalign=text.align_left) : na
+        array.push(fvgs, newFVG)
+
+// ---------------- Active FVG Updates + Trade Candidates ----------------
+var int tradesToday = 0
+var int lastTradeBar = na
+if newDay
+    tradesToday := 0
+
+float candidateLongStop = na
+float candidateLongTarget = na
+float candidateShortStop = na
+float candidateShortTarget = na
+float candidateLongScore = na
+float candidateShortScore = na
+string candidateLongGrade = ""
+string candidateShortGrade = ""
+bool longCandidate = false
+bool shortCandidate = false
+
+if array.size(fvgs) > 0
+    int i = array.size(fvgs) - 1
+    while i >= 0
+        FVG f = array.get(fvgs, i)
+        if not f.killed
+            int age = bar_index - f.birthBar
+            box.set_right(f.fvgBox, bar_index)
+            if showMidline and not na(f.ceLine)
+                line.set_x2(f.ceLine, bar_index)
+
+            bool touched = f.isBull ? low < (f.top - touchBuffer) and low >= f.bot : high > (f.bot + touchBuffer) and high <= f.top
+            if touched and (na(f.lastTouchBar) or bar_index - f.lastTouchBar > 1)
+                f.touches += 1
+                f.lastTouchBar := bar_index
+
+            if not f.ceBreached
+                if f.isBull and low < f.ce
+                    f.ceBreached := true
+                if not f.isBull and high > f.ce
+                    f.ceBreached := true
+
+            float newScore = calcScore(f.dispRatio, f.dispATR, f.volPctile, atrVal > 0 ? f.gapWidth / atrVal : 0.0, age, f.touches)
+            if f.ceBreached
+                newScore := math.max(newScore - 15.0, 0.0)
+            f.score := newScore
+            f.grade := scoreToGrade(newScore)
+
+            color updatedCol = f.isBull ? (newScore >= 70 ? bullColorA : bullColorB) : (newScore >= 70 ? bearColorA : bearColorB)
+            box.set_bgcolor(f.fvgBox, updatedCol)
+            if showScoreLabel and not na(f.gradeLbl)
+                label.set_text(f.gradeLbl, " " + f.grade + " (" + str.tostring(newScore, "#.0") + ")")
+                label.set_x(f.gradeLbl, bar_index)
+                label.set_y(f.gradeLbl, f.ce)
+
+            bool killIt = false
+            if f.isBull and low < f.bot
+                killIt := true
+            if not f.isBull and high > f.top
+                killIt := true
+            if f.touches >= maxTouches
+                killIt := true
+
+            if not killIt and f.score >= minTradeScore and strategy.position_size == 0
+                bool bullRetest = f.isBull and touched and close > f.ce and close > open
+                bool bearRetest = not f.isBull and touched and close < f.ce and close < open
+                if bullRetest and not longCandidate
+                    float riskLong = close - (f.bot - atrVal * stopBufferAtr)
+                    candidateLongStop := f.bot - atrVal * stopBufferAtr
+                    candidateLongTarget := close + riskLong * targetR
+                    candidateLongScore := f.score
+                    candidateLongGrade := f.grade
+                    longCandidate := riskLong > syminfo.mintick
+                if bearRetest and not shortCandidate
+                    float riskShort = (f.top + atrVal * stopBufferAtr) - close
+                    candidateShortStop := f.top + atrVal * stopBufferAtr
+                    candidateShortTarget := close - riskShort * targetR
+                    candidateShortScore := f.score
+                    candidateShortGrade := f.grade
+                    shortCandidate := riskShort > syminfo.mintick
+
+            if killIt
+                f.killed := true
+                f.sweptBar := bar_index
+                box.set_right(f.fvgBox, bar_index)
+                box.set_border_style(f.fvgBox, line.style_dotted)
+                box.set_bgcolor(f.fvgBox, f.isBull ? color.new(#00C853, 92) : color.new(#FF1744, 92))
+                box.set_border_color(f.fvgBox, f.isBull ? color.new(#00C853, 85) : color.new(#FF1744, 85))
+                if showMidline and not na(f.ceLine)
+                    line.set_color(f.ceLine, color.new(color.gray, 80))
+                if showScoreLabel and not na(f.gradeLbl)
+                    label.set_textcolor(f.gradeLbl, color.new(color.gray, 60))
+
+        if f.killed and (bar_index - f.sweptBar) > sweptLookback
+            box.delete(f.fvgBox)
+            if not na(f.ceLine)
+                line.delete(f.ceLine)
+            if not na(f.gradeLbl)
+                label.delete(f.gradeLbl)
+            array.remove(fvgs, i)
+        else
+            array.set(fvgs, i, f)
+        i -= 1
+
+while array.size(fvgs) > maxFVGs * 4
+    FVG oldest = array.get(fvgs, 0)
+    box.delete(oldest.fvgBox)
+    if not na(oldest.ceLine)
+        line.delete(oldest.ceLine)
+    if not na(oldest.gradeLbl)
+        label.delete(oldest.gradeLbl)
+    array.remove(fvgs, 0)
+
+// ---------------- Strategy Orders ----------------
+cooldownOk = na(lastTradeBar) or bar_index - lastTradeBar > cooldownBars
+tradeCountOk = tradesToday < maxTradesPerDay
+canTrade = confirmedOk and inSession and cooldownOk and tradeCountOk and strategy.position_size == 0
+longSignal = canTrade and longCandidate and not shortCandidate
+shortSignal = canTrade and shortCandidate and not longCandidate
+
+longAlert = "FVG LONG " + syminfo.ticker + " | Grade: " + candidateLongGrade + " | Score: " + str.tostring(candidateLongScore, "#.0") + " | Entry: " + str.tostring(close, format.mintick) + " | Stop: " + str.tostring(candidateLongStop, format.mintick) + " | Target: " + str.tostring(candidateLongTarget, format.mintick) + " | Reason: bullish FVG retest held above CE."
+shortAlert = "FVG SHORT " + syminfo.ticker + " | Grade: " + candidateShortGrade + " | Score: " + str.tostring(candidateShortScore, "#.0") + " | Entry: " + str.tostring(close, format.mintick) + " | Stop: " + str.tostring(candidateShortStop, format.mintick) + " | Target: " + str.tostring(candidateShortTarget, format.mintick) + " | Reason: bearish FVG retest rejected below CE."
+
+if longSignal
+    tradesToday += 1
+    lastTradeBar := bar_index
+    strategy.entry("FVG Long", strategy.long, qty=contracts, alert_message=longAlert)
+    strategy.exit("FVG Long Exit", from_entry="FVG Long", stop=candidateLongStop, limit=candidateLongTarget, alert_message="EXIT FVG LONG stop/target")
+    label.new(bar_index, low, "FVG LONG " + candidateLongGrade, style=label.style_label_up, color=color.new(#00C853, 0), textcolor=color.black, size=size.small, tooltip=longAlert)
+
+if shortSignal
+    tradesToday += 1
+    lastTradeBar := bar_index
+    strategy.entry("FVG Short", strategy.short, qty=contracts, alert_message=shortAlert)
+    strategy.exit("FVG Short Exit", from_entry="FVG Short", stop=candidateShortStop, limit=candidateShortTarget, alert_message="EXIT FVG SHORT stop/target")
+    label.new(bar_index, high, "FVG SHORT " + candidateShortGrade, style=label.style_label_down, color=color.new(#FF1744, 0), textcolor=color.white, size=size.small, tooltip=shortAlert)
+
+plotshape(bullGap, title="Bullish FVG Detected", style=shape.triangleup, location=location.belowbar, color=color.new(#00C853, 40), size=size.tiny, text="FVG")
+plotshape(bearGap, title="Bearish FVG Detected", style=shape.triangledown, location=location.abovebar, color=color.new(#FF1744, 40), size=size.tiny, text="FVG")
+plotshape(longSignal, title="FVG Long", style=shape.labelup, location=location.belowbar, color=color.new(#00C853, 0), text="FVG LONG", textcolor=color.black, size=size.small)
+plotshape(shortSignal, title="FVG Short", style=shape.labeldown, location=location.abovebar, color=color.new(#FF1744, 0), text="FVG SHORT", textcolor=color.white, size=size.small)
+
+// ---------------- Summary Table ----------------
+var table tbl = table.new(position.bottom_right, 3, 6, bgcolor=color.new(color.black, 80), border_width=1, border_color=color.new(color.white, 80))
+if barstate.islast and showTable
+    int bullAP = 0
+    int bullA = 0
+    int bullB = 0
+    int bullC = 0
+    int bullD = 0
+    int bearAP = 0
+    int bearA = 0
+    int bearB = 0
+    int bearC = 0
+    int bearD = 0
+    if array.size(fvgs) > 0
+        for j = 0 to array.size(fvgs) - 1
+            FVG f = array.get(fvgs, j)
+            if not f.killed
+                if f.isBull
+                    if f.grade == "A+"
+                        bullAP += 1
+                    else if f.grade == "A"
+                        bullA += 1
+                    else if f.grade == "B"
+                        bullB += 1
+                    else if f.grade == "C"
+                        bullC += 1
+                    else
+                        bullD += 1
+                else
+                    if f.grade == "A+"
+                        bearAP += 1
+                    else if f.grade == "A"
+                        bearA += 1
+                    else if f.grade == "B"
+                        bearB += 1
+                    else if f.grade == "C"
+                        bearC += 1
+                    else
+                        bearD += 1
+    table.cell(tbl, 0, 0, "FVG Quality", text_color=color.white, text_size=size.small)
+    table.cell(tbl, 1, 0, "Bull", text_color=#00C853, text_size=size.tiny)
+    table.cell(tbl, 2, 0, "Bear", text_color=#FF1744, text_size=size.tiny)
+    table.cell(tbl, 0, 1, "A+", text_color=color.new(color.white, 20), text_size=size.tiny)
+    table.cell(tbl, 1, 1, str.tostring(bullAP), text_color=#00C853, text_size=size.tiny)
+    table.cell(tbl, 2, 1, str.tostring(bearAP), text_color=#FF1744, text_size=size.tiny)
+    table.cell(tbl, 0, 2, "A", text_color=color.new(color.white, 20), text_size=size.tiny)
+    table.cell(tbl, 1, 2, str.tostring(bullA), text_color=#00C853, text_size=size.tiny)
+    table.cell(tbl, 2, 2, str.tostring(bearA), text_color=#FF1744, text_size=size.tiny)
+    table.cell(tbl, 0, 3, "B", text_color=color.new(color.white, 40), text_size=size.tiny)
+    table.cell(tbl, 1, 3, str.tostring(bullB), text_color=#00C853, text_size=size.tiny)
+    table.cell(tbl, 2, 3, str.tostring(bearB), text_color=#FF1744, text_size=size.tiny)
+    table.cell(tbl, 0, 4, "C", text_color=color.new(color.white, 60), text_size=size.tiny)
+    table.cell(tbl, 1, 4, str.tostring(bullC), text_color=#00C853, text_size=size.tiny)
+    table.cell(tbl, 2, 4, str.tostring(bearC), text_color=#FF1744, text_size=size.tiny)
+    table.cell(tbl, 0, 5, "D", text_color=color.new(color.white, 80), text_size=size.tiny)
+    table.cell(tbl, 1, 5, str.tostring(bullD), text_color=#00C853, text_size=size.tiny)
+    table.cell(tbl, 2, 5, str.tostring(bearD), text_color=#FF1744, text_size=size.tiny)
+
+var table dash = table.new(position.top_right, 2, 5, bgcolor=color.new(color.black, 15), border_color=color.new(color.white, 72), border_width=1)
+if showDashboard and barstate.islast
+    status = not inSession ? "Session wait" : longSignal ? "Long fired" : shortSignal ? "Short fired" : "Scanning"
+    table.cell(dash, 0, 0, "FVG Strategy", text_color=color.white, bgcolor=color.new(color.teal, 55))
+    table.cell(dash, 1, 0, status, text_color=color.white, bgcolor=color.new(color.teal, 55))
+    table.cell(dash, 0, 1, "Active", text_color=color.silver)
+    table.cell(dash, 1, 1, str.tostring(array.size(fvgs)), text_color=color.white)
+    table.cell(dash, 0, 2, "Min Score", text_color=color.silver)
+    table.cell(dash, 1, 2, str.tostring(minTradeScore, "#"), text_color=color.lime)
+    table.cell(dash, 0, 3, "Trades", text_color=color.silver)
+    table.cell(dash, 1, 3, str.tostring(tradesToday) + "/" + str.tostring(maxTradesPerDay), text_color=tradeCountOk ? color.white : color.orange)
+    table.cell(dash, 0, 4, "Session", text_color=color.silver)
+    table.cell(dash, 1, 4, inSession ? "Open" : "Closed", text_color=inSession ? color.lime : color.orange)
+
+// ---------------- Alerts ----------------
+alertcondition(bullGap, "Bullish FVG Detected", "New bullish FVG formed")
+alertcondition(bearGap, "Bearish FVG Detected", "New bearish FVG formed")
+alertcondition(longSignal, "FVG Strategy Long", "FVG long retest fired. Use Any alert() function call or {{strategy.order.alert_message}}.")
+alertcondition(shortSignal, "FVG Strategy Short", "FVG short retest fired. Use Any alert() function call or {{strategy.order.alert_message}}.")

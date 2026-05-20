@@ -1,6 +1,6 @@
 //@version=6
 //@strategy_alert_message {{strategy.order.alert_message}}
-strategy("Personal CMC Composite Strategy", shorttitle="CMC Strategy", overlay=false, initial_capital=100000, default_qty_type=strategy.fixed, default_qty_value=1, pyramiding=0, process_orders_on_close=false, calc_on_every_tick=true, calc_on_order_fills=true, commission_type=strategy.commission.cash_per_contract, commission_value=4.0, slippage=2, max_lines_count=500, max_labels_count=500)
+strategy("Personal CMC Composite Strategy", shorttitle="CMC Strategy", overlay=false, initial_capital=100000, default_qty_type=strategy.fixed, default_qty_value=1, pyramiding=0, margin_long=10, margin_short=10, process_orders_on_close=false, calc_on_every_tick=true, calc_on_order_fills=true, commission_type=strategy.commission.cash_per_contract, commission_value=4.0, slippage=2, max_lines_count=500, max_labels_count=500)
 
 // Cross-Market EMA Composite converted from the CMC indicator into a strategy.
 // It keeps the composite/divergence/band visuals and adds Strategy Report orders.

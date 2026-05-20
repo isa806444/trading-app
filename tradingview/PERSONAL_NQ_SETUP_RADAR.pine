@@ -45,7 +45,7 @@ patternPivotLen = input.int(5, "Pattern Pivot Length", minval=2, maxval=20)
 showDashboard = input.bool(true, "Show Dashboard")
 showAllSetupHints = input.bool(false, "Show Smaller Setup Hints")
 showSmartOpportunities = input.bool(true, "Show Smart Opportunity Watch Boxes")
-strategyReportMode = input.string("Clean + Watch Boxes", "Strategy Report Entries", options=["Clean Signals Only", "Clean + Watch Boxes"])
+strategyReportMode = input.string("All Detected Setups", "Strategy Report Entries", options=["Clean Signals Only", "Clean + Watch Boxes", "All Detected Setups"])
 opportunityScoreBuffer = input.float(10, "Opportunity Score Buffer", minval=2, maxval=25, step=1)
 opportunityEdgeBuffer = input.float(4, "Opportunity Edge Buffer", minval=0, maxval=15, step=1)
 opportunityCooldownBars = input.int(4, "Opportunity Cooldown Bars", minval=0, maxval=50)
@@ -298,12 +298,16 @@ shortTooltip = "Setup: " + shortSetup + "\nEntry: " + str.tostring(close, format
 
 var int lastOpportunityBar = na
 reportWatchTrades = strategyReportMode == "Clean + Watch Boxes"
+reportAllDetectedSetups = strategyReportMode == "All Detected Setups"
 opportunityCooldownOk = na(lastOpportunityBar) or bar_index - lastOpportunityBar > opportunityCooldownBars
 watchBase = showSmartOpportunities and confirmedOk and timeframeOk and inSession and opportunityCooldownOk and strategy.position_size == 0 and chopScore <= maxChop + 8 and cooldownOk
 watchLongCandidate = watchBase and not longSignal and locationLong and kamaOkLong and not doNotChaseLong and rewardOkLong and longScore >= minScore - opportunityScoreBuffer and edge >= minEdge - opportunityEdgeBuffer and longScore > shortScore
 watchShortCandidate = watchBase and not shortSignal and locationShort and kamaOkShort and not doNotChaseShort and rewardOkShort and shortScore >= minScore - opportunityScoreBuffer and edge <= -minEdge + opportunityEdgeBuffer and shortScore > longScore
-longTradeSignal = longSignal or (reportWatchTrades and watchLongCandidate)
-shortTradeSignal = shortSignal or (reportWatchTrades and watchShortCandidate)
+reportBaseGate = confirmedOk and timeframeOk and inSession and cooldownOk and strategy.position_size == 0
+detectedLongTrade = reportAllDetectedSetups and reportBaseGate and locationLong and longScore >= shortScore
+detectedShortTrade = reportAllDetectedSetups and reportBaseGate and locationShort and shortScore > longScore
+longTradeSignal = longSignal or (reportWatchTrades and watchLongCandidate) or detectedLongTrade
+shortTradeSignal = shortSignal or (reportWatchTrades and watchShortCandidate) or detectedShortTrade
 watchLong = watchLongCandidate and not reportWatchTrades
 watchShort = watchShortCandidate and not reportWatchTrades
 watchLongTooltip = "Watch Long Opportunity\nSetup: " + longSetup + "\nEntry area: " + str.tostring(close, format.mintick) + "\nStop idea: " + str.tostring(longStop, format.mintick) + "\nTarget idea: " + str.tostring(longTarget, format.mintick) + "\nScore L/S: " + str.tostring(longScore, "#") + " / " + str.tostring(shortScore, "#") + "\nTrap L/S: " + str.tostring(trapLongScore, "#") + " / " + str.tostring(trapShortScore, "#") + "\nWhy not full signal: it is close, but still below the stricter LONG gate."

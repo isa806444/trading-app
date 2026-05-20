@@ -44,6 +44,7 @@ patternPivotLen = input.int(5, "Pattern Pivot Length", minval=2, maxval=20)
 showDashboard = input.bool(true, "Show Dashboard")
 showAllSetupHints = input.bool(false, "Show Smaller Setup Hints")
 showSmartOpportunities = input.bool(true, "Show Smart Opportunity Watch Boxes")
+strategyReportMode = input.string("Clean + Watch Boxes", "Strategy Report Entries", options=["Clean Signals Only", "Clean + Watch Boxes"])
 opportunityScoreBuffer = input.float(10, "Opportunity Score Buffer", minval=2, maxval=25, step=1)
 opportunityEdgeBuffer = input.float(4, "Opportunity Edge Buffer", minval=0, maxval=15, step=1)
 opportunityCooldownBars = input.int(4, "Opportunity Cooldown Bars", minval=0, maxval=50)
@@ -294,10 +295,15 @@ longTooltip = "Setup: " + longSetup + "\nEntry: " + str.tostring(close, format.m
 shortTooltip = "Setup: " + shortSetup + "\nEntry: " + str.tostring(close, format.mintick) + "\nStop Loss: " + str.tostring(shortStop, format.mintick) + "\nTake Profit: " + str.tostring(shortTarget, format.mintick) + "\nScore L/S: " + str.tostring(longScore, "#") + " / " + str.tostring(shortScore, "#") + "\nTrap L/S: " + str.tostring(trapLongScore, "#") + " / " + str.tostring(trapShortScore, "#") + "\nEdge: " + str.tostring(edge, "#") + "\nReason: " + shortReason
 
 var int lastOpportunityBar = na
+reportWatchTrades = strategyReportMode == "Clean + Watch Boxes"
 opportunityCooldownOk = na(lastOpportunityBar) or bar_index - lastOpportunityBar > opportunityCooldownBars
 watchBase = showSmartOpportunities and confirmedOk and inSession and opportunityCooldownOk and strategy.position_size == 0 and chopScore <= maxChop + 8 and cooldownOk
-watchLong = watchBase and not longSignal and locationLong and kamaOkLong and not doNotChaseLong and rewardOkLong and longScore >= minScore - opportunityScoreBuffer and edge >= minEdge - opportunityEdgeBuffer and longScore > shortScore
-watchShort = watchBase and not shortSignal and locationShort and kamaOkShort and not doNotChaseShort and rewardOkShort and shortScore >= minScore - opportunityScoreBuffer and edge <= -minEdge + opportunityEdgeBuffer and shortScore > longScore
+watchLongCandidate = watchBase and not longSignal and locationLong and kamaOkLong and not doNotChaseLong and rewardOkLong and longScore >= minScore - opportunityScoreBuffer and edge >= minEdge - opportunityEdgeBuffer and longScore > shortScore
+watchShortCandidate = watchBase and not shortSignal and locationShort and kamaOkShort and not doNotChaseShort and rewardOkShort and shortScore >= minScore - opportunityScoreBuffer and edge <= -minEdge + opportunityEdgeBuffer and shortScore > longScore
+longTradeSignal = longSignal or (reportWatchTrades and watchLongCandidate)
+shortTradeSignal = shortSignal or (reportWatchTrades and watchShortCandidate)
+watchLong = watchLongCandidate and not reportWatchTrades
+watchShort = watchShortCandidate and not reportWatchTrades
 watchLongTooltip = "Watch Long Opportunity\nSetup: " + longSetup + "\nEntry area: " + str.tostring(close, format.mintick) + "\nStop idea: " + str.tostring(longStop, format.mintick) + "\nTarget idea: " + str.tostring(longTarget, format.mintick) + "\nScore L/S: " + str.tostring(longScore, "#") + " / " + str.tostring(shortScore, "#") + "\nTrap L/S: " + str.tostring(trapLongScore, "#") + " / " + str.tostring(trapShortScore, "#") + "\nWhy not full signal: it is close, but still below the stricter LONG gate."
 watchShortTooltip = "Watch Short Opportunity\nSetup: " + shortSetup + "\nEntry area: " + str.tostring(close, format.mintick) + "\nStop idea: " + str.tostring(shortStop, format.mintick) + "\nTarget idea: " + str.tostring(shortTarget, format.mintick) + "\nScore L/S: " + str.tostring(longScore, "#") + " / " + str.tostring(shortScore, "#") + "\nTrap L/S: " + str.tostring(trapLongScore, "#") + " / " + str.tostring(trapShortScore, "#") + "\nWhy not full signal: it is close, but still below the stricter SHORT gate."
 
@@ -313,7 +319,7 @@ var line stopLine = na
 var line targetLine = na
 
 // ---------------- Entries ----------------
-if longSignal
+if longTradeSignal
     lastSignalBar := bar_index
     activeEntry := close
     activeStop := longStop
@@ -337,7 +343,7 @@ if longSignal
         targetLine := line.new(bar_index, activeTarget, bar_index + 60, activeTarget, color=color.new(color.lime, 0), width=2, extend=extend.right)
     label.new(bar_index, low, "LONG", style=label.style_label_up, color=color.new(color.lime, 0), textcolor=color.black, size=size.small, tooltip=longTooltip)
 
-if shortSignal
+if shortTradeSignal
     lastSignalBar := bar_index
     activeEntry := close
     activeStop := shortStop
@@ -470,12 +476,12 @@ if watchShort
     lastOpportunityBar := bar_index
     label.new(bar_index, high, "WATCH S", style=label.style_label_down, color=color.new(color.red, 72), textcolor=color.white, size=size.tiny, tooltip=watchShortTooltip)
 
-plotshape(longSignal, title="Clean Long Setup Marker", style=shape.triangleup, location=location.belowbar, color=color.new(color.lime, 40), text="", size=size.tiny)
-plotshape(shortSignal, title="Clean Short Setup Marker", style=shape.triangledown, location=location.abovebar, color=color.new(color.red, 40), text="", size=size.tiny)
+plotshape(longTradeSignal, title="Strategy Report Long Marker", style=shape.triangleup, location=location.belowbar, color=color.new(color.lime, 40), text="", size=size.tiny)
+plotshape(shortTradeSignal, title="Strategy Report Short Marker", style=shape.triangledown, location=location.abovebar, color=color.new(color.red, 40), text="", size=size.tiny)
 
 // ---------------- Alerts ----------------
-alertcondition(longSignal, title="Personal Radar Long", message="LONG setup fired. For dynamic entry/stop/TP, use Any alert() function call or {{strategy.order.alert_message}}.")
-alertcondition(shortSignal, title="Personal Radar Short", message="SHORT setup fired. For dynamic entry/stop/TP, use Any alert() function call or {{strategy.order.alert_message}}.")
+alertcondition(longTradeSignal, title="Personal Radar Long", message="LONG setup fired. For dynamic entry/stop/TP, use Any alert() function call or {{strategy.order.alert_message}}.")
+alertcondition(shortTradeSignal, title="Personal Radar Short", message="SHORT setup fired. For dynamic entry/stop/TP, use Any alert() function call or {{strategy.order.alert_message}}.")
 alertcondition(strategy.position_size > 0 and close < activeStop, title="Long Stop Area", message="LONG stop area touched.")
 alertcondition(strategy.position_size < 0 and close > activeStop, title="Short Stop Area", message="SHORT stop area touched.")
 

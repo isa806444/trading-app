@@ -22,6 +22,7 @@ var string GRP_DISP = "Display"
 tradeQty = input.int(1, "Contracts / Paper Size", minval=1, maxval=10, group=GRP_STRAT)
 strategyMode = input.string("Divergence + Composite Cross", "Entry Mode", options=["Divergence Only", "Composite Cross", "Divergence + Composite Cross", "Band Reversion"], group=GRP_STRAT)
 strategyOrderSource = input.string("CMC + Live Signal Bot", "Strategy Report Orders", options=["CMC Signals Only", "Live Signal Bot Only", "CMC + Live Signal Bot"], group=GRP_STRAT)
+useBullBearAlertReportOrders = input.bool(true, "Report Trades From CMC Bull/Bear Alerts", group=GRP_STRAT, tooltip="ON: Strategy Report entries are simulated directly from the CMC Bull and CMC Bear alert events on 1m, 5m, and 15m charts.")
 useNoRepaint = input.bool(true, "Strict No-Repaint", group=GRP_STRAT)
 useSessionFilter = input.bool(true, "RTH Only", group=GRP_STRAT)
 tradeSession = input.session("0930-1600", "Trading Session", group=GRP_STRAT)
@@ -234,6 +235,7 @@ bullDiv = showDiv and showBullDiv and not na(pricePL) and not na(priceAtPL1) and
 // ---------------- Strategy Logic ----------------
 confirmedOk = not useNoRepaint or barstate.isconfirmed
 timeframeOk = not enforceChartTf or timeframe.period == requiredChartTf
+reportTimeframeOk = timeframe.period == "1" or timeframe.period == "5" or timeframe.period == "15"
 inSession = not useSessionFilter or not na(time(timeframe.period, tradeSession))
 atr = ta.atr(atrLen)
 pointValue = useChartPointValue and syminfo.pointvalue > 0 ? syminfo.pointvalue : fallbackDollarsPerPoint
@@ -267,11 +269,14 @@ cmcLongSignalRaw = (modeUsesDiv and bullDiv) or (modeUsesCross and compositeLong
 cmcShortSignalRaw = (modeUsesDiv and bearDiv) or (modeUsesCross and compositeShortCross) or (modeUsesBand and bandReversionShort)
 orderLongRaw = (useCmcStrategyOrders and cmcLongSignalRaw) or (useLiveStrategyOrders and liveBuyTrigger)
 orderShortRaw = (useCmcStrategyOrders and cmcShortSignalRaw) or (useLiveStrategyOrders and liveSellTrigger)
-longSignal = baseGate and orderLongRaw and not orderShortRaw
-shortSignal = baseGate and orderShortRaw and not orderLongRaw
+bullBearAlertGate = useBullBearAlertReportOrders and confirmedOk and reportTimeframeOk and strategy.position_size == 0
+bullBearLongSignal = bullBearAlertGate and bullDiv and not bearDiv
+bullBearShortSignal = bullBearAlertGate and bearDiv and not bullDiv
+longSignal = useBullBearAlertReportOrders ? bullBearLongSignal : baseGate and orderLongRaw and not orderShortRaw
+shortSignal = useBullBearAlertReportOrders ? bullBearShortSignal : baseGate and orderShortRaw and not orderLongRaw
 
-longSetup = useLiveStrategyOrders and liveBuyTrigger ? "Live Supertrend Buy" : bullDiv ? "CMC Bull Divergence" : bandReversionLong ? "CMC Band Reversion Long" : "CMC Composite Cross Long"
-shortSetup = useLiveStrategyOrders and liveSellTrigger ? "Live Supertrend Sell" : bearDiv ? "CMC Bear Divergence" : bandReversionShort ? "CMC Band Reversion Short" : "CMC Composite Cross Short"
+longSetup = bullBearLongSignal ? "CMC Bull Buy" : useLiveStrategyOrders and liveBuyTrigger ? "Live Supertrend Buy" : bullDiv ? "CMC Bull Divergence" : bandReversionLong ? "CMC Band Reversion Long" : "CMC Composite Cross Long"
+shortSetup = bullBearShortSignal ? "CMC Bear Sell" : useLiveStrategyOrders and liveSellTrigger ? "Live Supertrend Sell" : bearDiv ? "CMC Bear Divergence" : bandReversionShort ? "CMC Band Reversion Short" : "CMC Composite Cross Short"
 riskPoints = math.max(atr * stopAtrMult, syminfo.mintick * 4.0)
 longStop = close - riskPoints
 longTarget = close + riskPoints * targetR
@@ -290,7 +295,7 @@ if longSignal
     activeEntryBar := bar_index
     activeSetup := longSetup
     lastTradeBar := bar_index
-    strategy.entry("CMC Long", strategy.long, qty=tradeQty, alert_message=longMessage)
+    strategy.entry("CMC Bull Buy", strategy.long, qty=tradeQty, alert_message=longMessage)
 
 if shortSignal
     activeEntry := close
@@ -299,24 +304,24 @@ if shortSignal
     activeEntryBar := bar_index
     activeSetup := shortSetup
     lastTradeBar := bar_index
-    strategy.entry("CMC Short", strategy.short, qty=tradeQty, alert_message=shortMessage)
+    strategy.entry("CMC Bear Sell", strategy.short, qty=tradeQty, alert_message=shortMessage)
 
 if strategy.position_size > 0 and not na(activeStop) and not na(activeTarget)
-    strategy.exit("CMC Long Risk", from_entry="CMC Long", stop=activeStop, limit=activeTarget, alert_message=exitLongMessage)
+    strategy.exit("CMC Bull Buy Risk", from_entry="CMC Bull Buy", stop=activeStop, limit=activeTarget, alert_message=exitLongMessage)
 
 if strategy.position_size < 0 and not na(activeStop) and not na(activeTarget)
-    strategy.exit("CMC Short Risk", from_entry="CMC Short", stop=activeStop, limit=activeTarget, alert_message=exitShortMessage)
+    strategy.exit("CMC Bear Sell Risk", from_entry="CMC Bear Sell", stop=activeStop, limit=activeTarget, alert_message=exitShortMessage)
 
 barsInTrade = strategy.position_size != 0 and not na(activeEntryBar) ? bar_index - activeEntryBar : 0
 longSmartExit = useSmartExit and strategy.position_size > 0 and barsInTrade >= minBarsBeforeSmartExit and (bearDiv or liveSellTrigger or ta.crossunder(composite, bandMean) or barsInTrade >= maxBarsInTrade)
 shortSmartExit = useSmartExit and strategy.position_size < 0 and barsInTrade >= minBarsBeforeSmartExit and (bullDiv or liveBuyTrigger or ta.crossover(composite, bandMean) or barsInTrade >= maxBarsInTrade)
 
 if longSmartExit
-    strategy.close("CMC Long", alert_message=exitLongMessage)
+    strategy.close("CMC Bull Buy", alert_message=exitLongMessage)
     lastTradeBar := bar_index
 
 if shortSmartExit
-    strategy.close("CMC Short", alert_message=exitShortMessage)
+    strategy.close("CMC Bear Sell", alert_message=exitShortMessage)
     lastTradeBar := bar_index
 
 if strategy.position_size == 0 and strategy.position_size[1] != 0
@@ -400,10 +405,10 @@ if showPriceLvl
         for i = 0 to uSz - 1
             line.set_x2(array.get(bullPriceLvls, i), bar_index + priceLvlLen)
 
-plotshape(bearDiv and showPriceLvl, "Bear Div Price", shape.labeldown, location.abovebar, color.new(color.red, 10), offset=-divBarsR, text="CMC Bear", textcolor=color.white, force_overlay=true, size=size.small)
-plotshape(bullDiv and showPriceLvl, "Bull Div Price", shape.labelup, location.belowbar, color.new(color.lime, 10), offset=-divBarsR, text="CMC Bull", textcolor=color.white, force_overlay=true, size=size.small)
-plotshape(longSignal, "CMC Long", shape.labelup, location.bottom, color.new(color.lime, 0), text="CMC LONG", textcolor=color.black, size=size.small)
-plotshape(shortSignal, "CMC Short", shape.labeldown, location.top, color.new(color.red, 0), text="CMC SHORT", textcolor=color.white, size=size.small)
+plotshape(bearDiv and showPriceLvl, "CMC Bear Sell Alert", shape.labeldown, location.abovebar, color.new(color.red, 10), offset=-divBarsR, text="CMC Bear Sell", textcolor=color.white, force_overlay=true, size=size.small)
+plotshape(bullDiv and showPriceLvl, "CMC Bull Buy Alert", shape.labelup, location.belowbar, color.new(color.lime, 10), offset=-divBarsR, text="CMC Bull Buy", textcolor=color.white, force_overlay=true, size=size.small)
+plotshape(longSignal, "CMC Bull Buy Strategy Entry", shape.labelup, location.bottom, color.new(color.lime, 0), text="CMC Bull Buy", textcolor=color.black, size=size.small)
+plotshape(shortSignal, "CMC Bear Sell Strategy Entry", shape.labeldown, location.top, color.new(color.red, 0), text="CMC Bear Sell", textcolor=color.white, size=size.small)
 plotshape(showLiveSignalLabels and liveBuyTrigger, "Live Signal Buy", shape.labelup, location.belowbar, color.new(#00ff88, 0), text="BUY", textcolor=color.black, force_overlay=true, size=size.small)
 plotshape(showLiveSignalLabels and liveSellTrigger, "Live Signal Sell", shape.labeldown, location.abovebar, color.new(#ff3d00, 0), text="SELL", textcolor=color.white, force_overlay=true, size=size.small)
 
@@ -456,7 +461,7 @@ if showTable and barstate.islast
 
 var table dash = table.new(position.bottom_right, 2, 7, bgcolor=color.new(color.black, 20), border_color=color.new(color.white, 75), border_width=1)
 positionText = strategy.position_size > 0 ? "Long" : strategy.position_size < 0 ? "Short" : "Flat"
-statusText = not timeframeOk ? "Wrong TF" : not inSession ? "Session wait" : longSignal ? "Long fired" : shortSignal ? "Short fired" : "Scanning"
+statusText = useBullBearAlertReportOrders and not reportTimeframeOk ? "Use 1m/5m/15m" : not timeframeOk ? "Wrong TF" : not inSession and not useBullBearAlertReportOrders ? "Session wait" : longSignal ? "Long fired" : shortSignal ? "Short fired" : "Scanning"
 if showDashboard and barstate.islast
     table.cell(dash, 0, 0, "CMC", text_color=color.white, bgcolor=color.new(color.teal, 55), text_size=size.tiny)
     table.cell(dash, 1, 0, statusText, text_color=color.white, bgcolor=color.new(color.teal, 55), text_size=size.tiny)

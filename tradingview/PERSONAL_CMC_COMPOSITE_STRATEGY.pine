@@ -1,0 +1,464 @@
+//@version=6
+//@strategy_alert_message {{strategy.order.alert_message}}
+strategy("Personal CMC Composite Strategy", shorttitle="CMC Strategy", overlay=false, initial_capital=100000, default_qty_type=strategy.fixed, default_qty_value=1, pyramiding=0, process_orders_on_close=false, calc_on_every_tick=true, calc_on_order_fills=true, commission_type=strategy.commission.cash_per_contract, commission_value=4.0, slippage=2, max_lines_count=500, max_labels_count=500)
+
+// Cross-Market EMA Composite converted from the CMC indicator into a strategy.
+// It keeps the composite/divergence/band visuals and adds Strategy Report orders.
+// Use it as a personal TradingView setup radar/backtester.
+
+// ---------------- Groups ----------------
+var string GRP_STRAT = "Strategy"
+var string GRP_RES = "Resolution"
+var string GRP_EMA = "EMA Settings"
+var string GRP_CORR = "Correlation Weighting"
+var string GRP_INST = "Instruments"
+var string GRP_BANDS = "Std Dev Bands"
+var string GRP_DIV = "Divergence"
+var string GRP_RISK = "Risk / Exits"
+var string GRP_DISP = "Display"
+
+// ---------------- Strategy Inputs ----------------
+tradeQty = input.int(1, "Contracts / Paper Size", minval=1, maxval=10, group=GRP_STRAT)
+strategyMode = input.string("Divergence + Composite Cross", "Entry Mode", options=["Divergence Only", "Composite Cross", "Divergence + Composite Cross", "Band Reversion"], group=GRP_STRAT)
+useNoRepaint = input.bool(true, "Strict No-Repaint", group=GRP_STRAT)
+useSessionFilter = input.bool(true, "RTH Only", group=GRP_STRAT)
+tradeSession = input.session("0930-1600", "Trading Session", group=GRP_STRAT)
+enforceChartTf = input.bool(false, "Require Specific Chart TF", group=GRP_STRAT)
+requiredChartTf = input.timeframe("5", "Required Chart TF", group=GRP_STRAT)
+cooldownBars = input.int(4, "Cooldown Bars", minval=0, maxval=100, group=GRP_STRAT)
+minCompositeEdge = input.float(0.05, "Minimum Composite Edge", minval=0.0, maxval=10.0, step=0.01, group=GRP_STRAT)
+minBandExtreme = input.float(1.0, "Band Reversion Extreme", minval=0.25, maxval=4.0, step=0.25, group=GRP_STRAT)
+
+// ---------------- Resolution / Source Inputs ----------------
+srcRes = input.timeframe("5", "Data Resolution", group=GRP_RES)
+
+emaLen = input.int(21, "EMA Length", group=GRP_EMA, minval=1, maxval=500)
+smoothLen = input.int(3, "Composite Smoothing EMA", group=GRP_EMA, minval=1, maxval=50)
+
+corrLen = input.int(50, "Correlation Lookback", group=GRP_CORR, minval=10, maxval=500)
+minCorr = input.float(0.15, "Min Abs Correlation Threshold", group=GRP_CORR, minval=0.0, maxval=1.0, step=0.05)
+useSigned = input.bool(true, "Signed Correlation Weights", group=GRP_CORR, tooltip="ON: inverse instruments subtract. OFF: all enabled instruments are additive.")
+useZscore = input.bool(false, "Z-Score Deviation Mode", group=GRP_CORR, tooltip="ON: normalizes by rolling stdev. OFF: raw percent deviation from EMA.")
+zLen = input.int(50, "Z-Score Lookback", group=GRP_CORR, minval=10)
+
+useNQ = input.bool(true, "NQ - Nasdaq Futures", group=GRP_INST)
+useES = input.bool(true, "ES - S&P 500 Futures", group=GRP_INST)
+useRTY = input.bool(true, "RTY - Russell 2000 Futures", group=GRP_INST)
+useYM = input.bool(true, "YM - Dow Futures", group=GRP_INST)
+useCL = input.bool(true, "CL - Crude Oil", group=GRP_INST)
+useGC = input.bool(true, "GC - Gold", group=GRP_INST)
+useZN = input.bool(true, "ZN - 10yr Treasuries", group=GRP_INST)
+useDXY = input.bool(true, "DXY - Dollar Index", group=GRP_INST)
+useNVDA = input.bool(true, "NVDA", group=GRP_INST)
+useAAPL = input.bool(true, "AAPL", group=GRP_INST)
+useMSFT = input.bool(true, "MSFT", group=GRP_INST)
+
+showBands = input.bool(true, "Show Bands", group=GRP_BANDS)
+bandLen = input.int(50, "Band Lookback", group=GRP_BANDS, minval=5, maxval=500)
+mult1 = input.float(1.0, "Inner Band Multiplier", group=GRP_BANDS, minval=0.1, maxval=5.0, step=0.1)
+mult2 = input.float(2.0, "Outer Band Multiplier", group=GRP_BANDS, minval=0.1, maxval=5.0, step=0.1)
+showMidline = input.bool(true, "Show Rolling Mean Line", group=GRP_BANDS)
+fillBands = input.bool(false, "Fill Between Bands", group=GRP_BANDS)
+
+showDiv = input.bool(true, "Show Divergence", group=GRP_DIV)
+divBarsL = input.int(20, "Pivot Bars Left", group=GRP_DIV, minval=1, maxval=20)
+divBarsR = input.int(1, "Pivot Bars Right", group=GRP_DIV, minval=1, maxval=20, tooltip="Lower is earlier but can create more false positives.")
+showBullDiv = input.bool(true, "Show Bullish Divergence", group=GRP_DIV)
+showBearDiv = input.bool(true, "Show Bearish Divergence", group=GRP_DIV)
+divLookback = input.int(50, "Divergence Lookback", group=GRP_DIV, minval=5, maxval=100)
+showDivLine = input.bool(true, "Draw Composite Diagonal Lines", group=GRP_DIV)
+showPriceLvl = input.bool(true, "Draw Price Chart Levels", group=GRP_DIV)
+priceLvlLen = input.int(40, "Price Level Extension Bars", group=GRP_DIV, minval=5, maxval=200)
+maxPriceLvls = input.int(5, "Max Price Levels To Keep", group=GRP_DIV, minval=1, maxval=50)
+
+atrLen = input.int(14, "ATR Length", minval=2, maxval=100, group=GRP_RISK)
+stopAtrMult = input.float(1.25, "Stop ATR Multiplier", minval=0.25, maxval=10.0, step=0.05, group=GRP_RISK)
+targetR = input.float(2.0, "Take Profit R", minval=0.25, maxval=10.0, step=0.25, group=GRP_RISK)
+useSmartExit = input.bool(true, "Smart Composite Exit", group=GRP_RISK)
+minBarsBeforeSmartExit = input.int(2, "Min Bars Before Smart Exit", minval=0, maxval=50, group=GRP_RISK)
+maxBarsInTrade = input.int(48, "Max Bars In Trade", minval=2, maxval=500, group=GRP_RISK)
+useChartPointValue = input.bool(true, "Use Chart Point Value", group=GRP_RISK)
+fallbackDollarsPerPoint = input.float(20.0, "Fallback Dollars Per Point", minval=0.01, step=0.25, group=GRP_RISK)
+
+showFill = input.bool(false, "Fill Composite Zone", group=GRP_DISP)
+showTable = input.bool(false, "Show Correlation Table", group=GRP_DISP)
+showDashboard = input.bool(true, "Show Strategy Dashboard", group=GRP_DISP)
+showTradeLines = input.bool(true, "Show Entry / Stop / Target Lines", group=GRP_DISP)
+
+// ---------------- Helpers ----------------
+clamp(v, lo, hi) =>
+    math.min(math.max(v, lo), hi)
+
+f_sec(sym) =>
+    request.security(sym, srcRes, close, barmerge.gaps_off, barmerge.lookahead_off, ignore_invalid_symbol=true)
+
+f_ret(src) =>
+    not na(src) and not na(src[1]) and src[1] != 0.0 ? math.log(src / src[1]) : 0.0
+
+f_weight(corr, minThresh, signed) =>
+    math.abs(nz(corr)) >= minThresh ? (signed ? nz(corr) : math.abs(nz(corr))) : 0.0
+
+f_dev(src, len, zmode, zl) =>
+    e = ta.ema(src, len)
+    pct = e != 0.0 ? (src - e) / e * 100.0 : 0.0
+    if zmode
+        mn = ta.sma(pct, zl)
+        sd = ta.stdev(pct, zl)
+        sd != 0.0 ? (pct - mn) / sd : 0.0
+    else
+        pct
+
+f_corrColor(corr, thresh) =>
+    absC = math.abs(nz(corr))
+    if absC < thresh
+        color.new(color.gray, 60)
+    else if corr > 0
+        color.from_gradient(corr, 0.0, 1.0, color.new(color.gray, 40), color.new(color.lime, 0))
+    else
+        color.from_gradient(absC, 0.0, 1.0, color.new(color.gray, 40), color.new(color.red, 0))
+
+f_bandPosLabel(z) =>
+    z > 2.0 ? "High++" : z > 1.0 ? "High" : z < -2.0 ? "Low++" : z < -1.0 ? "Low" : "Mid"
+
+f_bandPosColor(z) =>
+    z > 2.0 ? color.new(color.red, 10) : z > 1.0 ? color.new(color.orange, 20) : z < -2.0 ? color.new(color.lime, 10) : z < -1.0 ? color.new(color.green, 20) : color.new(color.gray, 40)
+
+// ---------------- Data Layer ----------------
+ref_c = request.security(syminfo.tickerid, srcRes, close, barmerge.gaps_off, barmerge.lookahead_off)
+ref_h = request.security(syminfo.tickerid, srcRes, high, barmerge.gaps_off, barmerge.lookahead_off)
+ref_l = request.security(syminfo.tickerid, srcRes, low, barmerge.gaps_off, barmerge.lookahead_off)
+
+nq_c = f_sec("CME_MINI:NQ1!")
+es_c = f_sec("CME_MINI:ES1!")
+rty_c = f_sec("CME_MINI:RTY1!")
+ym_c = f_sec("CBOT_MINI:YM1!")
+cl_c = f_sec("NYMEX:CL1!")
+gc_c = f_sec("COMEX:GC1!")
+zn_c = f_sec("CBOT:ZN1!")
+dxy_c = f_sec("TVC:DXY")
+nvda_c = f_sec("NASDAQ:NVDA")
+aapl_c = f_sec("NASDAQ:AAPL")
+msft_c = f_sec("NASDAQ:MSFT")
+
+ref_r = f_ret(ref_c)
+nq_r = f_ret(nq_c)
+es_r = f_ret(es_c)
+rty_r = f_ret(rty_c)
+ym_r = f_ret(ym_c)
+cl_r = f_ret(cl_c)
+gc_r = f_ret(gc_c)
+zn_r = f_ret(zn_c)
+dxy_r = f_ret(dxy_c)
+nvda_r = f_ret(nvda_c)
+aapl_r = f_ret(aapl_c)
+msft_r = f_ret(msft_c)
+
+// ---------------- Composite Engine ----------------
+nq_corr = ta.correlation(nq_r, ref_r, corrLen)
+es_corr = ta.correlation(es_r, ref_r, corrLen)
+rty_corr = ta.correlation(rty_r, ref_r, corrLen)
+ym_corr = ta.correlation(ym_r, ref_r, corrLen)
+cl_corr = ta.correlation(cl_r, ref_r, corrLen)
+gc_corr = ta.correlation(gc_r, ref_r, corrLen)
+zn_corr = ta.correlation(zn_r, ref_r, corrLen)
+dxy_corr = ta.correlation(dxy_r, ref_r, corrLen)
+nvda_corr = ta.correlation(nvda_r, ref_r, corrLen)
+aapl_corr = ta.correlation(aapl_r, ref_r, corrLen)
+msft_corr = ta.correlation(msft_r, ref_r, corrLen)
+
+nq_w = useNQ ? f_weight(nq_corr, minCorr, useSigned) : 0.0
+es_w = useES ? f_weight(es_corr, minCorr, useSigned) : 0.0
+rty_w = useRTY ? f_weight(rty_corr, minCorr, useSigned) : 0.0
+ym_w = useYM ? f_weight(ym_corr, minCorr, useSigned) : 0.0
+cl_w = useCL ? f_weight(cl_corr, minCorr, useSigned) : 0.0
+gc_w = useGC ? f_weight(gc_corr, minCorr, useSigned) : 0.0
+zn_w = useZN ? f_weight(zn_corr, minCorr, useSigned) : 0.0
+dxy_w = useDXY ? f_weight(dxy_corr, minCorr, useSigned) : 0.0
+nvda_w = useNVDA ? f_weight(nvda_corr, minCorr, useSigned) : 0.0
+aapl_w = useAAPL ? f_weight(aapl_corr, minCorr, useSigned) : 0.0
+msft_w = useMSFT ? f_weight(msft_corr, minCorr, useSigned) : 0.0
+
+nq_dev = f_dev(nq_c, emaLen, useZscore, zLen)
+es_dev = f_dev(es_c, emaLen, useZscore, zLen)
+rty_dev = f_dev(rty_c, emaLen, useZscore, zLen)
+ym_dev = f_dev(ym_c, emaLen, useZscore, zLen)
+cl_dev = f_dev(cl_c, emaLen, useZscore, zLen)
+gc_dev = f_dev(gc_c, emaLen, useZscore, zLen)
+zn_dev = f_dev(zn_c, emaLen, useZscore, zLen)
+dxy_dev = f_dev(dxy_c, emaLen, useZscore, zLen)
+nvda_dev = f_dev(nvda_c, emaLen, useZscore, zLen)
+aapl_dev = f_dev(aapl_c, emaLen, useZscore, zLen)
+msft_dev = f_dev(msft_c, emaLen, useZscore, zLen)
+
+baseNum = nq_dev * nq_w + es_dev * es_w + rty_dev * rty_w + ym_dev * ym_w + cl_dev * cl_w + gc_dev * gc_w + zn_dev * zn_w + dxy_dev * dxy_w + nvda_dev * nvda_w + aapl_dev * aapl_w + msft_dev * msft_w
+baseDen = math.abs(nq_w) + math.abs(es_w) + math.abs(rty_w) + math.abs(ym_w) + math.abs(cl_w) + math.abs(gc_w) + math.abs(zn_w) + math.abs(dxy_w) + math.abs(nvda_w) + math.abs(aapl_w) + math.abs(msft_w)
+composite = ta.ema(baseDen != 0.0 ? baseNum / baseDen : 0.0, smoothLen)
+
+bandMean = ta.sma(composite, bandLen)
+bandStdev = ta.stdev(composite, bandLen)
+upper2 = bandMean + mult2 * bandStdev
+upper1 = bandMean + mult1 * bandStdev
+lower1 = bandMean - mult1 * bandStdev
+lower2 = bandMean - mult2 * bandStdev
+bandPos = bandStdev != 0.0 ? (composite - bandMean) / bandStdev : 0.0
+
+// ---------------- Divergence ----------------
+pricePH = ta.pivothigh(ref_h, divBarsL, divBarsR)
+pricePL = ta.pivotlow(ref_l, divBarsL, divBarsR)
+
+compAtPricePH = ta.valuewhen(not na(pricePH), composite[divBarsR], 0)
+compAtPricePH1 = ta.valuewhen(not na(pricePH), composite[divBarsR], 1)
+priceAtPH = ta.valuewhen(not na(pricePH), pricePH, 0)
+priceAtPH1 = ta.valuewhen(not na(pricePH), pricePH, 1)
+barAtPH = ta.valuewhen(not na(pricePH), bar_index - divBarsR, 0)
+barAtPH1 = ta.valuewhen(not na(pricePH), bar_index - divBarsR, 1)
+
+compAtPricePL = ta.valuewhen(not na(pricePL), composite[divBarsR], 0)
+compAtPricePL1 = ta.valuewhen(not na(pricePL), composite[divBarsR], 1)
+priceAtPL = ta.valuewhen(not na(pricePL), pricePL, 0)
+priceAtPL1 = ta.valuewhen(not na(pricePL), pricePL, 1)
+barAtPL = ta.valuewhen(not na(pricePL), bar_index - divBarsR, 0)
+barAtPL1 = ta.valuewhen(not na(pricePL), bar_index - divBarsR, 1)
+
+bearDiv = showDiv and showBearDiv and not na(pricePH) and not na(priceAtPH1) and not na(compAtPricePH1) and (barAtPH - barAtPH1) <= divLookback and priceAtPH > priceAtPH1 and compAtPricePH < compAtPricePH1
+bullDiv = showDiv and showBullDiv and not na(pricePL) and not na(priceAtPL1) and not na(compAtPricePL1) and (barAtPL - barAtPL1) <= divLookback and priceAtPL < priceAtPL1 and compAtPricePL > compAtPricePL1
+
+// ---------------- Strategy Logic ----------------
+confirmedOk = not useNoRepaint or barstate.isconfirmed
+timeframeOk = not enforceChartTf or timeframe.period == requiredChartTf
+inSession = not useSessionFilter or not na(time(timeframe.period, tradeSession))
+atr = ta.atr(atrLen)
+pointValue = useChartPointValue and syminfo.pointvalue > 0 ? syminfo.pointvalue : fallbackDollarsPerPoint
+
+var int lastTradeBar = na
+var float activeStop = na
+var float activeTarget = na
+var float activeEntry = na
+var int activeEntryBar = na
+var string activeSetup = "None"
+
+cooldownOk = na(lastTradeBar) or bar_index - lastTradeBar > cooldownBars
+baseGate = confirmedOk and timeframeOk and inSession and cooldownOk and strategy.position_size == 0
+
+compositeLongCross = ta.crossover(composite, 0.0) and composite > minCompositeEdge
+compositeShortCross = ta.crossunder(composite, 0.0) and composite < -minCompositeEdge
+bandReversionLong = bandPos <= -minBandExtreme and ta.rising(composite, 2)
+bandReversionShort = bandPos >= minBandExtreme and ta.falling(composite, 2)
+
+modeUsesDiv = strategyMode == "Divergence Only" or strategyMode == "Divergence + Composite Cross"
+modeUsesCross = strategyMode == "Composite Cross" or strategyMode == "Divergence + Composite Cross"
+modeUsesBand = strategyMode == "Band Reversion"
+
+longSignalRaw = (modeUsesDiv and bullDiv) or (modeUsesCross and compositeLongCross) or (modeUsesBand and bandReversionLong)
+shortSignalRaw = (modeUsesDiv and bearDiv) or (modeUsesCross and compositeShortCross) or (modeUsesBand and bandReversionShort)
+longSignal = baseGate and longSignalRaw and not shortSignalRaw
+shortSignal = baseGate and shortSignalRaw and not longSignalRaw
+
+longSetup = bullDiv ? "CMC Bull Divergence" : bandReversionLong ? "CMC Band Reversion Long" : "CMC Composite Cross Long"
+shortSetup = bearDiv ? "CMC Bear Divergence" : bandReversionShort ? "CMC Band Reversion Short" : "CMC Composite Cross Short"
+riskPoints = math.max(atr * stopAtrMult, syminfo.mintick * 4.0)
+longStop = close - riskPoints
+longTarget = close + riskPoints * targetR
+shortStop = close + riskPoints
+shortTarget = close - riskPoints * targetR
+
+longMessage = '{"source":"tradingview","bot":"personal_cmc_strategy","action":"BUY","ticker":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","setup":"' + longSetup + '","entry":' + str.tostring(close, format.mintick) + ',"stop":' + str.tostring(longStop, format.mintick) + ',"target":' + str.tostring(longTarget, format.mintick) + ',"qty":' + str.tostring(tradeQty) + ',"composite":' + str.tostring(composite, "#.####") + ',"band_pos":' + str.tostring(bandPos, "#.##") + '}'
+shortMessage = '{"source":"tradingview","bot":"personal_cmc_strategy","action":"SELL","ticker":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","setup":"' + shortSetup + '","entry":' + str.tostring(close, format.mintick) + ',"stop":' + str.tostring(shortStop, format.mintick) + ',"target":' + str.tostring(shortTarget, format.mintick) + ',"qty":' + str.tostring(tradeQty) + ',"composite":' + str.tostring(composite, "#.####") + ',"band_pos":' + str.tostring(bandPos, "#.##") + '}'
+exitLongMessage = '{"source":"tradingview","bot":"personal_cmc_strategy","action":"EXIT_LONG","ticker":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","price":' + str.tostring(close, format.mintick) + ',"reason":"CMC stop target or smart composite exit","composite":' + str.tostring(composite, "#.####") + '}'
+exitShortMessage = '{"source":"tradingview","bot":"personal_cmc_strategy","action":"EXIT_SHORT","ticker":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","price":' + str.tostring(close, format.mintick) + ',"reason":"CMC stop target or smart composite exit","composite":' + str.tostring(composite, "#.####") + '}'
+
+if longSignal
+    activeEntry := close
+    activeStop := longStop
+    activeTarget := longTarget
+    activeEntryBar := bar_index
+    activeSetup := longSetup
+    lastTradeBar := bar_index
+    strategy.entry("CMC Long", strategy.long, qty=tradeQty, alert_message=longMessage)
+
+if shortSignal
+    activeEntry := close
+    activeStop := shortStop
+    activeTarget := shortTarget
+    activeEntryBar := bar_index
+    activeSetup := shortSetup
+    lastTradeBar := bar_index
+    strategy.entry("CMC Short", strategy.short, qty=tradeQty, alert_message=shortMessage)
+
+if strategy.position_size > 0 and not na(activeStop) and not na(activeTarget)
+    strategy.exit("CMC Long Risk", from_entry="CMC Long", stop=activeStop, limit=activeTarget, alert_message=exitLongMessage)
+
+if strategy.position_size < 0 and not na(activeStop) and not na(activeTarget)
+    strategy.exit("CMC Short Risk", from_entry="CMC Short", stop=activeStop, limit=activeTarget, alert_message=exitShortMessage)
+
+barsInTrade = strategy.position_size != 0 and not na(activeEntryBar) ? bar_index - activeEntryBar : 0
+longSmartExit = useSmartExit and strategy.position_size > 0 and barsInTrade >= minBarsBeforeSmartExit and (bearDiv or ta.crossunder(composite, bandMean) or barsInTrade >= maxBarsInTrade)
+shortSmartExit = useSmartExit and strategy.position_size < 0 and barsInTrade >= minBarsBeforeSmartExit and (bullDiv or ta.crossover(composite, bandMean) or barsInTrade >= maxBarsInTrade)
+
+if longSmartExit
+    strategy.close("CMC Long", alert_message=exitLongMessage)
+    lastTradeBar := bar_index
+
+if shortSmartExit
+    strategy.close("CMC Short", alert_message=exitShortMessage)
+    lastTradeBar := bar_index
+
+if strategy.position_size == 0 and strategy.position_size[1] != 0
+    activeStop := na
+    activeTarget := na
+    activeEntry := na
+    activeEntryBar := na
+    activeSetup := "None"
+
+// ---------------- Visuals ----------------
+upper2Plot = plot(showBands ? upper2 : na, "Upper 2 SD", color=color.new(color.orange, 20), linewidth=2)
+upper1Plot = plot(showBands ? upper1 : na, "Upper 1 SD", color=color.new(color.aqua, 40), linewidth=1)
+lower1Plot = plot(showBands ? lower1 : na, "Lower 1 SD", color=color.new(color.aqua, 40), linewidth=1)
+lower2Plot = plot(showBands ? lower2 : na, "Lower 2 SD", color=color.new(color.orange, 20), linewidth=2)
+
+fill(upper2Plot, upper1Plot, showBands and fillBands ? color.new(color.aqua, 92) : na, title="Upper Outer Fill")
+fill(upper1Plot, lower1Plot, showBands and fillBands ? color.new(color.aqua, 96) : na, title="Inner Band Fill")
+fill(lower1Plot, lower2Plot, showBands and fillBands ? color.new(color.aqua, 92) : na, title="Lower Outer Fill")
+
+plot(showBands and showMidline ? bandMean : na, "Band Mean", color=color.new(color.gray, 35), linewidth=1)
+hline(0, "Zero", color=color.new(color.gray, 40), linestyle=hline.style_dashed, linewidth=1)
+
+compColor = composite >= 0 ? color.new(color.lime, 0) : color.new(color.red, 0)
+zeroPlot = plot(0, display=display.none)
+compPlot = plot(composite, "Composite", color=compColor, linewidth=3)
+fill(compPlot, zeroPlot, composite, 0, top_color=color.new(color.lime, showFill ? 82 : 100), bottom_color=color.new(color.red, showFill ? 82 : 100), title="Composite Fill")
+
+var line[] bearDivLines = array.new_line()
+var line[] bullDivLines = array.new_line()
+int maxDivLines = 50
+
+if bearDiv and showDivLine
+    l = line.new(int(barAtPH1), compAtPricePH1, int(barAtPH), compAtPricePH, color=color.new(color.red, 15), width=2, style=line.style_dashed)
+    array.push(bearDivLines, l)
+    if array.size(bearDivLines) > maxDivLines
+        line.delete(array.shift(bearDivLines))
+
+if bullDiv and showDivLine
+    l = line.new(int(barAtPL1), compAtPricePL1, int(barAtPL), compAtPricePL, color=color.new(color.lime, 15), width=2, style=line.style_dashed)
+    array.push(bullDivLines, l)
+    if array.size(bullDivLines) > maxDivLines
+        line.delete(array.shift(bullDivLines))
+
+var label[] bearDivLabels = array.new_label()
+var label[] bullDivLabels = array.new_label()
+
+if bearDiv
+    l = label.new(int(barAtPH), compAtPricePH, "Bear Div", color=color.new(color.red, 10), textcolor=color.white, style=label.style_label_down, size=size.small)
+    array.push(bearDivLabels, l)
+    if array.size(bearDivLabels) > maxDivLines
+        label.delete(array.shift(bearDivLabels))
+
+if bullDiv
+    l = label.new(int(barAtPL), compAtPricePL, "Bull Div", color=color.new(color.lime, 10), textcolor=color.white, style=label.style_label_up, size=size.small)
+    array.push(bullDivLabels, l)
+    if array.size(bullDivLabels) > maxDivLines
+        label.delete(array.shift(bullDivLabels))
+
+var line[] bearPriceLvls = array.new_line()
+var line[] bullPriceLvls = array.new_line()
+
+if bearDiv and showPriceLvl
+    l = line.new(int(barAtPH), priceAtPH, int(barAtPH) + priceLvlLen, priceAtPH, color=color.new(color.red, 30), width=1, style=line.style_dashed, force_overlay=true)
+    array.push(bearPriceLvls, l)
+    if array.size(bearPriceLvls) > maxPriceLvls
+        line.delete(array.shift(bearPriceLvls))
+
+if bullDiv and showPriceLvl
+    l = line.new(int(barAtPL), priceAtPL, int(barAtPL) + priceLvlLen, priceAtPL, color=color.new(color.lime, 30), width=1, style=line.style_dashed, force_overlay=true)
+    array.push(bullPriceLvls, l)
+    if array.size(bullPriceLvls) > maxPriceLvls
+        line.delete(array.shift(bullPriceLvls))
+
+if showPriceLvl
+    int bSz = array.size(bearPriceLvls)
+    int uSz = array.size(bullPriceLvls)
+    if bSz > 0
+        for i = 0 to bSz - 1
+            line.set_x2(array.get(bearPriceLvls, i), bar_index + priceLvlLen)
+    if uSz > 0
+        for i = 0 to uSz - 1
+            line.set_x2(array.get(bullPriceLvls, i), bar_index + priceLvlLen)
+
+plotshape(bearDiv and showPriceLvl, "Bear Div Price", shape.labeldown, location.abovebar, color.new(color.red, 10), offset=-divBarsR, text="CMC Bear", textcolor=color.white, force_overlay=true, size=size.small)
+plotshape(bullDiv and showPriceLvl, "Bull Div Price", shape.labelup, location.belowbar, color.new(color.lime, 10), offset=-divBarsR, text="CMC Bull", textcolor=color.white, force_overlay=true, size=size.small)
+plotshape(longSignal, "CMC Long", shape.labelup, location.bottom, color.new(color.lime, 0), text="CMC LONG", textcolor=color.black, size=size.small)
+plotshape(shortSignal, "CMC Short", shape.labeldown, location.top, color.new(color.red, 0), text="CMC SHORT", textcolor=color.white, size=size.small)
+
+var line entryLine = na
+var line stopLine = na
+var line targetLine = na
+var label setupLabel = na
+
+if showTradeLines and (longSignal or shortSignal)
+    line.delete(entryLine)
+    line.delete(stopLine)
+    line.delete(targetLine)
+    label.delete(setupLabel)
+    entryLine := line.new(bar_index, close, bar_index + 20, close, color=color.new(color.white, 15), width=1, force_overlay=true)
+    stopLine := line.new(bar_index, longSignal ? longStop : shortStop, bar_index + 20, longSignal ? longStop : shortStop, color=color.new(color.red, 0), width=2, force_overlay=true)
+    targetLine := line.new(bar_index, longSignal ? longTarget : shortTarget, bar_index + 20, longSignal ? longTarget : shortTarget, color=color.new(color.lime, 0), width=2, force_overlay=true)
+    setupLabel := label.new(bar_index, close, longSignal ? longSetup : shortSetup, color=longSignal ? color.new(color.lime, 10) : color.new(color.red, 10), textcolor=longSignal ? color.black : color.white, style=longSignal ? label.style_label_up : label.style_label_down, size=size.small, force_overlay=true)
+
+if showTradeLines and not na(entryLine)
+    line.set_x2(entryLine, bar_index + 20)
+    line.set_x2(stopLine, bar_index + 20)
+    line.set_x2(targetLine, bar_index + 20)
+
+if showTable and barstate.islast
+    tbl = table.new(position.top_right, 4, 13, bgcolor=color.new(color.black, 72), border_color=color.new(color.gray, 60), border_width=1, frame_color=color.new(color.gray, 40), frame_width=1)
+    table.cell(tbl, 0, 0, "vs " + syminfo.ticker, text_color=color.yellow, text_size=size.small)
+    table.cell(tbl, 1, 0, "Corr", text_color=color.gray, text_size=size.small)
+    table.cell(tbl, 2, 0, "Dev", text_color=color.gray, text_size=size.small)
+    table.cell(tbl, 3, 0, "Band", text_color=color.aqua, text_size=size.small)
+    corrs = array.from(nq_corr, es_corr, rty_corr, ym_corr, cl_corr, gc_corr, zn_corr, dxy_corr, nvda_corr, aapl_corr, msft_corr)
+    devs = array.from(nq_dev, es_dev, rty_dev, ym_dev, cl_dev, gc_dev, zn_dev, dxy_dev, nvda_dev, aapl_dev, msft_dev)
+    labels = array.from("NQ", "ES", "RTY", "YM", "CL", "GC", "ZN", "DXY", "NVDA", "AAPL", "MSFT")
+    enabled = array.from(useNQ, useES, useRTY, useYM, useCL, useGC, useZN, useDXY, useNVDA, useAAPL, useMSFT)
+    for i = 0 to 10
+        c = array.get(corrs, i)
+        d = array.get(devs, i)
+        lbl = array.get(labels, i)
+        active = array.get(enabled, i)
+        cc = active ? f_corrColor(c, minCorr) : color.new(color.gray, 70)
+        bandLbl = i == 0 ? f_bandPosLabel(bandPos) : ""
+        bandCol = i == 0 ? f_bandPosColor(bandPos) : color.new(color.gray, 90)
+        table.cell(tbl, 0, i + 1, lbl, text_color=cc, text_size=size.small)
+        table.cell(tbl, 1, i + 1, str.tostring(c, "#.00"), text_color=cc, text_size=size.small)
+        table.cell(tbl, 2, i + 1, str.tostring(d, "#.000"), text_color=cc, text_size=size.small)
+        table.cell(tbl, 3, i + 1, bandLbl, text_color=bandCol, text_size=size.small)
+    table.cell(tbl, 0, 12, "Band pos", text_color=color.new(color.gray, 40), text_size=size.small)
+    table.cell(tbl, 1, 12, str.tostring(bandPos, "#.00"), text_color=f_bandPosColor(bandPos), text_size=size.small)
+    table.cell(tbl, 2, 12, "", text_color=color.gray, text_size=size.small)
+    table.cell(tbl, 3, 12, "", text_color=color.gray, text_size=size.small)
+
+var table dash = table.new(position.bottom_right, 2, 7, bgcolor=color.new(color.black, 20), border_color=color.new(color.white, 75), border_width=1)
+positionText = strategy.position_size > 0 ? "Long" : strategy.position_size < 0 ? "Short" : "Flat"
+statusText = not timeframeOk ? "Wrong TF" : not inSession ? "Session wait" : longSignal ? "Long fired" : shortSignal ? "Short fired" : "Scanning"
+if showDashboard and barstate.islast
+    table.cell(dash, 0, 0, "CMC", text_color=color.white, bgcolor=color.new(color.teal, 55), text_size=size.tiny)
+    table.cell(dash, 1, 0, statusText, text_color=color.white, bgcolor=color.new(color.teal, 55), text_size=size.tiny)
+    table.cell(dash, 0, 1, "Mode", text_color=color.silver, text_size=size.tiny)
+    table.cell(dash, 1, 1, strategyMode, text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 0, 2, "Comp", text_color=color.silver, text_size=size.tiny)
+    table.cell(dash, 1, 2, str.tostring(composite, "#.###"), text_color=composite >= 0 ? color.lime : color.orange, text_size=size.tiny)
+    table.cell(dash, 0, 3, "Band", text_color=color.silver, text_size=size.tiny)
+    table.cell(dash, 1, 3, str.tostring(bandPos, "#.##"), text_color=f_bandPosColor(bandPos), text_size=size.tiny)
+    table.cell(dash, 0, 4, "Setup", text_color=color.silver, text_size=size.tiny)
+    table.cell(dash, 1, 4, activeSetup, text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 0, 5, "Pos", text_color=color.silver, text_size=size.tiny)
+    table.cell(dash, 1, 5, positionText, text_color=strategy.position_size == 0 ? color.white : strategy.openprofit >= 0 ? color.lime : color.orange, text_size=size.tiny)
+    table.cell(dash, 0, 6, "P/L", text_color=color.silver, text_size=size.tiny)
+    table.cell(dash, 1, 6, str.tostring(strategy.netprofit, "#.##"), text_color=strategy.netprofit >= 0 ? color.lime : color.red, text_size=size.tiny)
+
+// ---------------- Alerts ----------------
+alertcondition(bullDiv, "CMC Bull Divergence", "CMC: Bullish divergence - price lower low and composite higher low")
+alertcondition(bearDiv, "CMC Bear Divergence", "CMC: Bearish divergence - price higher high and composite lower high")
+alertcondition(longSignal, "CMC Strategy Long", "CMC strategy long signal")
+alertcondition(shortSignal, "CMC Strategy Short", "CMC strategy short signal")
+alertcondition(longSmartExit, "CMC Strategy Exit Long", "CMC strategy exit long")
+alertcondition(shortSmartExit, "CMC Strategy Exit Short", "CMC strategy exit short")

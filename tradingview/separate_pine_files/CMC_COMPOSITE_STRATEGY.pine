@@ -34,6 +34,11 @@ minBandExtreme = input.float(1.0, "Band Reversion Extreme", minval=0.25, maxval=
 useSmartCmcGate = input.bool(true, "Smart Pro Trade Filter", group=GRP_STRAT)
 minTradeScore = input.float(62.0, "Minimum CMC Trade Score", minval=20.0, maxval=100.0, step=1.0, group=GRP_STRAT)
 maxChopScore = input.float(70.0, "Max Chop Score", minval=20.0, maxval=100.0, step=1.0, group=GRP_STRAT)
+useAdaptiveLearning = input.bool(true, "Learn From Wins And Losses", group=GRP_STRAT)
+learningWinBoost = input.float(2.0, "Learning Boost After Win", minval=0.0, maxval=10.0, step=0.25, group=GRP_STRAT)
+learningLossPenalty = input.float(4.0, "Learning Penalty After Loss", minval=0.0, maxval=15.0, step=0.25, group=GRP_STRAT)
+learningMaxAdjust = input.float(14.0, "Max Learning Score Adjust", minval=0.0, maxval=30.0, step=0.5, group=GRP_STRAT)
+learningDecayPct = input.float(0.15, "Learning Decay Per Bar %", minval=0.0, maxval=5.0, step=0.05, group=GRP_STRAT)
 
 // ---------------- Live Supertrend Signal Bot ----------------
 useLiveSignalBot = input.bool(true, "Enable Live Signal Bot", group=GRP_LIVE)
@@ -93,6 +98,9 @@ minTrailPoints = input.float(5.0, "Minimum Trail Distance Points", minval=0.25, 
 trailAfterPoints = input.float(10.0, "Start Trailing After Profit Points", minval=0.25, maxval=200.0, step=0.25, group=GRP_RISK)
 profitGivebackPoints = input.float(8.0, "Smart Profit Giveback Points", minval=0.25, maxval=200.0, step=0.25, group=GRP_RISK)
 earlyExitLossPoints = input.float(7.5, "Early Exit If Thesis Fails Points", minval=0.25, maxval=200.0, step=0.25, group=GRP_RISK)
+useProfitClimaxExit = input.bool(true, "Exit Profit Climax Candles", group=GRP_RISK)
+climaxMinProfitPoints = input.float(24.0, "Min Profit For Climax Exit Points", minval=1.0, maxval=500.0, step=0.5, group=GRP_RISK)
+climaxAtrMult = input.float(1.35, "Climax Candle ATR Multiplier", minval=0.5, maxval=5.0, step=0.05, group=GRP_RISK)
 useSmartExit = input.bool(true, "Smart Composite Exit", group=GRP_RISK)
 minBarsBeforeSmartExit = input.int(2, "Min Bars Before Smart Exit", minval=0, maxval=50, group=GRP_RISK)
 maxBarsInTrade = input.int(48, "Max Bars In Trade", minval=2, maxval=500, group=GRP_RISK)
@@ -264,6 +272,8 @@ relativeVolume = volumeBaseline > 0 ? volume / volumeBaseline : 1.0
 candleRange = math.max(high - low, syminfo.mintick)
 body = math.abs(close - open)
 bodyPct = body / candleRange
+upperWick = high - math.max(open, close)
+lowerWick = math.min(open, close) - low
 longCloseQuality = (close - low) / candleRange
 shortCloseQuality = (high - close) / candleRange
 emaSlope = (priceEmaFast - nz(priceEmaFast[3], priceEmaFast)) / math.max(atr, syminfo.mintick)
@@ -290,6 +300,40 @@ var string activeSetup = "None"
 var label activeTradeLabel = na
 var int reportBullTrades = 0
 var int reportBearTrades = 0
+var int reviewedClosedTrades = 0
+var float adaptiveLongEdge = 0.0
+var float adaptiveShortEdge = 0.0
+var int learnLongWins = 0
+var int learnLongLosses = 0
+var int learnShortWins = 0
+var int learnShortLosses = 0
+
+if useAdaptiveLearning
+    learningDecay = 1.0 - learningDecayPct / 100.0
+    adaptiveLongEdge := clamp(adaptiveLongEdge * learningDecay, -learningMaxAdjust, learningMaxAdjust)
+    adaptiveShortEdge := clamp(adaptiveShortEdge * learningDecay, -learningMaxAdjust, learningMaxAdjust)
+
+if useAdaptiveLearning and strategy.closedtrades > reviewedClosedTrades
+    closedIdx = strategy.closedtrades - 1
+    closedPnl = strategy.closedtrades.profit(closedIdx)
+    closedId = strategy.closedtrades.entry_id(closedIdx)
+    closedLong = str.contains(closedId, "Bull")
+    closedShort = str.contains(closedId, "Bear")
+    if closedLong
+        if closedPnl > 0
+            learnLongWins += 1
+            adaptiveLongEdge := clamp(adaptiveLongEdge + learningWinBoost, -learningMaxAdjust, learningMaxAdjust)
+        else
+            learnLongLosses += 1
+            adaptiveLongEdge := clamp(adaptiveLongEdge - learningLossPenalty, -learningMaxAdjust, learningMaxAdjust)
+    if closedShort
+        if closedPnl > 0
+            learnShortWins += 1
+            adaptiveShortEdge := clamp(adaptiveShortEdge + learningWinBoost, -learningMaxAdjust, learningMaxAdjust)
+        else
+            learnShortLosses += 1
+            adaptiveShortEdge := clamp(adaptiveShortEdge - learningLossPenalty, -learningMaxAdjust, learningMaxAdjust)
+    reviewedClosedTrades := strategy.closedtrades
 
 cooldownOk = na(lastTradeBar) or bar_index - lastTradeBar > cooldownBars
 baseGate = confirmedOk and timeframeOk and inSession and cooldownOk and strategy.position_size == 0
@@ -313,8 +357,10 @@ cmcLongSignalRaw = (modeUsesDiv and bullDiv) or (modeUsesCross and compositeLong
 cmcShortSignalRaw = (modeUsesDiv and bearDiv) or (modeUsesCross and compositeShortCross) or (modeUsesBand and bandReversionShort)
 orderLongRaw = (useCmcStrategyOrders and cmcLongSignalRaw) or (useLiveStrategyOrders and liveBuyTrigger)
 orderShortRaw = (useCmcStrategyOrders and cmcShortSignalRaw) or (useLiveStrategyOrders and liveSellTrigger)
-longScore = clamp(26.0 + scoreBool(bullDiv, 22) + scoreBool(composite > composite[1], 10) + scoreBool(bandPos <= 0.25, 6) + scoreBool(buyersPress, 12) + scoreBool(longCloseQuality >= 0.62, 8) + scoreBool(close >= vwapValue or low <= vwapValue, 8) + scoreBool(close >= priceEmaFast or low <= priceEmaFast, 8) + scoreBool(relativeVolume >= 0.85, 6) + scoreBool(plusDi >= minusDi or composite > 0, 5) - scoreBool(chopScore > maxChopScore, 18) - scoreBool(sellersPress, 12) - scoreBool(close < priceEmaSlow and emaSlope < -0.12, 8), 0.0, 100.0)
-shortScore = clamp(26.0 + scoreBool(bearDiv, 22) + scoreBool(composite < composite[1], 10) + scoreBool(bandPos >= -0.25, 6) + scoreBool(sellersPress, 12) + scoreBool(shortCloseQuality >= 0.62, 8) + scoreBool(close <= vwapValue or high >= vwapValue, 8) + scoreBool(close <= priceEmaFast or high >= priceEmaFast, 8) + scoreBool(relativeVolume >= 0.85, 6) + scoreBool(minusDi >= plusDi or composite < 0, 5) - scoreBool(chopScore > maxChopScore, 18) - scoreBool(buyersPress, 12) - scoreBool(close > priceEmaSlow and emaSlope > 0.12, 8), 0.0, 100.0)
+rawLongScore = 26.0 + scoreBool(bullDiv, 22) + scoreBool(composite > composite[1], 10) + scoreBool(bandPos <= 0.25, 6) + scoreBool(buyersPress, 12) + scoreBool(longCloseQuality >= 0.62, 8) + scoreBool(close >= vwapValue or low <= vwapValue, 8) + scoreBool(close >= priceEmaFast or low <= priceEmaFast, 8) + scoreBool(relativeVolume >= 0.85, 6) + scoreBool(plusDi >= minusDi or composite > 0, 5) - scoreBool(chopScore > maxChopScore, 18) - scoreBool(sellersPress, 12) - scoreBool(close < priceEmaSlow and emaSlope < -0.12, 8)
+rawShortScore = 26.0 + scoreBool(bearDiv, 22) + scoreBool(composite < composite[1], 10) + scoreBool(bandPos >= -0.25, 6) + scoreBool(sellersPress, 12) + scoreBool(shortCloseQuality >= 0.62, 8) + scoreBool(close <= vwapValue or high >= vwapValue, 8) + scoreBool(close <= priceEmaFast or high >= priceEmaFast, 8) + scoreBool(relativeVolume >= 0.85, 6) + scoreBool(minusDi >= plusDi or composite < 0, 5) - scoreBool(chopScore > maxChopScore, 18) - scoreBool(buyersPress, 12) - scoreBool(close > priceEmaSlow and emaSlope > 0.12, 8)
+longScore = clamp(rawLongScore + (useAdaptiveLearning ? adaptiveLongEdge : 0.0), 0.0, 100.0)
+shortScore = clamp(rawShortScore + (useAdaptiveLearning ? adaptiveShortEdge : 0.0), 0.0, 100.0)
 smartLongOk = not useSmartCmcGate or (longScore >= minTradeScore and longScore >= shortScore + 6 and chopScore <= maxChopScore and composite > composite[1] and (buyersPress or close > priceEmaFast or close > vwapValue))
 smartShortOk = not useSmartCmcGate or (shortScore >= minTradeScore and shortScore >= longScore + 6 and chopScore <= maxChopScore and composite < composite[1] and (sellersPress or close < priceEmaFast or close < vwapValue))
 bullBearAlertGate = useBullBearAlertReportOrders and confirmedOk and reportTimeframeOk and inSession and cooldownOk and strategy.position_size == 0
@@ -409,8 +455,14 @@ longThesisFail = longOpenPoints <= -earlyExitLossPoints and (sellersPress or sho
 shortThesisFail = shortOpenPoints <= -earlyExitLossPoints and (buyersPress or longScore > shortScore or close > vwapValue)
 longProfitDrain = longBestPointsNow >= trailAfterPoints and longGivebackPoints >= profitGivebackPoints and (sellersPress or composite < composite[1] or shortScore >= longScore)
 shortProfitDrain = shortBestPointsNow >= trailAfterPoints and shortGivebackPoints >= profitGivebackPoints and (buyersPress or composite > composite[1] or longScore >= shortScore)
-longSmartExit = useSmartExit and strategy.position_size > 0 and barsInTrade >= minBarsBeforeSmartExit and confirmedOk and (longThesisFail or longProfitDrain or bearDiv or liveSellTrigger or ta.crossunder(composite, bandMean) or barsInTrade >= maxBarsInTrade)
-shortSmartExit = useSmartExit and strategy.position_size < 0 and barsInTrade >= minBarsBeforeSmartExit and confirmedOk and (shortThesisFail or shortProfitDrain or bullDiv or liveBuyTrigger or ta.crossover(composite, bandMean) or barsInTrade >= maxBarsInTrade)
+longClimaxGreen = close > open and candleRange >= atr * climaxAtrMult and longCloseQuality >= 0.68
+longReversalAfterPush = close < open and longBestPointsNow >= climaxMinProfitPoints and (high >= nz(activeBest, high) - syminfo.mintick * 8 or upperWick >= body * 0.7)
+shortClimaxRed = close < open and candleRange >= atr * climaxAtrMult and shortCloseQuality >= 0.68
+shortReversalAfterDrop = close > open and shortBestPointsNow >= climaxMinProfitPoints and (low <= nz(activeBest, low) + syminfo.mintick * 8 or lowerWick >= body * 0.7)
+longProfitClimax = useProfitClimaxExit and longBestPointsNow >= climaxMinProfitPoints and (longClimaxGreen or longReversalAfterPush)
+shortProfitClimax = useProfitClimaxExit and shortBestPointsNow >= climaxMinProfitPoints and (shortClimaxRed or shortReversalAfterDrop)
+longSmartExit = useSmartExit and strategy.position_size > 0 and barsInTrade >= minBarsBeforeSmartExit and confirmedOk and (longThesisFail or longProfitDrain or longProfitClimax or bearDiv or liveSellTrigger or ta.crossunder(composite, bandMean) or barsInTrade >= maxBarsInTrade)
+shortSmartExit = useSmartExit and strategy.position_size < 0 and barsInTrade >= minBarsBeforeSmartExit and confirmedOk and (shortThesisFail or shortProfitDrain or shortProfitClimax or bullDiv or liveBuyTrigger or ta.crossover(composite, bandMean) or barsInTrade >= maxBarsInTrade)
 
 if longSmartExit
     strategy.close("CMC Bull Buy", alert_message=exitLongMessage)
@@ -517,6 +569,8 @@ plotshape(bearDiv and showPriceLvl, "CMC Bear Sell Alert", shape.labeldown, loca
 plotshape(bullDiv and showPriceLvl, "CMC Bull Buy Alert", shape.labelup, location.belowbar, color.new(color.lime, 10), offset=-divBarsR, text="CMC Bull Buy", textcolor=color.white, force_overlay=true, size=size.small)
 plotshape(longSignal, "CMC Bull Buy Strategy Entry", shape.triangleup, location.belowbar, color.new(color.lime, 0), text="BUY", textcolor=color.black, force_overlay=true, size=size.small)
 plotshape(shortSignal, "CMC Bear Sell Strategy Entry", shape.triangledown, location.abovebar, color.new(color.red, 0), text="SELL", textcolor=color.white, force_overlay=true, size=size.small)
+plotshape(longSmartExit and longProfitClimax, "CMC Long Profit Climax Exit", shape.diamond, location.abovebar, color.new(color.blue, 0), text="LOCK", textcolor=color.white, force_overlay=true, size=size.tiny)
+plotshape(shortSmartExit and shortProfitClimax, "CMC Short Profit Climax Exit", shape.diamond, location.belowbar, color.new(color.blue, 0), text="LOCK", textcolor=color.white, force_overlay=true, size=size.tiny)
 plotshape(longExitMarker, "CMC Bull Sold", shape.labeldown, location.abovebar, color.new(color.yellow, 0), text="SOLD", textcolor=color.black, force_overlay=true, size=size.tiny)
 plotshape(shortExitMarker, "CMC Bear Covered", shape.labelup, location.belowbar, color.new(color.yellow, 0), text="BOUGHT", textcolor=color.black, force_overlay=true, size=size.tiny)
 plotshape(showLiveSignalLabels and liveBuyTrigger, "Live Signal Buy", shape.labelup, location.belowbar, color.new(#00ff88, 0), text="BUY", textcolor=color.black, force_overlay=true, size=size.small)
@@ -587,7 +641,7 @@ if showTable and barstate.islast
     table.cell(tbl, 2, 12, "", text_color=color.gray, text_size=size.small)
     table.cell(tbl, 3, 12, "", text_color=color.gray, text_size=size.small)
 
-var table dash = table.new(position.bottom_right, 2, 8, bgcolor=color.new(color.black, 20), border_color=color.new(color.white, 75), border_width=1)
+var table dash = table.new(position.bottom_right, 2, 10, bgcolor=color.new(color.black, 20), border_color=color.new(color.white, 75), border_width=1)
 positionText = strategy.position_size > 0 ? "Long" : strategy.position_size < 0 ? "Short" : "Flat"
 statusText = useBullBearAlertReportOrders and not reportTimeframeOk ? "Use 1m/5m/15m" : not timeframeOk ? "Wrong TF" : not inSession and not useBullBearAlertReportOrders ? "Session wait" : longSignal ? "Long fired" : shortSignal ? "Short fired" : "Scanning"
 if showDashboard and barstate.islast
@@ -607,6 +661,10 @@ if showDashboard and barstate.islast
     table.cell(dash, 1, 6, str.tostring(strategy.netprofit, "#.##"), text_color=strategy.netprofit >= 0 ? color.lime : color.red, text_size=size.tiny)
     table.cell(dash, 0, 7, "Report", text_color=color.silver, text_size=size.tiny)
     table.cell(dash, 1, 7, "B " + str.tostring(reportBullTrades) + " / S " + str.tostring(reportBearTrades), text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 0, 8, "Score", text_color=color.silver, text_size=size.tiny)
+    table.cell(dash, 1, 8, str.tostring(longScore, "#") + " / " + str.tostring(shortScore, "#"), text_color=longScore >= shortScore ? color.lime : color.orange, text_size=size.tiny)
+    table.cell(dash, 0, 9, "Learn", text_color=color.silver, text_size=size.tiny)
+    table.cell(dash, 1, 9, "L " + str.tostring(adaptiveLongEdge, "#.#") + " S " + str.tostring(adaptiveShortEdge, "#.#"), text_color=adaptiveLongEdge >= adaptiveShortEdge ? color.lime : color.orange, text_size=size.tiny)
 
 // ---------------- Alerts ----------------
 alertcondition(bullDiv, "CMC Bull Divergence", "CMC: Bullish divergence - price lower low and composite higher low")

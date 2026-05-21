@@ -34,6 +34,9 @@ minBandExtreme = input.float(1.0, "Band Reversion Extreme", minval=0.25, maxval=
 useSmartCmcGate = input.bool(true, "Smart Pro Trade Filter", group=GRP_STRAT)
 minTradeScore = input.float(62.0, "Minimum CMC Trade Score", minval=20.0, maxval=100.0, step=1.0, group=GRP_STRAT)
 maxChopScore = input.float(70.0, "Max Chop Score", minval=20.0, maxval=100.0, step=1.0, group=GRP_STRAT)
+useVolatilityFilter = input.bool(true, "Volatility Confirmation Filter", group=GRP_STRAT)
+minAtrPctOfPrice = input.float(0.05, "Min ATR % Of Price", minval=0.0, maxval=5.0, step=0.01, group=GRP_STRAT)
+minBbWidthPct = input.float(0.08, "Min Bollinger Width %", minval=0.0, maxval=10.0, step=0.01, group=GRP_STRAT)
 useAdaptiveLearning = input.bool(true, "Learn From Wins And Losses", group=GRP_STRAT)
 learningWinBoost = input.float(2.0, "Learning Boost After Win", minval=0.0, maxval=10.0, step=0.25, group=GRP_STRAT)
 learningLossPenalty = input.float(4.0, "Learning Penalty After Loss", minval=0.0, maxval=15.0, step=0.25, group=GRP_STRAT)
@@ -51,6 +54,9 @@ srcRes = input.timeframe("5", "Data Resolution", group=GRP_RES)
 
 emaLen = input.int(21, "EMA Length", group=GRP_EMA, minval=1, maxval=500)
 smoothLen = input.int(3, "Composite Smoothing EMA", group=GRP_EMA, minval=1, maxval=50)
+useSlopeWeightedEma = input.bool(true, "Slope-Weighted EMA Composite", group=GRP_EMA)
+slopeWeightStrength = input.float(1.0, "Slope Weight Strength", group=GRP_EMA, minval=0.0, maxval=5.0, step=0.1)
+maxSlopeWeightPct = input.float(12.0, "Max EMA Slope Weight %", group=GRP_EMA, minval=0.0, maxval=50.0, step=0.5)
 
 corrLen = input.int(50, "Correlation Lookback", group=GRP_CORR, minval=10, maxval=500)
 minCorr = input.float(0.15, "Min Abs Correlation Threshold", group=GRP_CORR, minval=0.0, maxval=1.0, step=0.05)
@@ -120,6 +126,7 @@ scoreBool(cond, points) =>
     cond ? points : 0.0
 
 f_sec(sym) =>
+    // Keep lookahead_off: lookahead_on can leak future higher-timeframe data into backtests.
     request.security(sym, srcRes, close, barmerge.gaps_off, barmerge.lookahead_off, ignore_invalid_symbol=true)
 
 f_ret(src) =>
@@ -128,8 +135,11 @@ f_ret(src) =>
 f_weight(corr, minThresh, signed) =>
     math.abs(nz(corr)) >= minThresh ? (signed ? nz(corr) : math.abs(nz(corr))) : 0.0
 
-f_dev(src, len, zmode, zl) =>
-    e = ta.ema(src, len)
+f_dev(src, len, zmode, zl, weighted, slopeStrength, maxWeightPct) =>
+    eBase = ta.ema(src, len)
+    slopePct = not na(eBase) and not na(eBase[1]) and eBase[1] != 0.0 ? (eBase - eBase[1]) / eBase[1] * 100.0 : 0.0
+    slopeWeight = weighted ? clamp(slopePct * slopeStrength, -maxWeightPct, maxWeightPct) / 100.0 : 0.0
+    e = eBase * (1.0 + slopeWeight)
     pct = e != 0.0 ? (src - e) / e * 100.0 : 0.0
     if zmode
         mn = ta.sma(pct, zl)
@@ -208,17 +218,17 @@ nvda_w = useNVDA ? f_weight(nvda_corr, minCorr, useSigned) : 0.0
 aapl_w = useAAPL ? f_weight(aapl_corr, minCorr, useSigned) : 0.0
 msft_w = useMSFT ? f_weight(msft_corr, minCorr, useSigned) : 0.0
 
-nq_dev = f_dev(nq_c, emaLen, useZscore, zLen)
-es_dev = f_dev(es_c, emaLen, useZscore, zLen)
-rty_dev = f_dev(rty_c, emaLen, useZscore, zLen)
-ym_dev = f_dev(ym_c, emaLen, useZscore, zLen)
-cl_dev = f_dev(cl_c, emaLen, useZscore, zLen)
-gc_dev = f_dev(gc_c, emaLen, useZscore, zLen)
-zn_dev = f_dev(zn_c, emaLen, useZscore, zLen)
-dxy_dev = f_dev(dxy_c, emaLen, useZscore, zLen)
-nvda_dev = f_dev(nvda_c, emaLen, useZscore, zLen)
-aapl_dev = f_dev(aapl_c, emaLen, useZscore, zLen)
-msft_dev = f_dev(msft_c, emaLen, useZscore, zLen)
+nq_dev = f_dev(nq_c, emaLen, useZscore, zLen, useSlopeWeightedEma, slopeWeightStrength, maxSlopeWeightPct)
+es_dev = f_dev(es_c, emaLen, useZscore, zLen, useSlopeWeightedEma, slopeWeightStrength, maxSlopeWeightPct)
+rty_dev = f_dev(rty_c, emaLen, useZscore, zLen, useSlopeWeightedEma, slopeWeightStrength, maxSlopeWeightPct)
+ym_dev = f_dev(ym_c, emaLen, useZscore, zLen, useSlopeWeightedEma, slopeWeightStrength, maxSlopeWeightPct)
+cl_dev = f_dev(cl_c, emaLen, useZscore, zLen, useSlopeWeightedEma, slopeWeightStrength, maxSlopeWeightPct)
+gc_dev = f_dev(gc_c, emaLen, useZscore, zLen, useSlopeWeightedEma, slopeWeightStrength, maxSlopeWeightPct)
+zn_dev = f_dev(zn_c, emaLen, useZscore, zLen, useSlopeWeightedEma, slopeWeightStrength, maxSlopeWeightPct)
+dxy_dev = f_dev(dxy_c, emaLen, useZscore, zLen, useSlopeWeightedEma, slopeWeightStrength, maxSlopeWeightPct)
+nvda_dev = f_dev(nvda_c, emaLen, useZscore, zLen, useSlopeWeightedEma, slopeWeightStrength, maxSlopeWeightPct)
+aapl_dev = f_dev(aapl_c, emaLen, useZscore, zLen, useSlopeWeightedEma, slopeWeightStrength, maxSlopeWeightPct)
+msft_dev = f_dev(msft_c, emaLen, useZscore, zLen, useSlopeWeightedEma, slopeWeightStrength, maxSlopeWeightPct)
 
 baseNum = nq_dev * nq_w + es_dev * es_w + rty_dev * rty_w + ym_dev * ym_w + cl_dev * cl_w + gc_dev * gc_w + zn_dev * zn_w + dxy_dev * dxy_w + nvda_dev * nvda_w + aapl_dev * aapl_w + msft_dev * msft_w
 baseDen = math.abs(nq_w) + math.abs(es_w) + math.abs(rty_w) + math.abs(ym_w) + math.abs(cl_w) + math.abs(gc_w) + math.abs(zn_w) + math.abs(dxy_w) + math.abs(nvda_w) + math.abs(aapl_w) + math.abs(msft_w)
@@ -288,6 +298,11 @@ alternatingCandles = (close > open and close[1] < open[1]) or (close < open and 
 vwapCrossEvent = ta.cross(close, vwapValue) ? 1.0 : 0.0
 vwapCrosses = ta.sma(vwapCrossEvent, 12) * 12.0
 chopScore = clamp(20.0 + scoreBool(adxValue < 15, 18) + scoreBool(math.abs(emaSlope) < 0.04, 12) + scoreBool(math.abs(vwapSlope) < 0.04, 10) + scoreBool(candleOverlap > 0.55, 10) + scoreBool(alternatingCandles, 8) + scoreBool(vwapCrosses >= 4, 12) - scoreBool(adxValue >= 20 and math.abs(emaSlope) >= 0.08, 14), 0.0, 100.0)
+bbBasisPrice = ta.sma(close, 20)
+bbDevPrice = ta.stdev(close, 20) * 2.0
+bbWidthPct = not na(bbBasisPrice) and bbBasisPrice != 0.0 ? (bbDevPrice * 2.0) / bbBasisPrice * 100.0 : 0.0
+priceAtrPct = close != 0.0 ? atr / close * 100.0 : 0.0
+volatilityConfirmOk = not useVolatilityFilter or (priceAtrPct >= minAtrPctOfPrice and bbWidthPct >= minBbWidthPct)
 
 var int lastTradeBar = na
 var float activeStop = na
@@ -357,12 +372,12 @@ cmcLongSignalRaw = (modeUsesDiv and bullDiv) or (modeUsesCross and compositeLong
 cmcShortSignalRaw = (modeUsesDiv and bearDiv) or (modeUsesCross and compositeShortCross) or (modeUsesBand and bandReversionShort)
 orderLongRaw = (useCmcStrategyOrders and cmcLongSignalRaw) or (useLiveStrategyOrders and liveBuyTrigger)
 orderShortRaw = (useCmcStrategyOrders and cmcShortSignalRaw) or (useLiveStrategyOrders and liveSellTrigger)
-rawLongScore = 26.0 + scoreBool(bullDiv, 22) + scoreBool(composite > composite[1], 10) + scoreBool(bandPos <= 0.25, 6) + scoreBool(buyersPress, 12) + scoreBool(longCloseQuality >= 0.62, 8) + scoreBool(close >= vwapValue or low <= vwapValue, 8) + scoreBool(close >= priceEmaFast or low <= priceEmaFast, 8) + scoreBool(relativeVolume >= 0.85, 6) + scoreBool(plusDi >= minusDi or composite > 0, 5) - scoreBool(chopScore > maxChopScore, 18) - scoreBool(sellersPress, 12) - scoreBool(close < priceEmaSlow and emaSlope < -0.12, 8)
-rawShortScore = 26.0 + scoreBool(bearDiv, 22) + scoreBool(composite < composite[1], 10) + scoreBool(bandPos >= -0.25, 6) + scoreBool(sellersPress, 12) + scoreBool(shortCloseQuality >= 0.62, 8) + scoreBool(close <= vwapValue or high >= vwapValue, 8) + scoreBool(close <= priceEmaFast or high >= priceEmaFast, 8) + scoreBool(relativeVolume >= 0.85, 6) + scoreBool(minusDi >= plusDi or composite < 0, 5) - scoreBool(chopScore > maxChopScore, 18) - scoreBool(buyersPress, 12) - scoreBool(close > priceEmaSlow and emaSlope > 0.12, 8)
+rawLongScore = 26.0 + scoreBool(bullDiv, 22) + scoreBool(composite > composite[1], 10) + scoreBool(bandPos <= 0.25, 6) + scoreBool(buyersPress, 12) + scoreBool(longCloseQuality >= 0.62, 8) + scoreBool(close >= vwapValue or low <= vwapValue, 8) + scoreBool(close >= priceEmaFast or low <= priceEmaFast, 8) + scoreBool(relativeVolume >= 0.85, 6) + scoreBool(plusDi >= minusDi or composite > 0, 5) + scoreBool(volatilityConfirmOk, 6) - scoreBool(not volatilityConfirmOk, 12) - scoreBool(chopScore > maxChopScore, 18) - scoreBool(sellersPress, 12) - scoreBool(close < priceEmaSlow and emaSlope < -0.12, 8)
+rawShortScore = 26.0 + scoreBool(bearDiv, 22) + scoreBool(composite < composite[1], 10) + scoreBool(bandPos >= -0.25, 6) + scoreBool(sellersPress, 12) + scoreBool(shortCloseQuality >= 0.62, 8) + scoreBool(close <= vwapValue or high >= vwapValue, 8) + scoreBool(close <= priceEmaFast or high >= priceEmaFast, 8) + scoreBool(relativeVolume >= 0.85, 6) + scoreBool(minusDi >= plusDi or composite < 0, 5) + scoreBool(volatilityConfirmOk, 6) - scoreBool(not volatilityConfirmOk, 12) - scoreBool(chopScore > maxChopScore, 18) - scoreBool(buyersPress, 12) - scoreBool(close > priceEmaSlow and emaSlope > 0.12, 8)
 longScore = clamp(rawLongScore + (useAdaptiveLearning ? adaptiveLongEdge : 0.0), 0.0, 100.0)
 shortScore = clamp(rawShortScore + (useAdaptiveLearning ? adaptiveShortEdge : 0.0), 0.0, 100.0)
-smartLongOk = not useSmartCmcGate or (longScore >= minTradeScore and longScore >= shortScore + 6 and chopScore <= maxChopScore and composite > composite[1] and (buyersPress or close > priceEmaFast or close > vwapValue))
-smartShortOk = not useSmartCmcGate or (shortScore >= minTradeScore and shortScore >= longScore + 6 and chopScore <= maxChopScore and composite < composite[1] and (sellersPress or close < priceEmaFast or close < vwapValue))
+smartLongOk = not useSmartCmcGate or (longScore >= minTradeScore and longScore >= shortScore + 6 and chopScore <= maxChopScore and volatilityConfirmOk and composite > composite[1] and (buyersPress or close > priceEmaFast or close > vwapValue))
+smartShortOk = not useSmartCmcGate or (shortScore >= minTradeScore and shortScore >= longScore + 6 and chopScore <= maxChopScore and volatilityConfirmOk and composite < composite[1] and (sellersPress or close < priceEmaFast or close < vwapValue))
 bullBearAlertGate = useBullBearAlertReportOrders and confirmedOk and reportTimeframeOk and inSession and cooldownOk and strategy.position_size == 0
 bullBearLongSignal = bullBearAlertGate and bullDiv and smartLongOk
 bullBearShortSignal = bullBearAlertGate and bearDiv and smartShortOk
@@ -389,10 +404,11 @@ longMessage = '{"source":"tradingview","bot":"personal_cmc_strategy","action":"B
 shortMessage = '{"source":"tradingview","bot":"personal_cmc_strategy","action":"SELL","ticker":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","setup":"' + shortSetup + '","entry":' + str.tostring(close, format.mintick) + ',"stop":' + str.tostring(shortStop, format.mintick) + ',"target":' + str.tostring(shortTarget, format.mintick) + ',"qty":' + str.tostring(tradeQty) + ',"composite":' + str.tostring(composite, "#.####") + ',"band_pos":' + str.tostring(bandPos, "#.##") + '}'
 exitLongMessage = '{"source":"tradingview","bot":"personal_cmc_strategy","action":"EXIT_LONG","ticker":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","price":' + str.tostring(close, format.mintick) + ',"reason":"CMC stop target or smart composite exit","composite":' + str.tostring(composite, "#.####") + '}'
 exitShortMessage = '{"source":"tradingview","bot":"personal_cmc_strategy","action":"EXIT_SHORT","ticker":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","price":' + str.tostring(close, format.mintick) + ',"reason":"CMC stop target or smart composite exit","composite":' + str.tostring(composite, "#.####") + '}'
-longReason = "Bull divergence confirmed with score " + str.tostring(longScore, "#") + ", chop " + str.tostring(chopScore, "#") + ", composite rising, and buyer confirmation."
-shortReason = "Bear divergence confirmed with score " + str.tostring(shortScore, "#") + ", chop " + str.tostring(chopScore, "#") + ", composite falling, and seller confirmation."
-longTooltip = "CMC Bull Buy\nEntry: " + str.tostring(close, format.mintick) + "\nStop: " + str.tostring(longStop, format.mintick) + "\nTake Profit: " + str.tostring(longTarget, format.mintick) + "\nScore L/S: " + str.tostring(longScore, "#") + " / " + str.tostring(shortScore, "#") + "\nChop: " + str.tostring(chopScore, "#") + "\nReason: " + longReason
-shortTooltip = "CMC Bear Sell\nEntry: " + str.tostring(close, format.mintick) + "\nStop: " + str.tostring(shortStop, format.mintick) + "\nTake Profit: " + str.tostring(shortTarget, format.mintick) + "\nScore L/S: " + str.tostring(longScore, "#") + " / " + str.tostring(shortScore, "#") + "\nChop: " + str.tostring(chopScore, "#") + "\nReason: " + shortReason
+volText = volatilityConfirmOk ? "volatility confirmed" : "volatility too quiet"
+longReason = "Bull divergence confirmed with score " + str.tostring(longScore, "#") + ", chop " + str.tostring(chopScore, "#") + ", " + volText + ", composite rising, and buyer confirmation."
+shortReason = "Bear divergence confirmed with score " + str.tostring(shortScore, "#") + ", chop " + str.tostring(chopScore, "#") + ", " + volText + ", composite falling, and seller confirmation."
+longTooltip = "CMC Bull Buy\nEntry: " + str.tostring(close, format.mintick) + "\nStop: " + str.tostring(longStop, format.mintick) + "\nTake Profit: " + str.tostring(longTarget, format.mintick) + "\nScore L/S: " + str.tostring(longScore, "#") + " / " + str.tostring(shortScore, "#") + "\nChop: " + str.tostring(chopScore, "#") + "\nVol ATR/BB: " + str.tostring(priceAtrPct, "#.##") + "% / " + str.tostring(bbWidthPct, "#.##") + "%\nReason: " + longReason
+shortTooltip = "CMC Bear Sell\nEntry: " + str.tostring(close, format.mintick) + "\nStop: " + str.tostring(shortStop, format.mintick) + "\nTake Profit: " + str.tostring(shortTarget, format.mintick) + "\nScore L/S: " + str.tostring(longScore, "#") + " / " + str.tostring(shortScore, "#") + "\nChop: " + str.tostring(chopScore, "#") + "\nVol ATR/BB: " + str.tostring(priceAtrPct, "#.##") + "% / " + str.tostring(bbWidthPct, "#.##") + "%\nReason: " + shortReason
 
 if longSignal
     activeEntry := close
@@ -641,9 +657,9 @@ if showTable and barstate.islast
     table.cell(tbl, 2, 12, "", text_color=color.gray, text_size=size.small)
     table.cell(tbl, 3, 12, "", text_color=color.gray, text_size=size.small)
 
-var table dash = table.new(position.bottom_right, 2, 10, bgcolor=color.new(color.black, 20), border_color=color.new(color.white, 75), border_width=1)
+var table dash = table.new(position.bottom_right, 2, 11, bgcolor=color.new(color.black, 20), border_color=color.new(color.white, 75), border_width=1)
 positionText = strategy.position_size > 0 ? "Long" : strategy.position_size < 0 ? "Short" : "Flat"
-statusText = useBullBearAlertReportOrders and not reportTimeframeOk ? "Use 1m/5m/15m" : not timeframeOk ? "Wrong TF" : not inSession and not useBullBearAlertReportOrders ? "Session wait" : longSignal ? "Long fired" : shortSignal ? "Short fired" : "Scanning"
+statusText = useBullBearAlertReportOrders and not reportTimeframeOk ? "Use 1m/5m/15m" : not timeframeOk ? "Wrong TF" : not inSession and not useBullBearAlertReportOrders ? "Session wait" : useSmartCmcGate and not volatilityConfirmOk ? "Vol wait" : longSignal ? "Long fired" : shortSignal ? "Short fired" : "Scanning"
 if showDashboard and barstate.islast
     table.cell(dash, 0, 0, "CMC", text_color=color.white, bgcolor=color.new(color.teal, 55), text_size=size.tiny)
     table.cell(dash, 1, 0, statusText, text_color=color.white, bgcolor=color.new(color.teal, 55), text_size=size.tiny)
@@ -665,6 +681,8 @@ if showDashboard and barstate.islast
     table.cell(dash, 1, 8, str.tostring(longScore, "#") + " / " + str.tostring(shortScore, "#"), text_color=longScore >= shortScore ? color.lime : color.orange, text_size=size.tiny)
     table.cell(dash, 0, 9, "Learn", text_color=color.silver, text_size=size.tiny)
     table.cell(dash, 1, 9, "L " + str.tostring(adaptiveLongEdge, "#.#") + " S " + str.tostring(adaptiveShortEdge, "#.#"), text_color=adaptiveLongEdge >= adaptiveShortEdge ? color.lime : color.orange, text_size=size.tiny)
+    table.cell(dash, 0, 10, "Vol", text_color=color.silver, text_size=size.tiny)
+    table.cell(dash, 1, 10, str.tostring(priceAtrPct, "#.##") + "% / " + str.tostring(bbWidthPct, "#.##") + "%", text_color=volatilityConfirmOk ? color.lime : color.orange, text_size=size.tiny)
 
 // ---------------- Alerts ----------------
 alertcondition(bullDiv, "CMC Bull Divergence", "CMC: Bullish divergence - price lower low and composite higher low")

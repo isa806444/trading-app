@@ -1,4 +1,4 @@
-"""CLI entry point for the v44 no-leak NQ Python backtest."""
+"""CLI entry point for the Quantum Pro no-leak NQ Python backtest."""
 
 from __future__ import annotations
 
@@ -65,7 +65,7 @@ def _load_or_fetch(args: argparse.Namespace) -> pd.DataFrame:
 
 def main() -> None:
     load_local_env()
-    parser = argparse.ArgumentParser(description="Run the active v44 1H no-leak NQ backtest.")
+    parser = argparse.ArgumentParser(description="Run the active Quantum Pro 1H no-leak NQ backtest.")
     parser.add_argument("--symbol", default="NQ.c.0", help="Use NQ.c.0 continuous for 4-year testing, or NQM6 for a single contract.")
     parser.add_argument("--start", default=None)
     parser.add_argument("--end", default=None)

@@ -1,4 +1,4 @@
-"""Python strategy logic for the active v44 no-leak NQ bot."""
+"""Python strategy logic for the active NQ Quantum Pro no-leak bot."""
 
 from __future__ import annotations
 
@@ -293,6 +293,147 @@ def add_v44_indicators(
     return out
 
 
+def add_quantum_pro_indicators(df: pd.DataFrame) -> pd.DataFrame:
+    """Add Pine-safe Quantum Pro research signals for Databento backtests.
+
+    This intentionally stays deterministic: no future bars, no external ML
+    memory, and no unconfirmed higher-timeframe candles. The TradingView Pine
+    version has a wider cross-market brain; the local Databento pass mirrors
+    the NQ-only core so the app can show a research-grade strategy report.
+    """
+    out = add_v44_indicators(df)
+    if out.empty:
+        return out
+
+    atr = out["atr"].clip(lower=0.25)
+    body = (out["close"] - out["open"]).abs().clip(lower=0.25)
+    close_high = (out["close"] - out["low"]) / out["candle_range"]
+    close_low = (out["high"] - out["close"]) / out["candle_range"]
+
+    out["bull_engulf"] = (
+        (out["close"] > out["open"])
+        & (out["close"].shift(1) < out["open"].shift(1))
+        & (out["close"] >= out["open"].shift(1))
+        & (out["open"] <= out["close"].shift(1))
+        & (close_high >= 0.62)
+    )
+    out["bear_engulf"] = (
+        (out["close"] < out["open"])
+        & (out["close"].shift(1) > out["open"].shift(1))
+        & (out["close"] <= out["open"].shift(1))
+        & (out["open"] >= out["close"].shift(1))
+        & (close_low >= 0.62)
+    )
+    out["bull_fvg"] = (out["low"] > out["high"].shift(2)) & ((out["low"] - out["high"].shift(2)) >= atr * 0.18)
+    out["bear_fvg"] = (out["high"] < out["low"].shift(2)) & ((out["low"].shift(2) - out["high"]) >= atr * 0.18)
+    out["bull_pin"] = (
+        (out["lower_wick"] >= body * 1.45)
+        & (close_high >= 0.58)
+        & ((out["low"] <= out["prior_low"] + atr * 0.35) | out["reclaim_long"])
+    )
+    out["bear_pin"] = (
+        (out["upper_wick"] >= body * 1.45)
+        & (close_low >= 0.58)
+        & ((out["high"] >= out["prior_high"] - atr * 0.35) | out["reject_short"])
+    )
+    out["trend_pullback_long"] = (
+        out["bull_trend"]
+        & out["htf_bull"]
+        & (out["low"] <= out["ema_pullback"] + atr * 0.35)
+        & (out["close"] > out["ema_pullback"])
+        & (close_high >= 0.58)
+    )
+    out["trend_pullback_short"] = (
+        out["bear_trend"]
+        & out["htf_bear"]
+        & (out["high"] >= out["ema_pullback"] - atr * 0.35)
+        & (out["close"] < out["ema_pullback"])
+        & (close_low >= 0.58)
+    )
+    out["quantum_fvg_long"] = out["bull_fvg"] & (out["close"] > out["open"]) & out["volume_ok"] & (out["long_score"] >= 56)
+    out["quantum_fvg_short"] = out["bear_fvg"] & (out["close"] < out["open"]) & out["volume_ok"] & (out["short_score"] >= 56)
+
+    long_votes = (
+        out["trend_pullback_long"].astype(float)
+        + out["reversal_long"].astype(float)
+        + out["break_long"].astype(float)
+        + out["quantum_fvg_long"].astype(float)
+        + out["htf_bull"].astype(float)
+        + (out["close"] > out["vwap"]).astype(float)
+        + out["close_near_high"].astype(float)
+        + out["volume_ok"].astype(float)
+    )
+    short_votes = (
+        out["trend_pullback_short"].astype(float)
+        + out["reversal_short"].astype(float)
+        + out["break_short"].astype(float)
+        + out["quantum_fvg_short"].astype(float)
+        + out["htf_bear"].astype(float)
+        + (out["close"] < out["vwap"]).astype(float)
+        + out["close_near_low"].astype(float)
+        + out["volume_ok"].astype(float)
+    )
+    out["long_votes"] = long_votes
+    out["short_votes"] = short_votes
+    out["uncertainty"] = (
+        18
+        + (out["chop_score"] > 64).astype(float) * 18
+        + out["middle_of_range"].astype(float) * 12
+        + (out["relative_volume"] < 0.70).astype(float) * 8
+        + (out["atr_ratio"] > 1.55).astype(float) * 8
+    ).clip(lower=0, upper=100)
+
+    out["long_score"] = (
+        out["long_score"]
+        + long_votes * 2.0
+        + out["bull_engulf"].astype(float) * 4
+        + out["bull_pin"].astype(float) * 4
+        + out["quantum_fvg_long"].astype(float) * 6
+        + out["trend_pullback_long"].astype(float) * 5
+        - (out["uncertainty"] > 60).astype(float) * 8
+    ).clip(lower=0, upper=100)
+    out["short_score"] = (
+        out["short_score"]
+        + short_votes * 2.0
+        + out["bear_engulf"].astype(float) * 4
+        + out["bear_pin"].astype(float) * 4
+        + out["quantum_fvg_short"].astype(float) * 6
+        + out["trend_pullback_short"].astype(float) * 5
+        - (out["uncertainty"] > 60).astype(float) * 8
+    ).clip(lower=0, upper=100)
+
+    long_valid = (
+        (out["long_votes"] >= 3)
+        & (out["long_score"] >= 76)
+        & (out["long_score"] >= out["short_score"] + 8)
+        & (out["uncertainty"] <= 60)
+        & (out["chop_score"] <= 64)
+        & ~out["fakeout_long_risk"]
+        & ~out["do_not_chase_long"]
+        & (out["trend_pullback_long"] | out["reversal_long"] | out["break_long"] | out["quantum_fvg_long"])
+    )
+    short_valid = (
+        (out["short_votes"] >= 3)
+        & (out["short_score"] >= 76)
+        & (out["short_score"] >= out["long_score"] + 8)
+        & (out["uncertainty"] <= 60)
+        & (out["chop_score"] <= 64)
+        & ~out["fakeout_short_risk"]
+        & ~out["do_not_chase_short"]
+        & (out["trend_pullback_short"] | out["reversal_short"] | out["break_short"] | out["quantum_fvg_short"])
+    )
+
+    out["signal"] = "WAIT"
+    out.loc[long_valid, "signal"] = "BUY"
+    out.loc[short_valid, "signal"] = "SELL"
+    out["setup"] = "WAIT"
+    out.loc[out["trend_pullback_long"] | out["trend_pullback_short"], "setup"] = "QuantumTrendPullback"
+    out.loc[out["reversal_long"] | out["reversal_short"] | out["bull_pin"] | out["bear_pin"], "setup"] = "QuantumReversal"
+    out.loc[out["break_long"] | out["break_short"], "setup"] = "QuantumBreakout"
+    out.loc[out["quantum_fvg_long"] | out["quantum_fvg_short"], "setup"] = "QuantumFVG"
+    return out
+
+
 def score_algorithm(df: pd.DataFrame) -> pd.DataFrame:
     """Backward-compatible alias used by older scripts."""
-    return add_v44_indicators(df)
+    return add_quantum_pro_indicators(df)

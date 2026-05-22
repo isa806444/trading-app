@@ -1,4 +1,4 @@
-"""No-leak Python backtester for the active v44 1H NQ Pine strategy."""
+"""No-leak Python backtester for the active NQ Quantum Pro Pine strategy."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from typing import Any
 
 import pandas as pd
 
-from .strategy import add_v44_indicators
+from .strategy import add_quantum_pro_indicators
 
 
 @dataclass
@@ -20,6 +20,7 @@ class BacktestConfig:
     point_value: float = 20.0
     tick_size: float = 0.25
     atr_stop_mult: float = 1.05
+    max_risk_points: float = 16.0
     reward_multiple: float = 2.0
     trail_after_r: float = 0.45
     trail_atr_mult: float = 0.85
@@ -30,6 +31,7 @@ class BacktestConfig:
     max_losses_per_day: int = 4
     max_consecutive_losses: int = 3
     max_daily_loss_dollars: float = 900.0
+    exit_outside_session: bool = True
     cooldown_bars: int = 2
     fee_per_contract_side: float = 4.0
     slippage_points: float = 0.5
@@ -151,13 +153,13 @@ def run_backtest(
     symbol: str = "NQ.c.0",
     output_dir: str | Path | None = None,
 ) -> dict[str, Any]:
-    """Run the active v44 1H no-leak logic.
+    """Run the active Quantum Pro no-leak logic.
 
     Signal row i-1 is the only information used to place/exit on row i. This
     mirrors the Pine script's request.security(..., lookahead_off) + [1] design.
     """
     config = config or BacktestConfig()
-    data = add_v44_indicators(df).dropna(subset=["time", "open", "high", "low", "close"]).reset_index(drop=True)
+    data = add_quantum_pro_indicators(df).dropna(subset=["time", "open", "high", "low", "close"]).reset_index(drop=True)
     if data.empty:
         result = {"summary": _summarize_trades(pd.DataFrame()), "signals": data, "trades": pd.DataFrame(), "equity": pd.DataFrame()}
         if output_dir:
@@ -231,7 +233,18 @@ def run_backtest(
             position = None
             last_trade_index = i
 
+        def protective_exit_price(raw_price: float) -> float:
+            if not position:
+                return raw_price
+            if position["side"] == "BUY":
+                return max(raw_price, position["stop"])
+            return min(raw_price, position["stop"])
+
         # Exit first using only the previously closed 1H signal row.
+        if position:
+            if config.exit_outside_session and not bool(bar["in_session"]):
+                close_position(protective_exit_price(float(bar["open"])), "session_exit", bar["time"])
+
         if position:
             if position["side"] == "BUY":
                 position["best"] = max(position["best"], float(signal["high"]))
@@ -273,7 +286,7 @@ def run_backtest(
                 adverse_exit = giveback_exit = no_followthrough_exit = weak_time_exit = thesis_exit = False
 
             if adverse_exit or giveback_exit or no_followthrough_exit or weak_time_exit or thesis_exit:
-                close_position(float(bar["open"]), "thesis_exit", bar["time"])
+                close_position(protective_exit_price(float(bar["open"])), "thesis_exit", bar["time"])
 
         # Conservative intrabar order: if stop and target both hit, count the stop.
         if position:
@@ -328,14 +341,16 @@ def run_backtest(
             if side == "BUY":
                 atr_stop = signal_close - atr * config.atr_stop_mult
                 structure_stop = float(signal["prior_low"]) - config.tick_size * 2
-                stop = max(atr_stop, structure_stop)
+                max_risk_stop = signal_close - config.max_risk_points
+                stop = max(atr_stop, structure_stop, max_risk_stop)
                 risk_points = max(signal_close - stop, config.tick_size)
                 target = signal_close + risk_points * config.reward_multiple
                 entry = _apply_slippage(float(bar["open"]), side, True, config.slippage_points)
             else:
                 atr_stop = signal_close + atr * config.atr_stop_mult
                 structure_stop = float(signal["prior_high"]) + config.tick_size * 2
-                stop = min(atr_stop, structure_stop)
+                max_risk_stop = signal_close + config.max_risk_points
+                stop = min(atr_stop, structure_stop, max_risk_stop)
                 risk_points = max(stop - signal_close, config.tick_size)
                 target = signal_close - risk_points * config.reward_multiple
                 entry = _apply_slippage(float(bar["open"]), side, True, config.slippage_points)
@@ -385,7 +400,7 @@ def run_backtest(
     summary.update(
         {
             "symbol": symbol,
-            "logic": "v44_1h_no_leak_kaufman_atr_reversal_tight_exits",
+            "logic": "nq_quantum_pro_ai_no_leak_research",
             "starting_cash": round(config.starting_cash, 2),
             "ending_cash": round(cash, 2),
             "max_drawdown_dollars": round(max_drawdown_dollars, 2),

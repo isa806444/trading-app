@@ -1,64 +1,73 @@
 //@version=6
 //@strategy_alert_message {{strategy.order.alert_message}}
-strategy("AI NQ1 Smart Paper Bot v44 - Tight Exits", overlay=true, initial_capital=100000, default_qty_type=strategy.fixed, default_qty_value=1, pyramiding=0, margin_long=10, margin_short=10, process_orders_on_close=false, calc_on_every_tick=true, calc_on_order_fills=true, commission_type=strategy.commission.cash_per_contract, commission_value=4.0, slippage=2)
+strategy("NQ Quantum Pro AI Strategy", shorttitle="NQ Quantum AI", overlay=true, initial_capital=100000, default_qty_type=strategy.fixed, default_qty_value=1, pyramiding=0, margin_long=10, margin_short=10, process_orders_on_close=true, calc_on_every_tick=false, calc_on_order_fills=false, commission_type=strategy.commission.cash_per_contract, commission_value=4.0, slippage=2, max_lines_count=500, max_labels_count=500, max_boxes_count=80)
 
-// Pro-simple version from the 212 idea list:
-// no repainting, confirmed 1H logic, three clean setups, score gate,
-// regime/chop/fakeout/location filters, realistic risk, and webhook payloads.
+// Pine-safe professional AI-style NQ futures strategy.
+// No true quantum/ML runs inside Pine; this uses deterministic scoring,
+// confirmed data only, adaptive session memory, and no lookahead.
 
-// ---------------- Routing / Safety ----------------
-contractQty = input.int(1, "Contracts", minval=1, maxval=10)
-signalTimeframe = input.timeframe("60", "Trade Signal Timeframe")
-restrictNq = input.bool(true, "Only NQ1 / NQ")
-webhookTag = input.string("nq1-smart-paper-v44", "Webhook Tag")
-useSessionFilter = input.bool(true, "Use Regular Session")
-tradeSession = input.session("0930-1600", "Trading Session")
-useNoRepaint = input.bool(true, "Strict No-Repaint")
-blockHigherChartTimeframes = input.bool(true, "Block Chart TF Above Signal TF")
-useRollingBacktest = input.bool(true, "Rolling Backtest Window")
-rollingBacktestYears = input.int(4, "Rolling Backtest Years", minval=1, maxval=20)
+// ---------------- Groups ----------------
+var string GRP_CORE = "Core"
+var string GRP_BRAIN = "AI Brain"
+var string GRP_RISK = "Risk / Exits"
+var string GRP_MARKETS = "Market Correlation"
+var string GRP_DISP = "Display"
 
-// ---------------- Strategy Inputs ----------------
-emaFastLen = input.int(50, "Fast EMA", minval=5, maxval=200)
-emaSlowLen = input.int(200, "Slow EMA", minval=20, maxval=500)
-emaPullbackLen = input.int(21, "Reversal EMA", minval=5, maxval=100)
-structureLen = input.int(20, "Structure Lookback", minval=5, maxval=100)
-kaufmanLen = input.int(10, "Kaufman Ratio Length", minval=3, maxval=80)
-minKaufmanRatio = input.float(0.30, "Minimum Kaufman Ratio", minval=0.05, maxval=1.0, step=0.01)
-atrExpansionMult = input.float(1.03, "ATR Expansion Ratio", minval=0.5, maxval=3.0, step=0.01)
-dmiLen = input.int(14, "DMI / Trend Strength Length", minval=2, maxval=100)
-dmiSmoothing = input.int(14, "DMI Smoothing", minval=2, maxval=100)
-minTrendStrength = input.float(15.0, "Minimum Trend Strength", minval=1.0, maxval=60.0, step=0.5)
-atrLen = input.int(14, "ATR Length", minval=2, maxval=100)
-volumeLen = input.int(30, "Volume Baseline", minval=5, maxval=100)
-minRelativeVolume = input.float(0.65, "Minimum Relative Volume", minval=0.1, maxval=5.0, step=0.05)
-minBodyPct = input.float(0.25, "Minimum Candle Body %", minval=0.05, maxval=0.95, step=0.05)
-pullbackAtrBuffer = input.float(0.35, "Reversal Level ATR Buffer", minval=0.05, maxval=2.0, step=0.05)
-useHtfBias = input.bool(true, "Use Confirmed 4H Bias")
-htfConfirmTf = input.timeframe("240", "HTF Bias Timeframe")
-minSetupScore = input.float(62.0, "Minimum Setup Score", minval=30.0, maxval=95.0, step=1.0)
-targetTradesPerDay = input.int(4, "Target Trades Per Day", minval=0, maxval=10)
-maxChopScore = input.float(72.0, "Max Chop Score", minval=20.0, maxval=100.0, step=1.0)
+// ---------------- Inputs ----------------
+tradeQty = input.int(1, "Contracts / Paper Size", minval=1, maxval=10, group=GRP_CORE)
+accountSize = input.float(100000.0, "Paper Account Size", minval=1000.0, step=1000.0, group=GRP_CORE)
+nqPointValue = input.float(20.0, "NQ $ / Point", minval=0.01, step=0.25, group=GRP_CORE)
+useNqLock = input.bool(true, "NQ Only", group=GRP_CORE)
+useNoRepaint = input.bool(true, "Strict No-Repaint Bar Close", group=GRP_CORE)
+useRollingBacktest = input.bool(true, "Rolling Backtest Window", group=GRP_CORE)
+rollingBacktestYears = input.int(4, "Rolling Backtest Years", minval=1, maxval=20, group=GRP_CORE)
+useSessionFilter = input.bool(true, "RTH Only", group=GRP_CORE)
+tradeSession = input.session("0930-1600", "Trading Session", group=GRP_CORE)
+webhookTag = input.string("nq-quantum-pro-ai", "Webhook Tag", group=GRP_CORE)
 
-// ---------------- Risk Inputs ----------------
-atrStopMult = input.float(1.05, "ATR Stop Multiplier", minval=0.25, maxval=5.0, step=0.05)
-rewardMultiple = input.float(2.0, "Reward Multiple", minval=0.5, maxval=10.0, step=0.25)
-trailAfterR = input.float(0.45, "Trail After R", minval=0.10, maxval=5.0, step=0.05)
-trailAtrMult = input.float(0.85, "Trail ATR Multiplier", minval=0.25, maxval=5.0, step=0.05)
-profitGivebackR = input.float(0.35, "Smart Exit Profit Giveback R", minval=0.10, maxval=3.0, step=0.05)
-earlyAdverseR = input.float(0.55, "Smart Exit Adverse R", minval=0.10, maxval=3.0, step=0.05)
-maxBarsInTrade = input.int(5, "Max Weak Bars In Trade", minval=2, maxval=50)
-maxTradesPerDay = input.int(10, "Max Trades Per Day", minval=1, maxval=30)
-maxLossesPerDay = input.int(4, "Max Losses Per Day", minval=1, maxval=10)
-maxConsecutiveLosses = input.int(3, "Max Consecutive Losses", minval=1, maxval=10)
-maxDailyLossDollars = input.float(900.0, "Max Daily Loss ($)", minval=50.0, step=50.0)
-cooldownBars = input.int(2, "Cooldown Bars", minval=0, maxval=200)
-sessionCloseBufferMinutes = input.int(10, "No New Trades Before Close", minval=0, maxval=60)
+minSetupScore = input.float(78.0, "Minimum Setup Score", minval=40.0, maxval=100.0, step=1.0, group=GRP_BRAIN)
+minEdge = input.float(8.0, "Minimum Long / Short Edge", minval=0.0, maxval=50.0, step=1.0, group=GRP_BRAIN)
+minVotes = input.int(3, "Minimum Confirmation Votes", minval=1, maxval=8, group=GRP_BRAIN)
+maxChopScore = input.float(64.0, "Max Chop Score", minval=20.0, maxval=100.0, step=1.0, group=GRP_BRAIN)
+maxUncertainty = input.float(60.0, "Max Uncertainty", minval=10.0, maxval=100.0, step=1.0, group=GRP_BRAIN)
+minRewardRoomR = input.float(1.15, "Minimum Reward Room R", minval=0.25, maxval=5.0, step=0.05, group=GRP_BRAIN)
+useAdaptiveLearning = input.bool(true, "Adaptive Learn From Closed Trades", group=GRP_BRAIN)
+useManualNewsBlock = input.bool(false, "Manual News Block", group=GRP_BRAIN)
+newsBlockSession = input.session("0955-1010", "News Block Window", group=GRP_BRAIN)
 
-// Optional plumbing test. Keep this off unless testing Strategy Report/webhook route.
-enableManualTest = input.bool(false, "Enable Manual Plumbing Test")
-manualTestAction = input.string("OFF", "Manual Test Action", options=["OFF", "BUY", "SELL", "EXIT_LONG", "EXIT_SHORT"])
-enableHourlyWebhookTest = input.bool(false, "Hourly Webhook Test Mode")
+atrLen = input.int(14, "ATR Length", minval=2, maxval=100, group=GRP_RISK)
+stopBufferPoints = input.float(2.0, "Structure Stop Buffer Points", minval=0.25, maxval=50.0, step=0.25, group=GRP_RISK)
+maxRiskPoints = input.float(16.0, "Max Risk Points", minval=1.0, maxval=200.0, step=0.25, group=GRP_RISK)
+targetR = input.float(2.0, "Base Target R", minval=0.25, maxval=10.0, step=0.05, group=GRP_RISK)
+breakevenAfterPoints = input.float(8.0, "Breakeven After Points", minval=0.25, maxval=200.0, step=0.25, group=GRP_RISK)
+trailAfterPoints = input.float(13.0, "Trail After Points", minval=0.25, maxval=300.0, step=0.25, group=GRP_RISK)
+trailAtrMult = input.float(0.95, "Trail ATR Multiplier", minval=0.1, maxval=5.0, step=0.05, group=GRP_RISK)
+profitProtectAfterPoints = input.float(10.0, "Profit Protection Starts", minval=0.25, maxval=300.0, step=0.25, group=GRP_RISK)
+profitGivebackPoints = input.float(6.0, "Max Profit Giveback Points", minval=0.25, maxval=300.0, step=0.25, group=GRP_RISK)
+earlyExitLossPoints = input.float(7.0, "Early Thesis-Fail Loss Points", minval=0.25, maxval=200.0, step=0.25, group=GRP_RISK)
+maxBarsInTrade = input.int(36, "Max Bars In Trade", minval=1, maxval=500, group=GRP_RISK)
+maxTradesPerDay = input.int(8, "Max Trades Per Day", minval=1, maxval=100, group=GRP_RISK)
+maxLossesPerDay = input.int(3, "Max Losses Per Day", minval=1, maxval=25, group=GRP_RISK)
+maxConsecutiveLosses = input.int(2, "Max Consecutive Losses", minval=1, maxval=20, group=GRP_RISK)
+dailyLossCap = input.float(900.0, "Daily Loss Cap ($)", minval=50.0, maxval=25000.0, step=50.0, group=GRP_RISK)
+dailyProfitLock = input.float(1800.0, "Daily Profit Lock ($)", minval=50.0, maxval=50000.0, step=50.0, group=GRP_RISK)
+cooldownBars = input.int(5, "Base Cooldown Bars", minval=0, maxval=200, group=GRP_RISK)
+bigWinCooldownBars = input.int(8, "Big Win Cooldown Bars", minval=0, maxval=200, group=GRP_RISK)
+
+esSymbol = input.string("CME_MINI:ES1!", "ES", group=GRP_MARKETS)
+qqqSymbol = input.string("NASDAQ:QQQ", "QQQ", group=GRP_MARKETS)
+vixSymbol = input.string("CBOE:VIX", "VIX", group=GRP_MARKETS)
+dxySymbol = input.string("TVC:DXY", "DXY", group=GRP_MARKETS)
+ratesSymbol = input.string("TVC:US10Y", "US10Y", group=GRP_MARKETS)
+nvdaSymbol = input.string("NASDAQ:NVDA", "NVDA", group=GRP_MARKETS)
+aaplSymbol = input.string("NASDAQ:AAPL", "AAPL", group=GRP_MARKETS)
+msftSymbol = input.string("NASDAQ:MSFT", "MSFT", group=GRP_MARKETS)
+smhSymbol = input.string("NASDAQ:SMH", "SMH", group=GRP_MARKETS)
+
+showLabels = input.bool(true, "Show Entry Labels", group=GRP_DISP)
+showTradeLines = input.bool(true, "Show Entry / Stop / Target Lines", group=GRP_DISP)
+showDashboard = input.bool(true, "Show Dashboard", group=GRP_DISP)
+showKeyLevels = input.bool(true, "Show Key Levels", group=GRP_DISP)
 
 // ---------------- Helpers ----------------
 clamp(v, lo, hi) =>
@@ -67,321 +76,499 @@ clamp(v, lo, hi) =>
 scoreBool(cond, points) =>
     cond ? points : 0.0
 
-money(v) =>
-    str.tostring(v, format.mintick)
+safeDiv(num, den) =>
+    den == 0.0 ? 0.0 : num / den
 
-kaufmanRatio(src, len) =>
-    directionalChange = math.abs(src[1] - src[len + 1])
-    pathLength = 0.0
-    for n = 1 to len
-        pathLength += math.abs(src[n] - src[n + 1])
-    pathLength > 0 ? directionalChange / pathLength : 0.0
+f_marketBiasConfirmed() =>
+    fast = ta.ema(close, 21)
+    slow = ta.ema(close, 55)
+    r = ta.rsi(close, 14)
+    roc = ta.roc(close, 5)
+    close[1] > fast[1] and fast[1] >= slow[1] and r[1] >= 50 and roc[1] >= 0 ? 1.0 : close[1] < fast[1] and fast[1] <= slow[1] and r[1] <= 50 and roc[1] <= 0 ? -1.0 : 0.0
 
-// ---------------- Guards ----------------
-tickerUpper = str.upper(syminfo.ticker)
-isNqSymbol = str.contains(tickerUpper, "NQ") and not str.contains(tickerUpper, "MNQ")
-symbolOk = not restrictNq or isNqSymbol
-timeframeOk = true
-chartSeconds = timeframe.in_seconds(timeframe.period)
-signalSeconds = timeframe.in_seconds(signalTimeframe)
-chartTimeframeSafe = not blockHigherChartTimeframes or (not na(chartSeconds) and not na(signalSeconds) and chartSeconds <= signalSeconds)
+f_marketDevConfirmed() =>
+    e = ta.ema(close, 21)
+    e[1] != 0.0 ? (close[1] - e[1]) / e[1] * 100.0 : 0.0
+
+f_retConfirmed() =>
+    close[2] != 0.0 ? math.log(close[1] / close[2]) : 0.0
+
+f_addName(txt, cond, name) =>
+    cond ? txt + (txt != "" ? "+" : "") + name : txt
+
+// ---------------- Core Data ----------------
 confirmedOk = not useNoRepaint or barstate.isconfirmed
+tickerUpper = str.upper(syminfo.ticker)
+symbolOk = not useNqLock or str.contains(tickerUpper, "NQ")
+inSession = not useSessionFilter or not na(time(timeframe.period, tradeSession))
+manualNewsNow = useManualNewsBlock and not na(time(timeframe.period, newsBlockSession))
+newDay = ta.change(time("D")) != 0
 nyHour = hour(time, "America/New_York")
 nyMinute = minute(time, "America/New_York")
-minutesNow = nyHour * 60 + nyMinute
-newDay = ta.change(time("D")) != 0
-backtestStartTime = timestamp("America/New_York", year(timenow, "America/New_York") - rollingBacktestYears, month(timenow, "America/New_York"), dayofmonth(timenow, "America/New_York"), 0, 0)
-qty = math.max(1, contractQty)
+nyMinutes = nyHour * 60 + nyMinute
+backtestStart = timestamp("America/New_York", year(timenow, "America/New_York") - rollingBacktestYears, month(timenow, "America/New_York"), dayofmonth(timenow, "America/New_York"), 0, 0)
+windowOk = not useRollingBacktest or time >= backtestStart
+maxContractsByAccount = int(math.max(1, math.floor(accountSize / math.max(close * nqPointValue, 1.0))))
+actualQty = math.max(1, math.min(tradeQty, maxContractsByAccount))
 
-// ---------------- 1H Signal Brain ----------------
-// No-future-leak rule: every signal value below uses [1], meaning the bot only
-// sees the last fully closed 1H candle. request.security also uses lookahead_off.
-signalFrame() =>
-    sfOpen = open[1]
-    sfHigh = high[1]
-    sfLow = low[1]
-    sfClose = close[1]
-    sfTime = time[1]
-    sfEmaFast = ta.ema(close, emaFastLen)[1]
-    sfEmaSlow = ta.ema(close, emaSlowLen)[1]
-    sfEmaPullback = ta.ema(close, emaPullbackLen)[1]
-    sfAtr = ta.atr(atrLen)[1]
-    sfAtrBaseline = ta.sma(ta.atr(atrLen), 100)[1]
-    sfAtrRatio = sfAtrBaseline > 0 ? sfAtr / sfAtrBaseline : 1.0
-    sfVolumeBaseline = ta.sma(volume, volumeLen)[1]
-    sfRelativeVolume = sfVolumeBaseline > 0 ? volume[1] / sfVolumeBaseline : 1.0
-    sfPriorHigh = ta.highest(high, structureLen)[2]
-    sfPriorLow = ta.lowest(low, structureLen)[2]
-    sfRangeHigh = ta.highest(high, structureLen)[1]
-    sfRangeLow = ta.lowest(low, structureLen)[1]
-    sfKaufmanRatio = kaufmanRatio(close, kaufmanLen)
-    [sfPlusDiRaw, sfMinusDiRaw, sfTrendRaw] = ta.dmi(dmiLen, dmiSmoothing)
-    sfPlusDi = sfPlusDiRaw[1]
-    sfMinusDi = sfMinusDiRaw[1]
-    sfTrendStrength = sfTrendRaw[1]
-    sfVwapRaw = ta.vwap(hlc3)[1]
-    sfVwap = na(sfVwapRaw) ? sfEmaPullback : sfVwapRaw
-    sfVwapPrior = nz(ta.vwap(hlc3)[4], sfVwap)
-    sfVwapSlope = (sfVwap - sfVwapPrior) / math.max(sfAtr, syminfo.mintick)
-    sfRange = math.max(sfHigh - sfLow, syminfo.mintick)
-    sfBodyPct = math.abs(sfClose - sfOpen) / sfRange
-    sfUpperWick = sfHigh - math.max(sfOpen, sfClose)
-    sfLowerWick = math.min(sfOpen, sfClose) - sfLow
-    sfCloseNearHigh = (sfClose - sfLow) / sfRange >= 0.58
-    sfCloseNearLow = (sfHigh - sfClose) / sfRange >= 0.58
-    sfOverlap = math.max(0.0, math.min(sfHigh, high[2]) - math.max(sfLow, low[2])) / sfRange
-    sfAlternating = (sfClose > sfOpen and close[2] < open[2]) or (sfClose < sfOpen and close[2] > open[2])
-    sfBbBasisRaw = ta.sma(close, 20)
-    sfBbDevRaw = ta.stdev(close, 20) * 2.0
-    sfBbWidthRaw = sfBbBasisRaw != 0 ? (sfBbDevRaw * 2.0) / sfBbBasisRaw * 100.0 : 0.0
-    sfBbWidth = sfBbWidthRaw[1]
-    sfBbWidthAvg = ta.sma(sfBbWidthRaw, 20)[1]
-    sfHour = hour(time, "America/New_York")[1]
-    sfMinute = minute(time, "America/New_York")[1]
-    sfMinutesNow = sfHour * 60 + sfMinute
-    sfInSession = not na(time(timeframe.period, tradeSession)[1])
-    sfNearSessionClose = sfInSession and sfMinutesNow >= 960 - sessionCloseBufferMinutes
-    [sfOpen, sfHigh, sfLow, sfClose, sfTime, sfEmaFast, sfEmaSlow, sfEmaPullback, sfAtr, sfAtrBaseline, sfAtrRatio, sfRelativeVolume, sfPriorHigh, sfPriorLow, sfRangeHigh, sfRangeLow, sfKaufmanRatio, sfPlusDi, sfMinusDi, sfTrendStrength, sfVwap, sfVwapSlope, sfBodyPct, sfUpperWick, sfLowerWick, sfCloseNearHigh, sfCloseNearLow, sfOverlap, sfAlternating, sfBbWidth, sfBbWidthAvg, sfInSession, sfNearSessionClose]
+atr = ta.atr(atrLen)
+atrBase = ta.sma(atr, 100)
+atrRatio = safeDiv(atr, atrBase)
+ema8 = ta.ema(close, 8)
+ema21 = ta.ema(close, 21)
+ema55 = ta.ema(close, 55)
+ema200 = ta.ema(close, 200)
+vwapRaw = ta.vwap(hlc3)
+vwapValue = na(vwapRaw) ? ema21 : vwapRaw
+[plusDi, minusDi, adxValue] = ta.dmi(14, 14)
+rsiValue = ta.rsi(close, 14)
+[macdLine, macdSignal, macdHist] = ta.macd(close, 12, 26, 9)
+volumeBase = ta.sma(volume, 30)
+relVolume = volumeBase > 0.0 ? volume / volumeBase : 1.0
 
-[signalOpen, signalHigh, signalLow, signalClose, signalTime, emaFast, emaSlow, emaPullback, atrValue, atrBaseline, atrRatio, relativeVolume, priorHigh, priorLow, rangeHigh, rangeLow, kaufmanRatioValue, plusDi, minusDi, trendStrength, vwapValue, vwapSlope, bodyPct, upperWick, lowerWick, closeNearHigh, closeNearLow, candleOverlap, alternatingCandle, bbWidth, bbWidthAvg, signalInSession, signalNearSessionClose] = request.security(syminfo.tickerid, signalTimeframe, signalFrame(), barmerge.gaps_off, barmerge.lookahead_off)
-[htfClose, htfEmaFast, htfEmaSlow] = request.security(syminfo.tickerid, htfConfirmTf, [close[1], ta.ema(close, emaFastLen)[1], ta.ema(close, emaSlowLen)[1]], barmerge.gaps_off, barmerge.lookahead_off)
+body = math.abs(close - open)
+avgBody = ta.sma(body, 20)
+candleRange = math.max(high - low, syminfo.mintick)
+bodyPct = body / candleRange
+upperWick = high - math.max(open, close)
+lowerWick = math.min(open, close) - low
+closeHigh = (close - low) / candleRange
+closeLow = (high - close) / candleRange
+bodyRatio = body / math.max(nz(avgBody, body), syminfo.mintick * 4.0)
 
-newSignalBar = ta.change(signalTime) != 0
-signalReady = not na(signalClose) and not na(emaSlow) and not na(emaPullback) and not na(priorHigh) and not na(priorLow) and not na(atrValue) and not na(kaufmanRatioValue) and not na(trendStrength)
-signalSessionOk = not useSessionFilter or signalInSession
-backtestWindowOk = not useRollingBacktest or (not na(signalTime) and signalTime >= backtestStartTime)
+priorSwingHigh = ta.highest(high, 24)[1]
+priorSwingLow = ta.lowest(low, 24)[1]
+recentHigh5 = ta.highest(high, 5)
+recentLow5 = ta.lowest(low, 5)
+rangeHigh = ta.highest(high, 30)
+rangeLow = ta.lowest(low, 30)
+rangeSpan = math.max(rangeHigh - rangeLow, syminfo.mintick)
+rangePos = (close - rangeLow) / rangeSpan
+distVwapAtr = math.abs(close - vwapValue) / math.max(atr, syminfo.mintick)
+bbBasis = ta.sma(close, 20)
+bbDev = ta.stdev(close, 20)
+bbUpper = bbBasis + bbDev * 2.0
+bbLower = bbBasis - bbDev * 2.0
+bbWidth = bbBasis != 0.0 ? (bbUpper - bbLower) / bbBasis * 100.0 : 0.0
+bbWidthBase = ta.sma(bbWidth, 60)
+emaSlope = (ema8 - nz(ema8[3], ema8)) / math.max(atr, syminfo.mintick)
+vwapSlope = (vwapValue - nz(vwapValue[5], vwapValue)) / math.max(atr, syminfo.mintick)
+kamaLen = 10
+kamaChange = math.abs(close - nz(close[kamaLen], close))
+kamaVol = ta.sma(math.abs(close - close[1]), kamaLen) * kamaLen
+kamaRatio = safeDiv(kamaChange, kamaVol)
+kamaFast = 2.0 / (2.0 + 1.0)
+kamaSlow = 2.0 / (30.0 + 1.0)
+kamaSc = math.pow(kamaRatio * (kamaFast - kamaSlow) + kamaSlow, 2.0)
+var float kamaValue = close
+kamaValue := nz(kamaValue[1], close) + kamaSc * (close - nz(kamaValue[1], close))
+kamaSlope = (kamaValue - nz(kamaValue[3], kamaValue)) / math.max(atr, syminfo.mintick)
 
-// ---------------- Daily Risk Memory ----------------
+[priorDayHigh, priorDayLow, priorDayClose] = request.security(syminfo.tickerid, "D", [high[1], low[1], close[1]], barmerge.gaps_off, barmerge.lookahead_off)
+[priorWeekHigh, priorWeekLow] = request.security(syminfo.tickerid, "W", [high[1], low[1]], barmerge.gaps_off, barmerge.lookahead_off)
+dailyAtr = request.security(syminfo.tickerid, "D", ta.atr(14)[1], barmerge.gaps_off, barmerge.lookahead_off)
+
+// ---------------- Market Regime ----------------
+overlap = math.max(0.0, math.min(high, high[1]) - math.max(low, low[1])) / candleRange
+alternating = (close > open and close[1] < open[1]) or (close < open and close[1] > open[1])
+vwapCrossEvent = ta.cross(close, vwapValue) ? 1.0 : 0.0
+vwapCrosses = ta.sma(vwapCrossEvent, 16) * 16.0
+trendQuality = clamp(35.0 + scoreBool(ema8 > ema21 and ema21 > ema55, 12) + scoreBool(ema8 < ema21 and ema21 < ema55, 12) + scoreBool(adxValue >= 20, 12) + scoreBool(math.abs(emaSlope) > 0.08, 10) + scoreBool(math.abs(vwapSlope) > 0.05, 8) - scoreBool(vwapCrosses >= 5, 10), 0.0, 100.0)
+chopScore = clamp(18.0 + scoreBool(adxValue < 16, 16) + scoreBool(math.abs(emaSlope) < 0.045, 12) + scoreBool(math.abs(vwapSlope) < 0.035, 10) + scoreBool(overlap > 0.55, 10) + scoreBool(alternating, 8) + scoreBool(vwapCrosses >= 5, 12) + scoreBool(relVolume < 0.70, 8) + scoreBool(bbWidth < nz(bbWidthBase, bbWidth) * 0.85, 5) - scoreBool(trendQuality >= 62, 16), 0.0, 100.0)
+highVol = atrRatio >= 1.35
+lowVol = atrRatio <= 0.78
+compression = bbWidth < nz(bbWidthBase, bbWidth) * 0.72 and atrRatio <= 0.92
+shockCandle = candleRange >= atr * 2.35 or (relVolume >= 2.20 and candleRange >= atr * 1.65)
+trendRegime = trendQuality >= 62 and chopScore <= 55
+rangeRegime = chopScore >= 56 and trendQuality < 62
+regimeLabel = shockCandle ? "Shock" : highVol ? "HighVol" : compression ? "Compression" : trendRegime ? "Trend" : rangeRegime ? "Range" : "Mixed"
+
+// ---------------- Cross-Market Brain ----------------
+esBias = request.security(esSymbol, timeframe.period, f_marketBiasConfirmed(), barmerge.gaps_off, barmerge.lookahead_off, ignore_invalid_symbol=true)
+qqqBias = request.security(qqqSymbol, timeframe.period, f_marketBiasConfirmed(), barmerge.gaps_off, barmerge.lookahead_off, ignore_invalid_symbol=true)
+nvdaBias = request.security(nvdaSymbol, timeframe.period, f_marketBiasConfirmed(), barmerge.gaps_off, barmerge.lookahead_off, ignore_invalid_symbol=true)
+aaplBias = request.security(aaplSymbol, timeframe.period, f_marketBiasConfirmed(), barmerge.gaps_off, barmerge.lookahead_off, ignore_invalid_symbol=true)
+msftBias = request.security(msftSymbol, timeframe.period, f_marketBiasConfirmed(), barmerge.gaps_off, barmerge.lookahead_off, ignore_invalid_symbol=true)
+smhBias = request.security(smhSymbol, timeframe.period, f_marketBiasConfirmed(), barmerge.gaps_off, barmerge.lookahead_off, ignore_invalid_symbol=true)
+vixRoc = request.security(vixSymbol, timeframe.period, ta.roc(close, 5)[1], barmerge.gaps_off, barmerge.lookahead_off, ignore_invalid_symbol=true)
+dxyRoc = request.security(dxySymbol, timeframe.period, ta.roc(close, 5)[1], barmerge.gaps_off, barmerge.lookahead_off, ignore_invalid_symbol=true)
+ratesRoc = request.security(ratesSymbol, timeframe.period, ta.roc(close, 5)[1], barmerge.gaps_off, barmerge.lookahead_off, ignore_invalid_symbol=true)
+htf15 = request.security(syminfo.tickerid, "15", f_marketBiasConfirmed(), barmerge.gaps_off, barmerge.lookahead_off)
+htf60 = request.security(syminfo.tickerid, "60", f_marketBiasConfirmed(), barmerge.gaps_off, barmerge.lookahead_off)
+htf240 = request.security(syminfo.tickerid, "240", f_marketBiasConfirmed(), barmerge.gaps_off, barmerge.lookahead_off)
+htfD = request.security(syminfo.tickerid, "D", f_marketBiasConfirmed(), barmerge.gaps_off, barmerge.lookahead_off)
+
+techBias = (nz(nvdaBias) + nz(aaplBias) + nz(msftBias) + nz(smhBias)) / 4.0
+crossScore = nz(esBias) * 2.0 + nz(qqqBias) * 1.6 + techBias * 1.8 - nz(vixRoc) * 1.9 - nz(dxyRoc) * 0.8 - nz(ratesRoc) * 0.8
+crossLongOk = crossScore >= -0.75 and nz(vixRoc) <= 0.55
+crossShortOk = crossScore <= 0.75 and nz(vixRoc) >= -0.55
+htfStack = nz(htf15) + nz(htf60) + nz(htf240) + nz(htfD)
+htfLongOk = htfStack >= -0.5
+htfShortOk = htfStack <= 0.5
+
+// ---------------- Pattern / Location Brain ----------------
+nearSupport = math.abs(close - priorDayLow) <= atr * 0.65 or math.abs(close - priorWeekLow) <= atr * 0.85 or math.abs(close - priorSwingLow) <= atr * 0.45 or low <= vwapValue + atr * 0.20
+nearResistance = math.abs(close - priorDayHigh) <= atr * 0.65 or math.abs(close - priorWeekHigh) <= atr * 0.85 or math.abs(close - priorSwingHigh) <= atr * 0.45 or high >= vwapValue - atr * 0.20
+bullWick = lowerWick >= math.max(body * 1.5, syminfo.mintick * 5.0) and closeHigh >= 0.56
+bearWick = upperWick >= math.max(body * 1.5, syminfo.mintick * 5.0) and closeLow >= 0.56
+buyersPress = close > open and closeHigh >= 0.62 and relVolume >= 0.75
+sellersPress = close < open and closeLow >= 0.62 and relVolume >= 0.75
+bullTrend = close > ema21 and ema8 >= ema21 and ema21 >= ema55
+bearTrend = close < ema21 and ema8 <= ema21 and ema21 <= ema55
+powerBull = bullTrend and close > vwapValue and trendRegime and buyersPress
+powerBear = bearTrend and close < vwapValue and trendRegime and sellersPress
+
+vwapReclaimLong = low <= vwapValue and close > vwapValue and closeHigh >= 0.58
+vwapRejectShort = high >= vwapValue and close < vwapValue and closeLow >= 0.58
+sweepLong = low < priorSwingLow and close > priorSwingLow and bullWick
+sweepShort = high > priorSwingHigh and close < priorSwingHigh and bearWick
+pdSweepLong = low < priorDayLow and close > priorDayLow and bullWick
+pdSweepShort = high > priorDayHigh and close < priorDayHigh and bearWick
+bullEngulf = close > open and close[1] < open[1] and close >= open[1] and open <= close[1] and closeHigh >= 0.62
+bearEngulf = close < open and close[1] > open[1] and close <= open[1] and open >= close[1] and closeLow >= 0.62
+pinLong = bullWick and nearSupport and rsiValue < 52
+pinShort = bearWick and nearResistance and rsiValue > 48
+trendPullbackLong = bullTrend and low <= math.max(ema8, vwapValue) + atr * 0.20 and close > math.max(ema8, vwapValue) and closeHigh >= 0.58
+trendPullbackShort = bearTrend and high >= math.min(ema8, vwapValue) - atr * 0.20 and close < math.min(ema8, vwapValue) and closeLow >= 0.58
+breakoutLong = close > priorSwingHigh and closeHigh >= 0.68 and relVolume >= 0.85 and not nearResistance
+breakoutShort = close < priorSwingLow and closeLow >= 0.68 and relVolume >= 0.85 and not nearSupport
+compressionLong = compression and close > bbUpper and buyersPress and crossLongOk
+compressionShort = compression and close < bbLower and sellersPress and crossShortOk
+
+fvgBullGap = low > high[2] and (low - high[2]) >= atr * 0.18 and bodyRatio[1] >= 1.10
+fvgBearGap = high < low[2] and (low[2] - high) >= atr * 0.18 and bodyRatio[1] >= 1.10
+var float bullFvgTop = na
+var float bullFvgBot = na
+var float bullFvgCe = na
+var float bearFvgTop = na
+var float bearFvgBot = na
+var float bearFvgCe = na
+if fvgBullGap
+    bullFvgTop := low
+    bullFvgBot := high[2]
+    bullFvgCe := (bullFvgTop + bullFvgBot) / 2.0
+if fvgBearGap
+    bearFvgTop := low[2]
+    bearFvgBot := high
+    bearFvgCe := (bearFvgTop + bearFvgBot) / 2.0
+if not na(bullFvgBot) and close < bullFvgBot
+    bullFvgTop := na
+    bullFvgBot := na
+    bullFvgCe := na
+if not na(bearFvgTop) and close > bearFvgTop
+    bearFvgTop := na
+    bearFvgBot := na
+    bearFvgCe := na
+fvgLong = not na(bullFvgTop) and low <= bullFvgTop and close > bullFvgCe and buyersPress
+fvgShort = not na(bearFvgBot) and high >= bearFvgBot and close < bearFvgCe and sellersPress
+
+// ---------------- Adaptive Learning ----------------
 var int tradesToday = 0
 var int lossesToday = 0
+var int winsToday = 0
 var int lossStreak = 0
 var int reviewedClosedTrades = 0
 var int lastTradeBar = na
-var int activeEntryBar = na
+var int lastBigWinBar = na
 var float dayStartEquity = strategy.equity
-var float activeStop = na
-var float activeTarget = na
-var float activeRiskPoints = na
-var float activeBest = na
+var float dayPeakEquity = strategy.equity
+var float longPenalty = 0.0
+var float shortPenalty = 0.0
+var float trendPenalty = 0.0
+var float reversalPenalty = 0.0
+var float breakoutPenalty = 0.0
+var float fvgPenalty = 0.0
+var int[] hourWins = array.new_int(24, 0)
+var int[] hourLosses = array.new_int(24, 0)
+var string activeSetupType = "None"
 
 if newDay
     tradesToday := 0
     lossesToday := 0
+    winsToday := 0
     lossStreak := 0
     dayStartEquity := strategy.equity
+    dayPeakEquity := strategy.equity
 
-if strategy.closedtrades > reviewedClosedTrades
+dayPeakEquity := math.max(nz(dayPeakEquity, strategy.equity), strategy.equity)
+dailyPnl = strategy.equity - dayStartEquity
+dailyDrawdown = math.max(dayPeakEquity - strategy.equity, 0.0)
+
+if useAdaptiveLearning and strategy.closedtrades > reviewedClosedTrades
     idx = strategy.closedtrades - 1
     pnl = strategy.closedtrades.profit(idx)
-    if pnl < 0
+    closedHour = math.max(0, math.min(23, nyHour))
+    if pnl > 0
+        winsToday += 1
+        lossStreak := 0
+        longPenalty := math.max(0.0, longPenalty - 1.0)
+        shortPenalty := math.max(0.0, shortPenalty - 1.0)
+        trendPenalty := math.max(0.0, trendPenalty - 0.8)
+        reversalPenalty := math.max(0.0, reversalPenalty - 0.8)
+        breakoutPenalty := math.max(0.0, breakoutPenalty - 0.8)
+        fvgPenalty := math.max(0.0, fvgPenalty - 0.8)
+        array.set(hourWins, closedHour, array.get(hourWins, closedHour) + 1)
+        if pnl >= profitProtectAfterPoints * nqPointValue
+            lastBigWinBar := bar_index
+    else
         lossesToday += 1
         lossStreak += 1
-    else
-        lossStreak := 0
+        if strategy.closedtrades.entry_id(idx) == "Quantum Long"
+            longPenalty := math.min(18.0, longPenalty + 3.0)
+        if strategy.closedtrades.entry_id(idx) == "Quantum Short"
+            shortPenalty := math.min(18.0, shortPenalty + 3.0)
+        if activeSetupType == "Trend"
+            trendPenalty := math.min(16.0, trendPenalty + 3.0)
+        if activeSetupType == "Reversal"
+            reversalPenalty := math.min(16.0, reversalPenalty + 3.0)
+        if activeSetupType == "Breakout"
+            breakoutPenalty := math.min(16.0, breakoutPenalty + 3.0)
+        if activeSetupType == "FVG"
+            fvgPenalty := math.min(16.0, fvgPenalty + 3.0)
+        array.set(hourLosses, closedHour, array.get(hourLosses, closedHour) + 1)
     reviewedClosedTrades := strategy.closedtrades
-    lastTradeBar := bar_index
 
-dailyPnL = strategy.equity - dayStartEquity
-dailyLossLock = dailyPnL <= -maxDailyLossDollars
+thisHourWins = array.get(hourWins, math.max(0, math.min(23, nyHour)))
+thisHourLosses = array.get(hourLosses, math.max(0, math.min(23, nyHour)))
+hourPenalty = useAdaptiveLearning and thisHourLosses > thisHourWins + 1 ? math.min(8.0, (thisHourLosses - thisHourWins) * 2.0) : 0.0
+bigWinCooldownOk = na(lastBigWinBar) or bar_index - lastBigWinBar > bigWinCooldownBars
+
+// ---------------- Scores / Decision Gate ----------------
+trendLongSetup = powerBull or trendPullbackLong or vwapReclaimLong
+trendShortSetup = powerBear or trendPullbackShort or vwapRejectShort
+reversalLongSetup = sweepLong or pdSweepLong or pinLong or bullEngulf
+reversalShortSetup = sweepShort or pdSweepShort or pinShort or bearEngulf
+breakLongSetup = breakoutLong or compressionLong
+breakShortSetup = breakoutShort or compressionShort
+fvgLongSetup = fvgLong
+fvgShortSetup = fvgShort
+
+longVotes = (trendLongSetup ? 1 : 0) + (reversalLongSetup ? 1 : 0) + (breakLongSetup ? 1 : 0) + (fvgLongSetup ? 1 : 0) + (crossLongOk ? 1 : 0) + (htfLongOk ? 1 : 0) + (buyersPress ? 1 : 0) + (nearSupport ? 1 : 0)
+shortVotes = (trendShortSetup ? 1 : 0) + (reversalShortSetup ? 1 : 0) + (breakShortSetup ? 1 : 0) + (fvgShortSetup ? 1 : 0) + (crossShortOk ? 1 : 0) + (htfShortOk ? 1 : 0) + (sellersPress ? 1 : 0) + (nearResistance ? 1 : 0)
+longModules = f_addName(f_addName(f_addName(f_addName("", trendLongSetup, "Trend"), reversalLongSetup, "Reversal"), breakLongSetup, "Breakout"), fvgLongSetup, "FVG")
+shortModules = f_addName(f_addName(f_addName(f_addName("", trendShortSetup, "Trend"), reversalShortSetup, "Reversal"), breakShortSetup, "Breakout"), fvgShortSetup, "FVG")
+
+setupPenaltyLong = trendLongSetup ? trendPenalty : reversalLongSetup ? reversalPenalty : breakLongSetup ? breakoutPenalty : fvgLongSetup ? fvgPenalty : 0.0
+setupPenaltyShort = trendShortSetup ? trendPenalty : reversalShortSetup ? reversalPenalty : breakShortSetup ? breakoutPenalty : fvgShortSetup ? fvgPenalty : 0.0
+uncertainty = clamp(16.0 + scoreBool(chopScore > maxChopScore, 18) + scoreBool(math.abs(crossScore) < 0.45, 10) + scoreBool(math.abs(htfStack) < 1.0, 12) + scoreBool(rangePos > 0.38 and rangePos < 0.62 and distVwapAtr > 0.40, 10) + scoreBool(manualNewsNow, 22) + scoreBool(shockCandle, 20), 0.0, 100.0)
+adaptiveMinScore = minSetupScore + scoreBool(highVol, 4) + scoreBool(rangeRegime, 5) + scoreBool(lossStreak > 0, lossStreak * 2.0) + hourPenalty - scoreBool(trendRegime and math.abs(crossScore) > 1.5, 2)
+
+longScore = clamp(24.0 + longVotes * 8.0 + scoreBool(trendLongSetup, 10) + scoreBool(reversalLongSetup and nearSupport, 11) + scoreBool(breakLongSetup and relVolume >= 1.0, 10) + scoreBool(fvgLongSetup, 9) + scoreBool(crossLongOk, 6) + scoreBool(htfLongOk, 7) + scoreBool(close > vwapValue, 5) + scoreBool(kamaSlope >= -0.02, 4) - scoreBool(chopScore > maxChopScore, 18) - scoreBool(sellersPress, 10) - scoreBool(nearResistance and not breakLongSetup, 8) - longPenalty - setupPenaltyLong - hourPenalty, 0.0, 100.0)
+shortScore = clamp(24.0 + shortVotes * 8.0 + scoreBool(trendShortSetup, 10) + scoreBool(reversalShortSetup and nearResistance, 11) + scoreBool(breakShortSetup and relVolume >= 1.0, 10) + scoreBool(fvgShortSetup, 9) + scoreBool(crossShortOk, 6) + scoreBool(htfShortOk, 7) + scoreBool(close < vwapValue, 5) + scoreBool(kamaSlope <= 0.02, 4) - scoreBool(chopScore > maxChopScore, 18) - scoreBool(buyersPress, 10) - scoreBool(nearSupport and not breakShortSetup, 8) - shortPenalty - setupPenaltyShort - hourPenalty, 0.0, 100.0)
+
+rewardRoomLong = math.min(math.max(nz(priorDayHigh, close + atr * 2.0) - close, 0.0), math.max(nz(priorWeekHigh, close + atr * 3.0) - close, 0.0))
+rewardRoomShort = math.min(math.max(close - nz(priorDayLow, close - atr * 2.0), 0.0), math.max(close - nz(priorWeekLow, close - atr * 3.0), 0.0))
+
+// ---------------- Orders / Smart Exits ----------------
+stopBuffer = math.max(stopBufferPoints, syminfo.mintick * 4.0)
+longStructureStop = fvgLongSetup and not na(bullFvgBot) ? bullFvgBot - stopBuffer : reversalLongSetup ? math.min(low, recentLow5) - stopBuffer : math.min(recentLow5, ema21) - stopBuffer
+shortStructureStop = fvgShortSetup and not na(bearFvgTop) ? bearFvgTop + stopBuffer : reversalShortSetup ? math.max(high, recentHigh5) + stopBuffer : math.max(recentHigh5, ema21) + stopBuffer
+longStop = math.max(longStructureStop, close - maxRiskPoints)
+shortStop = math.min(shortStructureStop, close + maxRiskPoints)
+longRisk = math.max(close - longStop, syminfo.mintick * 4.0)
+shortRisk = math.max(shortStop - close, syminfo.mintick * 4.0)
+targetBoostLong = trendRegime and crossScore > 1.5 and htfStack > 1.0 ? 0.50 : rangeRegime ? -0.35 : 0.0
+targetBoostShort = trendRegime and crossScore < -1.5 and htfStack < -1.0 ? 0.50 : rangeRegime ? -0.35 : 0.0
+longTarget = close + longRisk * math.max(0.85, targetR + targetBoostLong)
+shortTarget = close - shortRisk * math.max(0.85, targetR + targetBoostShort)
+rewardRoomOkLong = rewardRoomLong >= longRisk * minRewardRoomR or breakLongSetup or trendRegime
+rewardRoomOkShort = rewardRoomShort >= shortRisk * minRewardRoomR or breakShortSetup or trendRegime
+
+cooldownOk = na(lastTradeBar) or bar_index - lastTradeBar > cooldownBars + lossStreak * 2
 lossLock = lossesToday >= maxLossesPerDay or lossStreak >= maxConsecutiveLosses
+drawdownLock = dailyPnl <= -dailyLossCap
+profitLock = dailyPnl >= dailyProfitLock
 tradeCountLock = tradesToday >= maxTradesPerDay
-cooldownOk = na(lastTradeBar) or bar_index - lastTradeBar > cooldownBars
+gateOk = confirmedOk and symbolOk and inSession and windowOk and not manualNewsNow and not shockCandle and cooldownOk and bigWinCooldownOk and not lossLock and not drawdownLock and not profitLock and not tradeCountLock and chopScore <= maxChopScore and uncertainty <= maxUncertainty and strategy.position_size == 0
 
-// ---------------- Pro-Simple Entry Logic ----------------
-bullTrend = signalClose > emaSlow and emaFast > emaSlow
-bearTrend = signalClose < emaSlow and emaFast < emaSlow
-htfBull = not useHtfBias or (htfClose > htfEmaSlow and htfEmaFast >= htfEmaSlow)
-htfBear = not useHtfBias or (htfClose < htfEmaSlow and htfEmaFast <= htfEmaSlow)
-volumeOk = relativeVolume >= minRelativeVolume
-candleOk = bodyPct >= minBodyPct
-volatilityOk = na(atrBaseline) or atrBaseline <= 0 or atrValue <= atrBaseline * 2.35
-distVwapAtr = math.abs(signalClose - vwapValue) / math.max(atrValue, syminfo.mintick)
-rangeSpan = math.max(rangeHigh - rangeLow, syminfo.mintick)
-rangePosition = (signalClose - rangeLow) / rangeSpan
-middleOfRange = rangePosition > 0.35 and rangePosition < 0.65 and distVwapAtr > 0.45
-chopScore = clamp(18.0 + scoreBool(trendStrength < minTrendStrength, 18) + scoreBool(math.abs(vwapSlope) < 0.03, 10) + scoreBool(candleOverlap > 0.52, 12) + scoreBool(alternatingCandle, 8) + scoreBool(bbWidth < bbWidthAvg, 8) + scoreBool(middleOfRange, 10) - scoreBool(kaufmanRatioValue >= minKaufmanRatio and trendStrength >= minTrendStrength, 16), 0.0, 100.0)
-reclaimLong = signalLow <= vwapValue and signalClose > vwapValue and signalClose > signalOpen
-rejectShort = signalHigh >= vwapValue and signalClose < vwapValue and signalClose < signalOpen
-breakLong = signalClose > priorHigh and closeNearHigh and volumeOk
-breakShort = signalClose < priorLow and closeNearLow and volumeOk
-sweepLong = signalLow < priorLow and signalClose > priorLow and lowerWick > upperWick
-sweepShort = signalHigh > priorHigh and signalClose < priorHigh and upperWick > lowerWick
-fakeoutLongRisk = signalHigh > priorHigh and signalClose < priorHigh and upperWick > math.max(math.abs(signalClose - signalOpen), syminfo.mintick) * 1.2
-fakeoutShortRisk = signalLow < priorLow and signalClose > priorLow and lowerWick > math.max(math.abs(signalClose - signalOpen), syminfo.mintick) * 1.2
-doNotChaseLong = distVwapAtr > 2.4 or (signalClose > priorHigh and upperWick > math.max(math.abs(signalClose - signalOpen), syminfo.mintick) * 1.5)
-doNotChaseShort = distVwapAtr > 2.4 or (signalClose < priorLow and lowerWick > math.max(math.abs(signalClose - signalOpen), syminfo.mintick) * 1.5)
-reversalLong = (sweepLong or reclaimLong or (signalLow <= emaPullback + atrValue * pullbackAtrBuffer and signalClose > emaPullback)) and signalClose > signalOpen and closeNearHigh and lowerWick > upperWick and volumeOk and (not useHtfBias or htfBull or sweepLong)
-reversalShort = (sweepShort or rejectShort or (signalHigh >= emaPullback - atrValue * pullbackAtrBuffer and signalClose < emaPullback)) and signalClose < signalOpen and closeNearLow and upperWick > lowerWick and volumeOk and (not useHtfBias or htfBear or sweepShort)
-kaufmanLong = bullTrend and htfBull and kaufmanRatioValue >= minKaufmanRatio and signalClose > emaFast and signalClose > signalOpen and volumeOk
-kaufmanShort = bearTrend and htfBear and kaufmanRatioValue >= minKaufmanRatio and signalClose < emaFast and signalClose < signalOpen and volumeOk
-atrLong = bullTrend and htfBull and atrRatio >= atrExpansionMult and candleOk and closeNearHigh and volumeOk and (breakLong or reclaimLong or signalClose > emaFast)
-atrShort = bearTrend and htfBear and atrRatio >= atrExpansionMult and candleOk and closeNearLow and volumeOk and (breakShort or rejectShort or signalClose < emaFast)
+longRaw = longVotes >= minVotes and longScore >= adaptiveMinScore and longScore >= shortScore + minEdge and crossLongOk and htfLongOk and rewardRoomOkLong
+shortRaw = shortVotes >= minVotes and shortScore >= adaptiveMinScore and shortScore >= longScore + minEdge and crossShortOk and htfShortOk and rewardRoomOkShort
+longSignal = gateOk and longRaw and not shortRaw
+shortSignal = gateOk and shortRaw and not longRaw
+longSetup = longModules != "" ? longModules : "Quantum Long"
+shortSetup = shortModules != "" ? shortModules : "Quantum Short"
+longSetupType = trendLongSetup ? "Trend" : reversalLongSetup ? "Reversal" : breakLongSetup ? "Breakout" : fvgLongSetup ? "FVG" : "Mixed"
+shortSetupType = trendShortSetup ? "Trend" : reversalShortSetup ? "Reversal" : breakShortSetup ? "Breakout" : fvgShortSetup ? "FVG" : "Mixed"
 
-longScore = clamp(42.0 + scoreBool(bullTrend, 12) + scoreBool(htfBull, 10) + scoreBool(signalClose > vwapValue, 8) + scoreBool(vwapSlope > 0, 5) + scoreBool(volumeOk, 7) + scoreBool(relativeVolume >= 1.1, 5) + scoreBool(kaufmanRatioValue >= minKaufmanRatio, 8) + scoreBool(trendStrength >= minTrendStrength, 6) + scoreBool(closeNearHigh, 5) + scoreBool(reclaimLong or sweepLong, 8) + scoreBool(reversalLong, 9) + scoreBool(breakLong, 6) - scoreBool(chopScore > maxChopScore, 12) - scoreBool(fakeoutLongRisk, 12) - scoreBool(doNotChaseLong, 10) - scoreBool(bearTrend and htfBear, 12), 0.0, 100.0)
-shortScore = clamp(42.0 + scoreBool(bearTrend, 12) + scoreBool(htfBear, 10) + scoreBool(signalClose < vwapValue, 8) + scoreBool(vwapSlope < 0, 5) + scoreBool(volumeOk, 7) + scoreBool(relativeVolume >= 1.1, 5) + scoreBool(kaufmanRatioValue >= minKaufmanRatio, 8) + scoreBool(trendStrength >= minTrendStrength, 6) + scoreBool(closeNearLow, 5) + scoreBool(rejectShort or sweepShort, 8) + scoreBool(reversalShort, 9) + scoreBool(breakShort, 6) - scoreBool(chopScore > maxChopScore, 12) - scoreBool(fakeoutShortRisk, 12) - scoreBool(doNotChaseShort, 10) - scoreBool(bullTrend and htfBull, 12), 0.0, 100.0)
-edge = longScore - shortScore
-opportunityBoost = targetTradesPerDay > 0 and tradesToday < targetTradesPerDay and minutesNow >= 690 and minutesNow < 930 and lossStreak == 0 ? 6.0 : 0.0
-adaptiveMinScore = minSetupScore + scoreBool(chopScore > maxChopScore, 5) + lossStreak * 3.0 - opportunityBoost
-chopOk = chopScore <= maxChopScore or reversalLong or reversalShort
+longMsg = '{"source":"tradingview","bot":"nq_quantum_pro_ai","action":"BUY","ticker":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","setup":"' + longSetup + '","entry":' + str.tostring(close, format.mintick) + ',"stop":' + str.tostring(longStop, format.mintick) + ',"target":' + str.tostring(longTarget, format.mintick) + ',"qty":' + str.tostring(actualQty) + ',"score":' + str.tostring(longScore, "#.##") + ',"opposing_score":' + str.tostring(shortScore, "#.##") + ',"votes":' + str.tostring(longVotes) + ',"regime":"' + regimeLabel + '","uncertainty":' + str.tostring(uncertainty, "#.##") + ',"reason":"AI thesis: ' + longSetup + ', cross ' + str.tostring(crossScore, "#.##") + ', HTF ' + str.tostring(htfStack, "#.##") + '","tag":"' + webhookTag + '"}'
+shortMsg = '{"source":"tradingview","bot":"nq_quantum_pro_ai","action":"SELL","ticker":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","setup":"' + shortSetup + '","entry":' + str.tostring(close, format.mintick) + ',"stop":' + str.tostring(shortStop, format.mintick) + ',"target":' + str.tostring(shortTarget, format.mintick) + ',"qty":' + str.tostring(actualQty) + ',"score":' + str.tostring(shortScore, "#.##") + ',"opposing_score":' + str.tostring(longScore, "#.##") + ',"votes":' + str.tostring(shortVotes) + ',"regime":"' + regimeLabel + '","uncertainty":' + str.tostring(uncertainty, "#.##") + ',"reason":"AI thesis: ' + shortSetup + ', cross ' + str.tostring(crossScore, "#.##") + ', HTF ' + str.tostring(htfStack, "#.##") + '","tag":"' + webhookTag + '"}'
+exitLongMsg = '{"source":"tradingview","bot":"nq_quantum_pro_ai","action":"EXIT_LONG","ticker":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","price":' + str.tostring(close, format.mintick) + ',"reason":"quantum smart exit: stop target thesis fail trail or risk lock","tag":"' + webhookTag + '"}'
+exitShortMsg = '{"source":"tradingview","bot":"nq_quantum_pro_ai","action":"EXIT_SHORT","ticker":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","price":' + str.tostring(close, format.mintick) + ',"reason":"quantum smart exit: stop target thesis fail trail or risk lock","tag":"' + webhookTag + '"}'
 
-baseGate = symbolOk and timeframeOk and chartTimeframeSafe and confirmedOk and signalReady and newSignalBar and backtestWindowOk and signalSessionOk and not signalNearSessionClose and not dailyLossLock and not lossLock and not tradeCountLock and cooldownOk and volatilityOk and chopOk
-newLongSignal = baseGate and strategy.position_size == 0 and longScore >= adaptiveMinScore and longScore >= shortScore + 4 and not fakeoutLongRisk and not doNotChaseLong and (kaufmanLong or atrLong or reversalLong)
-newShortSignal = baseGate and strategy.position_size == 0 and shortScore >= adaptiveMinScore and shortScore >= longScore + 4 and not fakeoutShortRisk and not doNotChaseShort and (kaufmanShort or atrShort or reversalShort)
+var float activeStop = na
+var float activeTarget = na
+var float activeBest = na
+var int activeEntryBar = na
+var string activeSetup = "None"
 
-testLongSignal = enableManualTest and manualTestAction == "BUY" and chartTimeframeSafe and confirmedOk and backtestWindowOk
-testShortSignal = enableManualTest and manualTestAction == "SELL" and chartTimeframeSafe and confirmedOk and backtestWindowOk
-testExitLongSignal = enableManualTest and manualTestAction == "EXIT_LONG" and chartTimeframeSafe and confirmedOk and backtestWindowOk
-testExitShortSignal = enableManualTest and manualTestAction == "EXIT_SHORT" and chartTimeframeSafe and confirmedOk and backtestWindowOk
-hourlySlot = signalReady ? int(signalTime / 3600000) : 0
-hourlyTestReady = enableHourlyWebhookTest and symbolOk and chartTimeframeSafe and confirmedOk and signalReady and newSignalBar and backtestWindowOk and signalSessionOk
-hourlyTestLongSignal = hourlyTestReady and hourlySlot % 2 == 0
-hourlyTestShortSignal = hourlyTestReady and hourlySlot % 2 != 0
+longTooltip = "NQ Quantum AI LONG\nSetup: " + longSetup + "\nEntry: " + str.tostring(close, format.mintick) + "\nStop: " + str.tostring(longStop, format.mintick) + "\nTake Profit: " + str.tostring(longTarget, format.mintick) + "\nScore L/S: " + str.tostring(longScore, "#") + " / " + str.tostring(shortScore, "#") + "\nVotes: " + str.tostring(longVotes) + "\nRegime: " + regimeLabel + "\nCross: " + str.tostring(crossScore, "#.##") + "\nHTF: " + str.tostring(htfStack, "#.##") + "\nUncertainty: " + str.tostring(uncertainty, "#") + "\nNo repaint: bar close + lookahead_off"
+shortTooltip = "NQ Quantum AI SHORT\nSetup: " + shortSetup + "\nEntry: " + str.tostring(close, format.mintick) + "\nStop: " + str.tostring(shortStop, format.mintick) + "\nTake Profit: " + str.tostring(shortTarget, format.mintick) + "\nScore L/S: " + str.tostring(longScore, "#") + " / " + str.tostring(shortScore, "#") + "\nVotes: " + str.tostring(shortVotes) + "\nRegime: " + regimeLabel + "\nCross: " + str.tostring(crossScore, "#.##") + "\nHTF: " + str.tostring(htfStack, "#.##") + "\nUncertainty: " + str.tostring(uncertainty, "#") + "\nNo repaint: bar close + lookahead_off"
 
-longSignal = hourlyTestLongSignal or (strategy.position_size == 0 and (newLongSignal or testLongSignal))
-shortSignal = hourlyTestShortSignal or (strategy.position_size == 0 and (newShortSignal or testShortSignal))
-
-// ---------------- Stop / Target Plan ----------------
-longAtrStop = signalClose - atrValue * atrStopMult
-shortAtrStop = signalClose + atrValue * atrStopMult
-longStructureStop = na(priorLow) ? longAtrStop : priorLow - syminfo.mintick * 2
-shortStructureStop = na(priorHigh) ? shortAtrStop : priorHigh + syminfo.mintick * 2
-testModeActive = enableManualTest or enableHourlyWebhookTest
-plannedLongStopRaw = testModeActive ? signalClose - atrValue * 0.75 : math.max(longAtrStop, longStructureStop)
-plannedShortStopRaw = testModeActive ? signalClose + atrValue * 0.75 : math.min(shortAtrStop, shortStructureStop)
-plannedLongStop = math.min(plannedLongStopRaw, signalClose - syminfo.mintick * 4)
-plannedShortStop = math.max(plannedShortStopRaw, signalClose + syminfo.mintick * 4)
-plannedLongRisk = math.max(signalClose - plannedLongStop, syminfo.mintick)
-plannedShortRisk = math.max(plannedShortStop - signalClose, syminfo.mintick)
-plannedLongTarget = signalClose + plannedLongRisk * rewardMultiple
-plannedShortTarget = signalClose - plannedShortRisk * rewardMultiple
-
-longSetup = enableHourlyWebhookTest ? "HourlyWebhookTest" : kaufmanLong ? "KaufmanRatio" : atrLong ? "ATRExpansion" : reversalLong ? "Reversal" : "ManualTest"
-shortSetup = enableHourlyWebhookTest ? "HourlyWebhookTest" : kaufmanShort ? "KaufmanRatio" : atrShort ? "ATRExpansion" : reversalShort ? "Reversal" : "ManualTest"
-longGrade = longScore >= 84 ? "A+" : longScore >= 74 ? "A" : "B"
-shortGrade = shortScore >= 84 ? "A+" : shortScore >= 74 ? "A" : "B"
-riskMode = enableHourlyWebhookTest ? "WebhookTestHourly" : "ProSimpleTight"
-testModeJson = enableHourlyWebhookTest ? "true" : "false"
-longReason = enableHourlyWebhookTest ? "Hourly webhook route test only | alternates every confirmed 1H bar" : longSetup + " | score " + str.tostring(longScore, "#") + " | KR " + str.tostring(kaufmanRatioValue, "#.##") + " | ATR " + str.tostring(atrRatio, "#.##") + "x | chop " + str.tostring(chopScore, "#") + " | tight trail/smart exits"
-shortReason = enableHourlyWebhookTest ? "Hourly webhook route test only | alternates every confirmed 1H bar" : shortSetup + " | score " + str.tostring(shortScore, "#") + " | KR " + str.tostring(kaufmanRatioValue, "#.##") + " | ATR " + str.tostring(atrRatio, "#.##") + "x | chop " + str.tostring(chopScore, "#") + " | tight trail/smart exits"
-
-longMessage = '{"source":"tradingview","action":"BUY","ticker":"' + syminfo.ticker + '","timeframe":"' + signalTimeframe + '","chart_timeframe":"' + timeframe.period + '","price":' + money(signalClose) + ',"target":' + money(plannedLongTarget) + ',"profit_mode":"BRACKET_TARGET_TIGHT_TRAIL","stop_mode":"SMART_TRAILING_STOP","stop":' + money(plannedLongStop) + ',"qty":' + str.tostring(qty) + ',"edge":' + str.tostring(edge, "#.##") + ',"score":' + str.tostring(longScore, "#.##") + ',"ai_score":' + str.tostring(longScore, "#.##") + ',"ai_bias":"LONG","entry_style":"' + longSetup + '","grade":"' + longGrade + '","risk_mode":"' + riskMode + '","test_mode":' + testModeJson + ',"reason":"' + longReason + '","bar_time":"' + str.tostring(signalTime) + '","tag":"' + webhookTag + '"}'
-shortMessage = '{"source":"tradingview","action":"SELL","ticker":"' + syminfo.ticker + '","timeframe":"' + signalTimeframe + '","chart_timeframe":"' + timeframe.period + '","price":' + money(signalClose) + ',"target":' + money(plannedShortTarget) + ',"profit_mode":"BRACKET_TARGET_TIGHT_TRAIL","stop_mode":"SMART_TRAILING_STOP","stop":' + money(plannedShortStop) + ',"qty":' + str.tostring(qty) + ',"edge":' + str.tostring(edge, "#.##") + ',"score":' + str.tostring(shortScore, "#.##") + ',"ai_score":' + str.tostring(shortScore, "#.##") + ',"ai_bias":"SHORT","entry_style":"' + shortSetup + '","grade":"' + shortGrade + '","risk_mode":"' + riskMode + '","test_mode":' + testModeJson + ',"reason":"' + shortReason + '","bar_time":"' + str.tostring(signalTime) + '","tag":"' + webhookTag + '"}'
-exitLongMessage = '{"source":"tradingview","action":"EXIT_LONG","ticker":"' + syminfo.ticker + '","timeframe":"' + signalTimeframe + '","chart_timeframe":"' + timeframe.period + '","price":' + money(signalClose) + ',"qty":' + str.tostring(qty) + ',"edge":' + str.tostring(edge, "#.##") + ',"score":' + str.tostring(longScore, "#.##") + ',"risk_mode":"' + riskMode + '","test_mode":' + testModeJson + ',"reason":"tight smart exit","bar_time":"' + str.tostring(signalTime) + '","tag":"' + webhookTag + '"}'
-exitShortMessage = '{"source":"tradingview","action":"EXIT_SHORT","ticker":"' + syminfo.ticker + '","timeframe":"' + signalTimeframe + '","chart_timeframe":"' + timeframe.period + '","price":' + money(signalClose) + ',"qty":' + str.tostring(qty) + ',"edge":' + str.tostring(edge, "#.##") + ',"score":' + str.tostring(shortScore, "#.##") + ',"risk_mode":"' + riskMode + '","test_mode":' + testModeJson + ',"reason":"tight smart exit","bar_time":"' + str.tostring(signalTime) + '","tag":"' + webhookTag + '"}'
-
-// ---------------- Strategy Report + Webhook Orders ----------------
 if longSignal
+    activeStop := longStop
+    activeTarget := longTarget
+    activeBest := high
+    activeEntryBar := bar_index
+    activeSetup := longSetup
+    activeSetupType := longSetupType
     tradesToday += 1
     lastTradeBar := bar_index
-    activeEntryBar := bar_index
-    activeStop := plannedLongStop
-    activeTarget := plannedLongTarget
-    activeRiskPoints := plannedLongRisk
-    activeBest := signalClose
-    strategy.entry("Long", strategy.long, qty=qty, alert_message=longMessage)
-    alert(longMessage, alert.freq_once_per_bar_close)
+    strategy.entry("Quantum Long", strategy.long, qty=actualQty, alert_message=longMsg)
+    strategy.exit("Quantum Long Risk", from_entry="Quantum Long", stop=activeStop, limit=activeTarget, alert_message=exitLongMsg)
+    alert(longMsg, alert.freq_once_per_bar_close)
+    if showLabels
+        label.new(bar_index, low, "Q BUY\n" + longSetup, style=label.style_label_up, color=color.new(color.lime, 0), textcolor=color.black, size=size.small, tooltip=longTooltip)
 
 if shortSignal
+    activeStop := shortStop
+    activeTarget := shortTarget
+    activeBest := low
+    activeEntryBar := bar_index
+    activeSetup := shortSetup
+    activeSetupType := shortSetupType
     tradesToday += 1
     lastTradeBar := bar_index
-    activeEntryBar := bar_index
-    activeStop := plannedShortStop
-    activeTarget := plannedShortTarget
-    activeRiskPoints := plannedShortRisk
-    activeBest := signalClose
-    strategy.entry("Short", strategy.short, qty=qty, alert_message=shortMessage)
-    alert(shortMessage, alert.freq_once_per_bar_close)
+    strategy.entry("Quantum Short", strategy.short, qty=actualQty, alert_message=shortMsg)
+    strategy.exit("Quantum Short Risk", from_entry="Quantum Short", stop=activeStop, limit=activeTarget, alert_message=exitShortMsg)
+    alert(shortMsg, alert.freq_once_per_bar_close)
+    if showLabels
+        label.new(bar_index, high, "Q SELL\n" + shortSetup, style=label.style_label_down, color=color.new(color.red, 0), textcolor=color.white, size=size.small, tooltip=shortTooltip)
 
-barsInTrade = not na(activeEntryBar) ? bar_index - activeEntryBar : 0
-longHealth = clamp(longScore - shortScore + 55.0 - scoreBool(signalClose < emaPullback, 8) - scoreBool(signalClose < vwapValue, 10) - scoreBool(closeNearLow, 6), 0.0, 100.0)
-shortHealth = clamp(shortScore - longScore + 55.0 - scoreBool(signalClose > emaPullback, 8) - scoreBool(signalClose > vwapValue, 10) - scoreBool(closeNearHigh, 6), 0.0, 100.0)
-safeRiskPoints = math.max(nz(activeRiskPoints, atrValue), syminfo.mintick)
-longOpenR = strategy.position_size > 0 ? (signalClose - strategy.position_avg_price) / safeRiskPoints : 0.0
-shortOpenR = strategy.position_size < 0 ? (strategy.position_avg_price - signalClose) / safeRiskPoints : 0.0
-longBestR = strategy.position_size > 0 and not na(activeBest) ? (activeBest - strategy.position_avg_price) / safeRiskPoints : 0.0
-shortBestR = strategy.position_size < 0 and not na(activeBest) ? (strategy.position_avg_price - activeBest) / safeRiskPoints : 0.0
-longGivebackR = math.max(longBestR - longOpenR, 0.0)
-shortGivebackR = math.max(shortBestR - shortOpenR, 0.0)
+trailPoints = math.max(atr * trailAtrMult, syminfo.mintick * 4.0)
+if strategy.position_size > 0 and not na(activeStop)
+    activeBest := na(activeBest) ? high : math.max(activeBest, high)
+    bestPoints = activeBest - strategy.position_avg_price
+    if bestPoints >= breakevenAfterPoints
+        activeStop := math.max(activeStop, strategy.position_avg_price + syminfo.mintick)
+    if bestPoints >= profitProtectAfterPoints
+        activeStop := math.max(activeStop, activeBest - profitGivebackPoints)
+    if bestPoints >= trailAfterPoints
+        activeStop := math.max(activeStop, activeBest - trailPoints)
+    strategy.exit("Quantum Long Risk", from_entry="Quantum Long", stop=activeStop, limit=activeTarget, alert_message=exitLongMsg)
 
-if strategy.position_size > 0 and signalReady
-    activeBest := na(activeBest) ? signalHigh : math.max(activeBest, signalHigh)
-    openProfitPoints = signalClose - strategy.position_avg_price
-    if openProfitPoints >= safeRiskPoints * trailAfterR
-        structureTrail = signalClose - atrValue * trailAtrMult
-        profitLockStop = strategy.position_avg_price + safeRiskPoints * 0.05
-        activeStop := math.max(math.max(activeStop, structureTrail), profitLockStop)
-    strategy.exit("Long Risk Exit", from_entry="Long", stop=activeStop, limit=activeTarget, alert_message=exitLongMessage)
+if strategy.position_size < 0 and not na(activeStop)
+    activeBest := na(activeBest) ? low : math.min(activeBest, low)
+    bestPoints = strategy.position_avg_price - activeBest
+    if bestPoints >= breakevenAfterPoints
+        activeStop := math.min(activeStop, strategy.position_avg_price - syminfo.mintick)
+    if bestPoints >= profitProtectAfterPoints
+        activeStop := math.min(activeStop, activeBest + profitGivebackPoints)
+    if bestPoints >= trailAfterPoints
+        activeStop := math.min(activeStop, activeBest + trailPoints)
+    strategy.exit("Quantum Short Risk", from_entry="Quantum Short", stop=activeStop, limit=activeTarget, alert_message=exitShortMsg)
 
-if strategy.position_size < 0 and signalReady
-    activeBest := na(activeBest) ? signalLow : math.min(activeBest, signalLow)
-    openProfitPoints = strategy.position_avg_price - signalClose
-    if openProfitPoints >= safeRiskPoints * trailAfterR
-        structureTrail = signalClose + atrValue * trailAtrMult
-        profitLockStop = strategy.position_avg_price - safeRiskPoints * 0.05
-        activeStop := math.min(math.min(activeStop, structureTrail), profitLockStop)
-    strategy.exit("Short Risk Exit", from_entry="Short", stop=activeStop, limit=activeTarget, alert_message=exitShortMessage)
+barsInTrade = strategy.position_size != 0 and not na(activeEntryBar) ? bar_index - activeEntryBar : 0
+longOpenPoints = strategy.position_size > 0 ? close - strategy.position_avg_price : 0.0
+shortOpenPoints = strategy.position_size < 0 ? strategy.position_avg_price - close : 0.0
+longBestPoints = strategy.position_size > 0 and not na(activeBest) ? activeBest - strategy.position_avg_price : 0.0
+shortBestPoints = strategy.position_size < 0 and not na(activeBest) ? strategy.position_avg_price - activeBest : 0.0
+longGiveback = strategy.position_size > 0 ? math.max(longBestPoints - longOpenPoints, 0.0) : 0.0
+shortGiveback = strategy.position_size < 0 ? math.max(shortBestPoints - shortOpenPoints, 0.0) : 0.0
+longHealth = clamp(50.0 + scoreBool(longOpenPoints > 0, 8) + scoreBool(longScore >= shortScore, 8) + scoreBool(buyersPress, 8) + scoreBool(crossLongOk, 5) + scoreBool(htfLongOk, 5) - scoreBool(sellersPress, 10) - scoreBool(crossScore < -1.0, 8) - scoreBool(close < ema21, 8), 0.0, 100.0)
+shortHealth = clamp(50.0 + scoreBool(shortOpenPoints > 0, 8) + scoreBool(shortScore >= longScore, 8) + scoreBool(sellersPress, 8) + scoreBool(crossShortOk, 5) + scoreBool(htfShortOk, 5) - scoreBool(buyersPress, 10) - scoreBool(crossScore > 1.0, 8) - scoreBool(close > ema21, 8), 0.0, 100.0)
 
-longAdverseExit = longOpenR <= -earlyAdverseR and (shortScore > longScore or signalClose < vwapValue or closeNearLow)
-shortAdverseExit = shortOpenR <= -earlyAdverseR and (longScore > shortScore or signalClose > vwapValue or closeNearHigh)
-longGivebackExit = longBestR >= 0.70 and longGivebackR >= profitGivebackR and (longHealth < 66 or shortScore > longScore)
-shortGivebackExit = shortBestR >= 0.70 and shortGivebackR >= profitGivebackR and (shortHealth < 66 or longScore > shortScore)
-longNoFollowThroughExit = barsInTrade >= 2 and longOpenR < 0.20 and longHealth < 60
-shortNoFollowThroughExit = barsInTrade >= 2 and shortOpenR < 0.20 and shortHealth < 60
-longThesisExit = strategy.position_size > 0 and confirmedOk and newSignalBar and (longAdverseExit or longGivebackExit or longNoFollowThroughExit or (signalClose < emaPullback and longHealth < 62) or (signalClose < vwapValue and longHealth < 58) or shortScore > longScore + 8 or barsInTrade >= maxBarsInTrade and longHealth < 66 or testExitLongSignal)
-shortThesisExit = strategy.position_size < 0 and confirmedOk and newSignalBar and (shortAdverseExit or shortGivebackExit or shortNoFollowThroughExit or (signalClose > emaPullback and shortHealth < 62) or (signalClose > vwapValue and shortHealth < 58) or longScore > shortScore + 8 or barsInTrade >= maxBarsInTrade and shortHealth < 66 or testExitShortSignal)
+sessionExit = useSessionFilter and strategy.position_size != 0 and not inSession
+longThesisFail = strategy.position_size > 0 and longOpenPoints <= -earlyExitLossPoints and (sellersPress or close < ema21 or shortScore > longScore or not crossLongOk)
+shortThesisFail = strategy.position_size < 0 and shortOpenPoints <= -earlyExitLossPoints and (buyersPress or close > ema21 or longScore > shortScore or not crossShortOk)
+longProfitDrain = strategy.position_size > 0 and longBestPoints >= profitProtectAfterPoints and longGiveback >= profitGivebackPoints and (sellersPress or longHealth < 48)
+shortProfitDrain = strategy.position_size < 0 and shortBestPoints >= profitProtectAfterPoints and shortGiveback >= profitGivebackPoints and (buyersPress or shortHealth < 48)
+longBiasFlip = strategy.position_size > 0 and shortScore > longScore + minEdge and shortVotes >= minVotes and (sellersPress or crossScore < -1.0)
+shortBiasFlip = strategy.position_size < 0 and longScore > shortScore + minEdge and longVotes >= minVotes and (buyersPress or crossScore > 1.0)
+exitLong = confirmedOk and strategy.position_size > 0 and (sessionExit or longThesisFail or longProfitDrain or longBiasFlip or shockCandle or barsInTrade >= maxBarsInTrade or drawdownLock)
+exitShort = confirmedOk and strategy.position_size < 0 and (sessionExit or shortThesisFail or shortProfitDrain or shortBiasFlip or shockCandle or barsInTrade >= maxBarsInTrade or drawdownLock)
 
-if longThesisExit
-    strategy.close("Long", alert_message=exitLongMessage)
-    alert(exitLongMessage, alert.freq_once_per_bar_close)
+if exitLong
+    strategy.close("Quantum Long", alert_message=exitLongMsg)
+    lastTradeBar := bar_index
 
-if shortThesisExit
-    strategy.close("Short", alert_message=exitShortMessage)
-    alert(exitShortMessage, alert.freq_once_per_bar_close)
+if exitShort
+    strategy.close("Quantum Short", alert_message=exitShortMsg)
+    lastTradeBar := bar_index
 
 if strategy.position_size == 0 and not longSignal and not shortSignal
     activeStop := na
     activeTarget := na
-    activeRiskPoints := na
     activeBest := na
     activeEntryBar := na
 
-// ---------------- Visuals / Status ----------------
-plot(emaFast, "Fast EMA", color=color.new(color.orange, 0), linewidth=1)
-plot(emaPullback, "Reversal EMA", color=color.new(color.white, 0), linewidth=1)
-plot(emaSlow, "Slow EMA", color=color.new(color.blue, 0), linewidth=2)
-plot(vwapValue, "VWAP", color=color.new(color.aqua, 15), linewidth=1)
-plot(priorHigh, "Structure High", color=color.new(color.lime, 78), style=plot.style_linebr)
-plot(priorLow, "Structure Low", color=color.new(color.red, 78), style=plot.style_linebr)
-plot(activeStop, "Active Stop", color=color.new(color.red, 0), style=plot.style_linebr)
-plot(activeTarget, "Active Target", color=color.new(color.lime, 0), style=plot.style_linebr)
+// ---------------- Visuals ----------------
+plot(showKeyLevels ? vwapValue : na, "VWAP", color=color.new(color.white, 0), linewidth=2)
+plot(showKeyLevels ? ema8 : na, "EMA 8", color=color.new(color.orange, 0))
+plot(showKeyLevels ? ema21 : na, "EMA 21", color=color.new(color.blue, 0))
+plot(showKeyLevels ? ema55 : na, "EMA 55", color=color.new(color.fuchsia, 20))
+plot(showKeyLevels ? priorDayHigh : na, "Prior Day High", color=color.new(color.red, 55), style=plot.style_linebr)
+plot(showKeyLevels ? priorDayLow : na, "Prior Day Low", color=color.new(color.lime, 55), style=plot.style_linebr)
+plot(showKeyLevels and not na(bullFvgCe) ? bullFvgCe : na, "Bull FVG CE", color=color.new(color.lime, 70), style=plot.style_linebr)
+plot(showKeyLevels and not na(bearFvgCe) ? bearFvgCe : na, "Bear FVG CE", color=color.new(color.red, 70), style=plot.style_linebr)
 
-plotshape(longSignal, title="Pro Long", style=shape.labelup, location=location.belowbar, color=color.new(color.lime, 0), text="BUY", textcolor=color.black, size=size.small)
-plotshape(shortSignal, title="Pro Short", style=shape.labeldown, location=location.abovebar, color=color.new(color.red, 0), text="SELL", textcolor=color.white, size=size.small)
-plotshape(longThesisExit, title="Pro Exit Long", style=shape.xcross, location=location.abovebar, color=color.new(color.yellow, 0), text="EXIT", textcolor=color.black, size=size.tiny)
-plotshape(shortThesisExit, title="Pro Exit Short", style=shape.xcross, location=location.belowbar, color=color.new(color.yellow, 0), text="EXIT", textcolor=color.black, size=size.tiny)
+plotshape(fvgBullGap, "Bull FVG", shape.triangleup, location.belowbar, color.new(color.lime, 70), text="FVG", size=size.tiny)
+plotshape(fvgBearGap, "Bear FVG", shape.triangledown, location.abovebar, color.new(color.red, 70), text="FVG", size=size.tiny)
+plotshape(longSignal, "Quantum Long", shape.labelup, location.belowbar, color.new(color.lime, 0), text="Q BUY", textcolor=color.black, size=size.small)
+plotshape(shortSignal, "Quantum Short", shape.labeldown, location.abovebar, color.new(color.red, 0), text="Q SELL", textcolor=color.white, size=size.small)
+plotshape(exitLong, "Quantum Exit Long", shape.xcross, location.abovebar, color.new(color.yellow, 0), text="XL", textcolor=color.black, size=size.tiny)
+plotshape(exitShort, "Quantum Exit Short", shape.xcross, location.belowbar, color.new(color.yellow, 0), text="XS", textcolor=color.black, size=size.tiny)
 
-statusText = not symbolOk ? "Wrong symbol" : not chartTimeframeSafe ? "Chart TF too high" : not signalReady ? "Building 1H data" : not backtestWindowOk ? "Before 4Y window" : not signalSessionOk ? "Outside 1H session" : dailyLossLock ? "Daily loss lock" : lossLock ? "Loss lock" : tradeCountLock ? "Trade cap" : signalNearSessionClose ? "1H close buffer" : "No-leak 1H armed"
-positionText = strategy.position_size > 0 ? "Long" : strategy.position_size < 0 ? "Short" : "Flat"
-setupText = kaufmanLong or kaufmanShort ? "Kaufman" : atrLong or atrShort ? "ATR" : reversalLong or reversalShort ? "Reversal" : "Waiting"
-var table dash = table.new(position.top_right, 2, 9, bgcolor=color.new(color.black, 12), border_color=color.new(color.white, 70), border_width=1)
-if barstate.islast
-    table.cell(dash, 0, 0, "NQ v44 Pro", text_color=color.white, bgcolor=color.new(color.teal, 58))
-    table.cell(dash, 1, 0, statusText, text_color=baseGate ? color.lime : color.orange, bgcolor=color.new(color.teal, 58))
-    table.cell(dash, 0, 1, "Position", text_color=color.silver)
-    table.cell(dash, 1, 1, positionText, text_color=strategy.position_size == 0 ? color.white : color.lime)
-    table.cell(dash, 0, 2, "Setup", text_color=color.silver)
-    table.cell(dash, 1, 2, setupText, text_color=newLongSignal ? color.lime : newShortSignal ? color.orange : color.silver)
-    table.cell(dash, 0, 3, "Score L/S", text_color=color.silver)
-    table.cell(dash, 1, 3, str.tostring(longScore, "#") + "/" + str.tostring(shortScore, "#"), text_color=edge >= 0 ? color.lime : color.orange)
-    table.cell(dash, 0, 4, "Chop", text_color=color.silver)
-    table.cell(dash, 1, 4, str.tostring(chopScore, "#"), text_color=chopScore <= maxChopScore ? color.lime : color.orange)
-    table.cell(dash, 0, 5, "Today", text_color=color.silver)
-    table.cell(dash, 1, 5, str.tostring(tradesToday) + "/" + str.tostring(maxTradesPerDay) + " target " + str.tostring(targetTradesPerDay), text_color=tradeCountLock ? color.red : color.white)
-    table.cell(dash, 0, 6, "Daily P/L", text_color=color.silver)
-    table.cell(dash, 1, 6, str.tostring(dailyPnL, "#.##"), text_color=dailyPnL >= 0 ? color.lime : color.red)
-    table.cell(dash, 0, 7, "Route", text_color=color.silver)
-    table.cell(dash, 1, 7, "TV > Render > App", text_color=color.white)
-    table.cell(dash, 0, 8, "Tag", text_color=color.silver)
-    table.cell(dash, 1, 8, webhookTag + " | no leak", text_color=color.lime)
+var line entryLine = na
+var line stopLine = na
+var line targetLine = na
+if showTradeLines and (longSignal or shortSignal)
+    if not na(entryLine)
+        line.delete(entryLine)
+    if not na(stopLine)
+        line.delete(stopLine)
+    if not na(targetLine)
+        line.delete(targetLine)
+    entryLine := line.new(bar_index, close, bar_index + 30, close, color=color.new(color.white, 10), width=1)
+    stopLine := line.new(bar_index, longSignal ? longStop : shortStop, bar_index + 30, longSignal ? longStop : shortStop, color=color.new(color.red, 0), width=2)
+    targetLine := line.new(bar_index, longSignal ? longTarget : shortTarget, bar_index + 30, longSignal ? longTarget : shortTarget, color=color.new(color.lime, 0), width=2)
+if showTradeLines and not na(entryLine)
+    line.set_x2(entryLine, bar_index + 30)
+    line.set_x2(stopLine, bar_index + 30)
+    line.set_x2(targetLine, bar_index + 30)
+    if not na(activeStop)
+        line.set_y1(stopLine, activeStop)
+        line.set_y2(stopLine, activeStop)
+    if not na(activeTarget)
+        line.set_y1(targetLine, activeTarget)
+        line.set_y2(targetLine, activeTarget)
 
-bgcolor(symbolOk and timeframeOk ? na : color.new(color.red, 88))
+// ---------------- Dashboard ----------------
+status = not symbolOk ? "NQ only" : not windowOk ? "Before window" : not inSession ? "Session wait" : manualNewsNow ? "News block" : shockCandle ? "Shock wait" : drawdownLock ? "DD lock" : profitLock ? "Profit lock" : lossLock ? "Loss lock" : chopScore > maxChopScore ? "Chop wait" : longSignal ? "Long fired" : shortSignal ? "Short fired" : "Scanning"
+var table dash = table.new(position.bottom_right, 2, 15, bgcolor=color.new(color.black, 18), border_color=color.new(color.white, 75), border_width=1)
+if showDashboard and barstate.islast
+    table.cell(dash, 0, 0, "Quantum AI", text_color=color.white, bgcolor=color.new(color.teal, 55), text_size=size.tiny)
+    table.cell(dash, 1, 0, status, text_color=color.white, bgcolor=color.new(color.teal, 55), text_size=size.tiny)
+    table.cell(dash, 0, 1, "Score", text_color=color.silver, text_size=size.tiny)
+    table.cell(dash, 1, 1, str.tostring(longScore, "#") + " / " + str.tostring(shortScore, "#"), text_color=longScore >= shortScore ? color.lime : color.orange, text_size=size.tiny)
+    table.cell(dash, 0, 2, "Votes", text_color=color.silver, text_size=size.tiny)
+    table.cell(dash, 1, 2, str.tostring(longVotes) + " / " + str.tostring(shortVotes), text_color=longVotes >= shortVotes ? color.lime : color.orange, text_size=size.tiny)
+    table.cell(dash, 0, 3, "Regime", text_color=color.silver, text_size=size.tiny)
+    table.cell(dash, 1, 3, regimeLabel, text_color=trendRegime ? color.lime : rangeRegime ? color.orange : color.silver, text_size=size.tiny)
+    table.cell(dash, 0, 4, "Cross", text_color=color.silver, text_size=size.tiny)
+    table.cell(dash, 1, 4, str.tostring(crossScore, "#.##"), text_color=crossScore > 0 ? color.lime : color.orange, text_size=size.tiny)
+    table.cell(dash, 0, 5, "HTF", text_color=color.silver, text_size=size.tiny)
+    table.cell(dash, 1, 5, str.tostring(htfStack, "#.##"), text_color=htfStack > 0 ? color.lime : htfStack < 0 ? color.orange : color.silver, text_size=size.tiny)
+    table.cell(dash, 0, 6, "Chop/Unc", text_color=color.silver, text_size=size.tiny)
+    table.cell(dash, 1, 6, str.tostring(chopScore, "#") + " / " + str.tostring(uncertainty, "#"), text_color=chopScore <= maxChopScore and uncertainty <= maxUncertainty ? color.lime : color.orange, text_size=size.tiny)
+    table.cell(dash, 0, 7, "Setup", text_color=color.silver, text_size=size.tiny)
+    table.cell(dash, 1, 7, activeSetup, text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 0, 8, "Day", text_color=color.silver, text_size=size.tiny)
+    table.cell(dash, 1, 8, str.tostring(tradesToday) + " W" + str.tostring(winsToday) + " L" + str.tostring(lossesToday), text_color=lossLock ? color.red : color.white, text_size=size.tiny)
+    table.cell(dash, 0, 9, "P/L", text_color=color.silver, text_size=size.tiny)
+    table.cell(dash, 1, 9, str.tostring(dailyPnl, "#.##"), text_color=dailyPnl >= 0 ? color.lime : color.red, text_size=size.tiny)
+    table.cell(dash, 0, 10, "Pen L/S", text_color=color.silver, text_size=size.tiny)
+    table.cell(dash, 1, 10, str.tostring(longPenalty, "#.#") + " / " + str.tostring(shortPenalty, "#.#"), text_color=color.silver, text_size=size.tiny)
+    table.cell(dash, 0, 11, "Adapt Min", text_color=color.silver, text_size=size.tiny)
+    table.cell(dash, 1, 11, str.tostring(adaptiveMinScore, "#"), text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 0, 12, "Health", text_color=color.silver, text_size=size.tiny)
+    table.cell(dash, 1, 12, strategy.position_size > 0 ? str.tostring(longHealth, "#") : strategy.position_size < 0 ? str.tostring(shortHealth, "#") : "Flat", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 0, 13, "Backtest", text_color=color.silver, text_size=size.tiny)
+    table.cell(dash, 1, 13, str.tostring(rollingBacktestYears) + "Y rolling", text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 0, 14, "NoLeak", text_color=color.silver, text_size=size.tiny)
+    table.cell(dash, 1, 14, useNoRepaint ? "Close + OFF" : "Fast + OFF", text_color=useNoRepaint ? color.lime : color.orange, text_size=size.tiny)
+
+// ---------------- Alerts ----------------
+alertcondition(longSignal, "NQ Quantum AI Long", "NQ Quantum AI long fired. Use Any alert() function call or {{strategy.order.alert_message}}.")
+alertcondition(shortSignal, "NQ Quantum AI Short", "NQ Quantum AI short fired. Use Any alert() function call or {{strategy.order.alert_message}}.")
+alertcondition(exitLong, "NQ Quantum AI Exit Long", "NQ Quantum AI exit long.")
+alertcondition(exitShort, "NQ Quantum AI Exit Short", "NQ Quantum AI exit short.")

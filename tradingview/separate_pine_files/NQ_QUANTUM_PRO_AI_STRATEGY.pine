@@ -16,6 +16,7 @@ accountSize = input.float(100000.0, "Paper Account Size", minval=1000.0, step=10
 nqPointValue = input.float(20.0, "NQ $ / Point", minval=0.01, step=0.25, group=GRP_CORE)
 useNqLock = input.bool(true, "NQ Only", group=GRP_CORE)
 useNoRepaint = input.bool(true, "Strict No-Repaint Bar Close", group=GRP_CORE)
+requireOneHour = input.bool(true, "Require 1H Chart For Python Sync", group=GRP_CORE)
 useRollingBacktest = input.bool(true, "Rolling 4Y Backtest Window", group=GRP_CORE)
 rollingBacktestYears = input.int(4, "Rolling Backtest Years", minval=1, maxval=20, group=GRP_CORE)
 useSessionFilter = input.bool(true, "RTH Only", group=GRP_CORE)
@@ -64,6 +65,7 @@ safeDiv(num, den) =>
 confirmedOk = not useNoRepaint or barstate.isconfirmed
 tickerUpper = str.upper(syminfo.ticker)
 symbolOk = not useNqLock or str.contains(tickerUpper, "NQ")
+timeframeOk = not requireOneHour or timeframe.period == "60"
 inSession = not useSessionFilter or not na(time(timeframe.period, tradeSession))
 newDay = ta.change(time("D")) != 0
 nyHour = hour(time, "America/New_York")
@@ -214,7 +216,7 @@ dailyLossLock = dailyPnl <= -dailyLossCap
 lossLock = lossesToday >= maxLossesPerDay or lossStreak >= maxConsecutiveLosses
 tradeCountLock = tradesToday >= maxTradesPerDay
 cooldownOk = na(lastTradeBar) or bar_index - lastTradeBar > cooldownBars
-gateOk = confirmedOk and symbolOk and inSession and not nearSessionClose and windowOk and volatilityOk and not dailyLossLock and not lossLock and not tradeCountLock and cooldownOk and strategy.position_size == 0
+gateOk = confirmedOk and symbolOk and timeframeOk and inSession and not nearSessionClose and windowOk and volatilityOk and not dailyLossLock and not lossLock and not tradeCountLock and cooldownOk and strategy.position_size == 0
 
 longRaw = longVotes >= minVotes and longScore >= minSetupScore and longScore >= shortScore + minEdge and uncertainty <= maxUncertainty and chopScore <= maxChopScore and not fakeoutLongRisk and not doNotChaseLong and (trendPullbackLong or reversalLong or breakLong or quantumFvgLong)
 shortRaw = shortVotes >= minVotes and shortScore >= minSetupScore and shortScore >= longScore + minEdge and uncertainty <= maxUncertainty and chopScore <= maxChopScore and not fakeoutShortRisk and not doNotChaseShort and (trendPullbackShort or reversalShort or breakShort or quantumFvgShort)
@@ -355,7 +357,7 @@ if showLines and not na(entryLine)
         line.set_y1(targetLine, activeTarget)
         line.set_y2(targetLine, activeTarget)
 
-status = timeframe.period != "60" ? "Use 1H" : not symbolOk ? "NQ only" : not windowOk ? "Before 4Y window" : not inSession ? "Session wait" : dailyLossLock ? "Daily lock" : lossLock ? "Loss lock" : tradeCountLock ? "Trade lock" : chopScore > maxChopScore ? "Chop wait" : longSignal ? "Long fired" : shortSignal ? "Short fired" : "Scanning"
+status = not timeframeOk ? "LOCKED: use 1H" : not symbolOk ? "NQ only" : not windowOk ? "Before 4Y window" : not inSession ? "Session wait" : dailyLossLock ? "Daily lock" : lossLock ? "Loss lock" : tradeCountLock ? "Trade lock" : chopScore > maxChopScore ? "Chop wait" : longSignal ? "Long fired" : shortSignal ? "Short fired" : "Scanning"
 var table dash = table.new(position.bottom_right, 2, 12, bgcolor=color.new(color.black, 18), border_color=color.new(color.white, 75), border_width=1)
 if showDashboard and barstate.islast
     table.cell(dash, 0, 0, "NQ Sync", text_color=color.white, bgcolor=color.new(color.teal, 55), text_size=size.tiny)

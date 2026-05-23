@@ -41,8 +41,9 @@ stopSource = input.string("Heikin Ashi Wick", "Stop Uses", options=["Heikin Ashi
 stopBufferTicks = input.int(2, "Stop Buffer Ticks", minval=0, maxval=50, group=grpRisk)
 minRiskTicks = input.int(4, "Minimum Risk Ticks", minval=1, maxval=100, group=grpRisk)
 maxRiskAtr = input.float(1.25, "Max Risk ATR", minval=0.1, maxval=5.0, step=0.05, group=grpRisk)
-moveStopToBEAt1R = input.bool(true, "Move Stop To Breakeven After 1R", group=grpRisk)
-lockOneRAfter2R = input.bool(true, "Lock 1R After 2R", group=grpRisk)
+useStepStopLadder = input.bool(true, "Use Step Stop Ladder", group=grpRisk, tooltip="At 2R the stop moves to breakeven. At 3R it locks 2R. At 4R it locks 3R, and so on.")
+stepBreakevenAtR = input.float(2.0, "Move Stop To Breakeven At R", minval=0.5, maxval=10.0, step=0.25, group=grpRisk)
+letRunnerContinue = input.bool(true, "Let Final Runner Continue Past 3R", group=grpRisk)
 maxBarsInTrade = input.int(8, "Max Bars In Trade", minval=1, maxval=60, group=grpRisk)
 
 grpVisual = "Visuals"
@@ -151,6 +152,7 @@ shortSignal = confirmed and timeframeOk and inSession and dailyTradeOk and flat 
 var float entryPrice = na
 var float activeStop = na
 var float riskPoints = na
+var float maxReachedR = 0.0
 var float target1 = na
 var float target2 = na
 var float target3 = na
@@ -164,6 +166,7 @@ if longSignal
     entryPrice := close
     activeStop := longStopCandidate
     riskPoints := longRisk
+    maxReachedR := 0.0
     target1 := entryPrice + riskPoints
     target2 := entryPrice + riskPoints * 2.0
     target3 := entryPrice + riskPoints * 3.0
@@ -190,6 +193,7 @@ if shortSignal
     entryPrice := close
     activeStop := shortStopCandidate
     riskPoints := shortRisk
+    maxReachedR := 0.0
     target1 := entryPrice - riskPoints
     target2 := entryPrice - riskPoints * 2.0
     target3 := entryPrice - riskPoints * 3.0
@@ -215,28 +219,34 @@ if shortSignal
 barsInTrade = na(entryBar) ? 0 : bar_index - entryBar
 
 if longOpen and not na(riskPoints)
-    if moveStopToBEAt1R and high >= target1
-        activeStop := math.max(activeStop, entryPrice)
-    if lockOneRAfter2R and high >= target2
-        activeStop := math.max(activeStop, entryPrice + riskPoints)
+    maxReachedR := math.max(maxReachedR, (high - entryPrice) / riskPoints)
+    if useStepStopLadder and maxReachedR >= stepBreakevenAtR
+        float lockR = maxReachedR < stepBreakevenAtR + 1.0 ? 0.0 : math.floor(maxReachedR) - 1.0
+        activeStop := math.max(activeStop, entryPrice + riskPoints * lockR)
     if showLevels and not na(stopLine)
         line.set_y1(stopLine, activeStop)
         line.set_y2(stopLine, activeStop)
     strategy.exit("L 1R", "Long", qty_percent=33, stop=activeStop, limit=target1, alert_message=longExitAlert)
     strategy.exit("L 2R", "Long", qty_percent=33, stop=activeStop, limit=target2, alert_message=longExitAlert)
-    strategy.exit("L 3R", "Long", qty_percent=34, stop=activeStop, limit=target3, alert_message=longExitAlert)
+    if letRunnerContinue
+        strategy.exit("L Runner", "Long", qty_percent=34, stop=activeStop, alert_message=longExitAlert)
+    else
+        strategy.exit("L 3R", "Long", qty_percent=34, stop=activeStop, limit=target3, alert_message=longExitAlert)
 
 if shortOpen and not na(riskPoints)
-    if moveStopToBEAt1R and low <= target1
-        activeStop := math.min(activeStop, entryPrice)
-    if lockOneRAfter2R and low <= target2
-        activeStop := math.min(activeStop, entryPrice - riskPoints)
+    maxReachedR := math.max(maxReachedR, (entryPrice - low) / riskPoints)
+    if useStepStopLadder and maxReachedR >= stepBreakevenAtR
+        float lockR = maxReachedR < stepBreakevenAtR + 1.0 ? 0.0 : math.floor(maxReachedR) - 1.0
+        activeStop := math.min(activeStop, entryPrice - riskPoints * lockR)
     if showLevels and not na(stopLine)
         line.set_y1(stopLine, activeStop)
         line.set_y2(stopLine, activeStop)
     strategy.exit("S 1R", "Short", qty_percent=33, stop=activeStop, limit=target1, alert_message=shortExitAlert)
     strategy.exit("S 2R", "Short", qty_percent=33, stop=activeStop, limit=target2, alert_message=shortExitAlert)
-    strategy.exit("S 3R", "Short", qty_percent=34, stop=activeStop, limit=target3, alert_message=shortExitAlert)
+    if letRunnerContinue
+        strategy.exit("S Runner", "Short", qty_percent=34, stop=activeStop, alert_message=shortExitAlert)
+    else
+        strategy.exit("S 3R", "Short", qty_percent=34, stop=activeStop, limit=target3, alert_message=shortExitAlert)
 
 timeExit = confirmed and not flat and barsInTrade >= maxBarsInTrade
 sessionExit = confirmed and not flat and not inSession
@@ -250,6 +260,7 @@ if timeExit or sessionExit
     entryPrice := na
     activeStop := na
     riskPoints := na
+    maxReachedR := 0.0
     target1 := na
     target2 := na
     target3 := na
@@ -259,6 +270,7 @@ if flat and not longSignal and not shortSignal
     entryPrice := na
     activeStop := na
     riskPoints := na
+    maxReachedR := 0.0
     target1 := na
     target2 := na
     target3 := na

@@ -18,14 +18,14 @@ tradeSession = input.session("0930-1600", "Trading Session")
 avoidLunch = input.bool(true, "Avoid Lunch Chop")
 
 tradeMode = input.string("Auto", "Trade Mode", options=["Auto", "Scalping", "Trend Following", "Reversal", "Breakout"])
-minTotalScore = input.float(78, "Minimum Total Score", minval=40, maxval=120, step=1)
-minEdge = input.float(8, "Minimum Direction Edge", minval=0, maxval=50, step=1)
-maxChop = input.float(68, "Max Chop Score", minval=20, maxval=100, step=1)
-cooldownBars = input.int(6, "Cooldown Bars", minval=0, maxval=200)
+minTotalScore = input.float(84, "Minimum Total Score", minval=40, maxval=120, step=1)
+minEdge = input.float(12, "Minimum Direction Edge", minval=0, maxval=50, step=1)
+maxChop = input.float(58, "Max Chop Score", minval=20, maxval=100, step=1)
+cooldownBars = input.int(18, "Cooldown Bars", minval=0, maxval=200)
 strategyReportSync = input.bool(true, "Strategy Report Sync Fallback")
-reportSyncEveryBars = input.int(8, "Report Sync Bars Between Trades", minval=3, maxval=200)
-reportSyncHoldBars = input.int(3, "CMC Sync Hold Bars", minval=1, maxval=50)
-maxTradesPerDay = input.int(10, "Max Trades Per Day", minval=1, maxval=50)
+reportSyncEveryBars = input.int(30, "Report Sync Bars Between Trades", minval=3, maxval=200)
+reportSyncHoldBars = input.int(6, "CMC Sync Hold Bars", minval=1, maxval=50)
+maxTradesPerDay = input.int(5, "Max Trades Per Day", minval=1, maxval=50)
 maxLossesPerDay = input.int(3, "Max Losses Per Day", minval=1, maxval=20)
 maxConsecutiveLosses = input.int(2, "Max Consecutive Losses", minval=1, maxval=10)
 dailyLossLimit = input.float(1200, "Daily Loss Limit ($)", minval=100, step=50)
@@ -55,15 +55,15 @@ dxySymbol = input.string("TVC:DXY", "DXY Symbol")
 qqqSymbol = input.string("NASDAQ:QQQ", "QQQ Symbol")
 semiSymbol = input.string("NASDAQ:SMH", "Semiconductor Symbol")
 
-stopAtrMult = input.float(1.10, "Base Stop ATR", minval=0.25, maxval=5.0, step=0.05)
-targetR = input.float(1.75, "Take Profit R", minval=0.5, maxval=8.0, step=0.25)
+stopAtrMult = input.float(0.85, "Base Stop ATR", minval=0.25, maxval=5.0, step=0.05)
+targetR = input.float(2.25, "Take Profit R", minval=0.5, maxval=8.0, step=0.25)
 maxTargetAtr = input.float(4.0, "Max TP ATR Stretch", minval=1.0, maxval=12.0, step=0.25)
 maxLossDollars = input.float(800, "Max Loss Per Trade ($)", minval=50, step=50)
-trailStartR = input.float(0.75, "Trail Starts At R", minval=0.1, maxval=5.0, step=0.05)
-trailAtrMult = input.float(0.85, "Trailing ATR Multiplier", minval=0.1, maxval=5.0, step=0.05)
-givebackR = input.float(0.45, "Smart Exit Giveback R", minval=0.1, maxval=3.0, step=0.05)
-breakevenR = input.float(0.55, "Breakeven Trigger R", minval=0.1, maxval=5.0, step=0.05)
-profitLockR = input.float(0.90, "Lock Profit Trigger R", minval=0.2, maxval=5.0, step=0.05)
+trailStartR = input.float(0.55, "Trail Starts At R", minval=0.1, maxval=5.0, step=0.05)
+trailAtrMult = input.float(0.65, "Trailing ATR Multiplier", minval=0.1, maxval=5.0, step=0.05)
+givebackR = input.float(0.30, "Smart Exit Giveback R", minval=0.1, maxval=3.0, step=0.05)
+breakevenR = input.float(0.40, "Breakeven Trigger R", minval=0.1, maxval=5.0, step=0.05)
+profitLockR = input.float(0.65, "Lock Profit Trigger R", minval=0.2, maxval=5.0, step=0.05)
 firstTargetR = input.float(1.0, "First Target Behavior R", minval=0.25, maxval=5.0, step=0.05)
 maxBarsWeakScalp = input.int(8, "Weak Scalp Max Bars", minval=2, maxval=100)
 maxBarsAnyTrade = input.int(35, "Max Bars Any Trade", minval=5, maxval=300)
@@ -363,9 +363,11 @@ riskLock = dailyPnl <= -dailyLossLimit or dailyPnl >= dailyProfitLock or dailyDr
 baseGate = confirmedOk and tfOk and inSession and not lunchChop and not newsRisk and not spreadSlipRisk and not riskLock and cooldownOk and strategy.position_size == 0 and chopScore <= maxChop
 longSignal = baseGate and candidateLong and longScore >= minTotalScore and edge >= minEdge and mtfLongScore >= 54 and crossLongOk
 shortSignal = baseGate and candidateShort and shortScore >= minTotalScore and edge <= -minEdge and mtfShortScore >= 54 and crossShortOk
-reportSyncReady = strategyReportSync and confirmedOk and strategy.position_size == 0 and bar_index > 20 and bar_index % reportSyncEveryBars == 0
-reportSyncLong = reportSyncReady and (sarBull or close >= emaEntry) and longScore >= shortScore - 6
-reportSyncShort = reportSyncReady and not reportSyncLong
+reportLongQuality = longScore >= minTotalScore - 4 and edge >= minEdge * 0.75 and mtfLongScore >= 56 and crossLongOk and not nearResistance and (candidateLong or (sarBull and close > vwap and momentumLong and volumeLong))
+reportShortQuality = shortScore >= minTotalScore - 4 and edge <= -minEdge * 0.75 and mtfShortScore >= 56 and crossShortOk and not nearSupport and (candidateShort or (sarBear and close < vwap and momentumShort and volumeShort))
+reportSyncReady = strategyReportSync and baseGate and bar_index > 20 and bar_index % reportSyncEveryBars == 0
+reportSyncLong = reportSyncReady and reportLongQuality and longScore > shortScore
+reportSyncShort = reportSyncReady and reportShortQuality and shortScore > longScore
 longTradeSignal = longSignal or (not shortSignal and reportSyncLong)
 shortTradeSignal = (shortSignal and not longSignal) or (not longSignal and not reportSyncLong and reportSyncShort)
 

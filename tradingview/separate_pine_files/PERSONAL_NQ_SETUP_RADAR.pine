@@ -56,7 +56,7 @@ reportMinScore = input.float(40, "Report Min Score", minval=0, maxval=100, step=
 reportMinEdge = input.float(0, "Report Min Edge", minval=0, maxval=40, step=1)
 reportTimeExitBars = input.int(12, "Report Time Exit Bars", minval=1, maxval=200)
 reportSmokeTest = input.bool(true, "Strategy Report Smoke Test")
-reportSmokeEveryBars = input.int(20, "Smoke Test Bars Between Trades", minval=5, maxval=200)
+reportSmokeEveryBars = input.int(5, "Smoke Test Bars Between Trades", minval=1, maxval=200)
 opportunityScoreBuffer = input.float(10, "Opportunity Score Buffer", minval=2, maxval=25, step=1)
 opportunityEdgeBuffer = input.float(4, "Opportunity Edge Buffer", minval=0, maxval=15, step=1)
 opportunityCooldownBars = input.int(4, "Opportunity Cooldown Bars", minval=0, maxval=50)
@@ -331,7 +331,7 @@ forceStrategyReportOrders = true
 reportBaseGate = confirmedOk and cooldownOk and strategy.position_size == 0 and not na(atr)
 forcedLongTrade = forceStrategyReportOrders and reportBaseGate and reportBiasLong
 forcedShortTrade = forceStrategyReportOrders and reportBaseGate and not forcedLongTrade and reportBiasShort
-smokeReady = reportSmokeTest and confirmedOk and strategy.position_size == 0 and not na(atr) and bar_index > 100 and bar_index % reportSmokeEveryBars == 0
+smokeReady = reportSmokeTest and strategy.position_size == 0 and bar_index > 5 and bar_index % reportSmokeEveryBars == 0
 smokeLongTrade = smokeReady and close >= emaFast
 smokeShortTrade = smokeReady and close < emaFast
 detectedLongTrade = not forceStrategyReportOrders and reportAllDetectedSetups and reportBaseGate and locationLong and longScore >= shortScore and not doNotChaseLong
@@ -355,9 +355,35 @@ var int activeEntryBar = na
 var line entryLine = na
 var line stopLine = na
 var line targetLine = na
+var int reportEntryBar = na
+var string reportEntryId = ""
+
+// TradingView report proof path. This is intentionally simple so Strategy Report
+// must show trades if this script is actually running as a strategy.
+if smokeLongTrade
+    smokeStop = close - math.max(nz(atr, high - low), syminfo.mintick * 20)
+    smokeTarget = close + math.max(nz(atr, high - low), syminfo.mintick * 20) * targetR
+    reportEntryBar := bar_index
+    reportEntryId := "Report Long"
+    strategy.entry("Report Long", strategy.long, qty=tradeQty, alert_message="REPORT LONG smoke test")
+    strategy.exit("Report Long Exit", from_entry="Report Long", stop=smokeStop, limit=smokeTarget, alert_message="REPORT LONG stop/target")
+
+if smokeShortTrade
+    smokeStop = close + math.max(nz(atr, high - low), syminfo.mintick * 20)
+    smokeTarget = close - math.max(nz(atr, high - low), syminfo.mintick * 20) * targetR
+    reportEntryBar := bar_index
+    reportEntryId := "Report Short"
+    strategy.entry("Report Short", strategy.short, qty=tradeQty, alert_message="REPORT SHORT smoke test")
+    strategy.exit("Report Short Exit", from_entry="Report Short", stop=smokeStop, limit=smokeTarget, alert_message="REPORT SHORT stop/target")
+
+if reportEntryId == "Report Long" and not na(reportEntryBar) and bar_index - reportEntryBar >= reportTimeExitBars
+    strategy.close("Report Long", alert_message="REPORT LONG time close")
+
+if reportEntryId == "Report Short" and not na(reportEntryBar) and bar_index - reportEntryBar >= reportTimeExitBars
+    strategy.close("Report Short", alert_message="REPORT SHORT time close")
 
 // ---------------- Entries ----------------
-if longTradeSignal
+if longTradeSignal and not smokeLongTrade
     lastSignalBar := bar_index
     activeEntry := close
     activeStop := longStop
@@ -381,7 +407,7 @@ if longTradeSignal
         targetLine := line.new(bar_index, activeTarget, bar_index + 60, activeTarget, color=color.new(color.lime, 0), width=2, extend=extend.right)
     label.new(bar_index, low, "LONG", style=label.style_label_up, color=color.new(color.lime, 0), textcolor=color.black, size=size.small, tooltip=longTooltip)
 
-if shortTradeSignal
+if shortTradeSignal and not smokeShortTrade
     lastSignalBar := bar_index
     activeEntry := close
     activeStop := shortStop
@@ -411,7 +437,7 @@ safeRisk = math.max(nz(activeRisk, atr), syminfo.mintick)
 longOpenR = strategy.position_size > 0 ? (close - strategy.position_avg_price) / safeRisk : 0.0
 shortOpenR = strategy.position_size < 0 ? (strategy.position_avg_price - close) / safeRisk : 0.0
 
-if strategy.position_size > 0
+if strategy.position_size > 0 and activeSetup != ""
     activeBest := na(activeBest) ? high : math.max(activeBest, high)
     bestR = (activeBest - strategy.position_avg_price) / safeRisk
     givebackR = math.max(bestR - longOpenR, 0.0)
@@ -427,7 +453,7 @@ if strategy.position_size > 0
     if barsInTrade >= reportTimeExitBars and confirmedOk
         strategy.close("Long", alert_message="CLOSE LONG report time exit")
 
-if strategy.position_size < 0
+if strategy.position_size < 0 and activeSetup != ""
     activeBest := na(activeBest) ? low : math.min(activeBest, low)
     bestR = (strategy.position_avg_price - activeBest) / safeRisk
     givebackR = math.max(bestR - shortOpenR, 0.0)
@@ -450,6 +476,8 @@ if strategy.position_size == 0
     activeRisk := na
     activeBest := na
     activeEntryBar := na
+    reportEntryBar := na
+    reportEntryId := ""
 
 // ---------------- Pattern Lines ----------------
 var line patternLineOne = na

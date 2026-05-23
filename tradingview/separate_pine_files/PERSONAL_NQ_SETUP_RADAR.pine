@@ -55,6 +55,8 @@ strategyReportMode = input.string("All Detected Setups", "Strategy Report Entrie
 reportMinScore = input.float(40, "Report Min Score", minval=0, maxval=100, step=1)
 reportMinEdge = input.float(0, "Report Min Edge", minval=0, maxval=40, step=1)
 reportTimeExitBars = input.int(12, "Report Time Exit Bars", minval=1, maxval=200)
+reportSmokeTest = input.bool(true, "Strategy Report Smoke Test")
+reportSmokeEveryBars = input.int(20, "Smoke Test Bars Between Trades", minval=5, maxval=200)
 opportunityScoreBuffer = input.float(10, "Opportunity Score Buffer", minval=2, maxval=25, step=1)
 opportunityEdgeBuffer = input.float(4, "Opportunity Edge Buffer", minval=0, maxval=15, step=1)
 opportunityCooldownBars = input.int(4, "Opportunity Cooldown Bars", minval=0, maxval=50)
@@ -329,10 +331,15 @@ forceStrategyReportOrders = true
 reportBaseGate = confirmedOk and cooldownOk and strategy.position_size == 0 and not na(atr)
 forcedLongTrade = forceStrategyReportOrders and reportBaseGate and reportBiasLong
 forcedShortTrade = forceStrategyReportOrders and reportBaseGate and not forcedLongTrade and reportBiasShort
+smokeReady = reportSmokeTest and confirmedOk and strategy.position_size == 0 and not na(atr) and bar_index > 100 and bar_index % reportSmokeEveryBars == 0
+smokeLongTrade = smokeReady and close >= emaFast
+smokeShortTrade = smokeReady and close < emaFast
 detectedLongTrade = not forceStrategyReportOrders and reportAllDetectedSetups and reportBaseGate and locationLong and longScore >= shortScore and not doNotChaseLong
 detectedShortTrade = not forceStrategyReportOrders and reportAllDetectedSetups and reportBaseGate and locationShort and shortScore > longScore and not doNotChaseShort
-longTradeSignal = forcedLongTrade or longSignal or (reportWatchTrades and watchLongCandidate) or detectedLongTrade
-shortTradeSignal = forcedShortTrade or shortSignal or (reportWatchTrades and watchShortCandidate) or detectedShortTrade
+nonSmokeLongTrade = forcedLongTrade or longSignal or (reportWatchTrades and watchLongCandidate) or detectedLongTrade
+nonSmokeShortTrade = forcedShortTrade or shortSignal or (reportWatchTrades and watchShortCandidate) or detectedShortTrade
+longTradeSignal = smokeLongTrade or (not smokeShortTrade and nonSmokeLongTrade)
+shortTradeSignal = smokeShortTrade or (not smokeLongTrade and not nonSmokeLongTrade and nonSmokeShortTrade)
 watchLong = watchLongCandidate and not reportWatchTrades
 watchShort = watchShortCandidate and not reportWatchTrades
 watchLongTooltip = "Watch Long Opportunity\nSetup: " + longSetup + "\nEntry area: " + str.tostring(close, format.mintick) + "\nStop idea: " + str.tostring(longStop, format.mintick) + "\nTarget idea: " + str.tostring(longTarget, format.mintick) + "\nScore L/S: " + str.tostring(longScore, "#") + " / " + str.tostring(shortScore, "#") + "\nTrap L/S: " + str.tostring(trapLongScore, "#") + " / " + str.tostring(trapShortScore, "#") + "\nSAR: " + (sarBull ? "bullish" : "bearish") + "\nWhy not full signal: it is close, but still below the stricter LONG gate."

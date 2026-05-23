@@ -1,0 +1,307 @@
+//@version=6
+//@strategy_alert_message {{strategy.order.alert_message}}
+strategy("Personal Heikin Ashi 100 EMA Pullback Scalper", shorttitle="HA 100 EMA Scalp", overlay=true, initial_capital=100000, default_qty_type=strategy.fixed, default_qty_value=1, pyramiding=0, margin_long=10, margin_short=10, process_orders_on_close=true, calc_on_every_tick=false, calc_on_order_fills=true, commission_type=strategy.commission.cash_per_contract, commission_value=4.0, slippage=2, max_lines_count=120, max_labels_count=200)
+
+// Built for the 1m chart:
+// Trend side: longs only above the 100 EMA, shorts only below it.
+// Entry: two clean Heikin Ashi pullback candles, then a range-expanded doji reversal.
+
+grpSession = "Session"
+requireOneMinute = input.bool(true, "Require 1m Chart", group=grpSession)
+tradeSession = input.session("1000-1200", "Scalping Window", group=grpSession)
+sessionTimezone = input.string("America/New_York", "Session Timezone", options=["America/New_York", "America/Chicago", "Etc/UTC"], group=grpSession)
+maxTradesPerDay = input.int(6, "Max Trades Per Day", minval=1, maxval=30, group=grpSession)
+
+grpTrend = "Trend And Structure"
+emaLen = input.int(100, "Trend EMA", minval=5, maxval=500, group=grpTrend)
+emaSlopeBars = input.int(5, "EMA Slope Bars", minval=1, maxval=50, group=grpTrend)
+emaBufferAtr = input.float(0.16, "EMA Chop Zone ATR", minval=0.0, maxval=2.0, step=0.01, group=grpTrend)
+structureLookback = input.int(10, "Structure Lookback", minval=3, maxval=50, group=grpTrend)
+requireEmaSlope = input.bool(true, "Require EMA Slope", group=grpTrend)
+
+grpPullback = "Pullback Logic"
+flatToleranceTicks = input.int(1, "Flat Wick Tolerance Ticks", minval=0, maxval=20, group=grpPullback)
+shortPullbackFlatSide = input.string("No Lower Wick", "Short Pullback Flat Side", options=["No Lower Wick", "No Upper Wick", "Either One-Sided"], group=grpPullback, tooltip="No Lower Wick is the usual bullish Heikin Ashi pullback shape. Switch to No Upper Wick if you want the short pullback rule to be literal flat-top candles.")
+requirePullbackProgress = input.bool(true, "Require Pullback Direction Progress", group=grpPullback)
+showSetupMarkers = input.bool(true, "Show Pullback / Doji Markers", group=grpPullback)
+
+grpDoji = "Doji Entry"
+maxDojiBodyPct = input.float(0.28, "Max Doji Body % Of Range", minval=0.01, maxval=0.80, step=0.01, group=grpDoji)
+minWickPct = input.float(0.24, "Min Wick % Each Side", minval=0.01, maxval=0.60, step=0.01, group=grpDoji)
+wickToBodyMin = input.float(1.3, "Min Wick To Body", minval=0.1, maxval=10.0, step=0.1, group=grpDoji)
+requireRangeExpansion = input.bool(true, "Doji Must Be Bigger Than Prior 1 Or 2", group=grpDoji)
+useVolumeFilter = input.bool(false, "Also Require Actual Volume Spike", group=grpDoji)
+volumeLen = input.int(20, "Volume Average", minval=2, maxval=200, group=grpDoji, active=useVolumeFilter)
+volumeMultiplier = input.float(1.15, "Volume Multiplier", minval=0.1, maxval=5.0, step=0.05, group=grpDoji, active=useVolumeFilter)
+
+grpRisk = "Risk"
+contracts = input.int(1, "Contracts", minval=1, maxval=20, group=grpRisk)
+pointValue = input.float(20.0, "Dollars Per Point", minval=0.01, step=0.25, group=grpRisk)
+stopSource = input.string("Heikin Ashi Wick", "Stop Uses", options=["Heikin Ashi Wick", "Real Candle Wick"], group=grpRisk)
+stopBufferTicks = input.int(2, "Stop Buffer Ticks", minval=0, maxval=50, group=grpRisk)
+minRiskTicks = input.int(4, "Minimum Risk Ticks", minval=1, maxval=100, group=grpRisk)
+maxRiskAtr = input.float(1.25, "Max Risk ATR", minval=0.1, maxval=5.0, step=0.05, group=grpRisk)
+moveStopToBEAt1R = input.bool(true, "Move Stop To Breakeven After 1R", group=grpRisk)
+lockOneRAfter2R = input.bool(true, "Lock 1R After 2R", group=grpRisk)
+maxBarsInTrade = input.int(8, "Max Bars In Trade", minval=1, maxval=60, group=grpRisk)
+
+grpVisual = "Visuals"
+showLabels = input.bool(true, "Show Entry / Exit Labels", group=grpVisual)
+showLevels = input.bool(true, "Show Stop / Target Lines", group=grpVisual)
+colorCandles = input.bool(true, "Color Heikin Ashi Bias Candles", group=grpVisual)
+showDashboard = input.bool(true, "Show Dashboard", group=grpVisual)
+
+grpAlerts = "Alerts"
+longEntryAlert = input.string("HA Scalper Long", "Long Entry Alert", group=grpAlerts)
+shortEntryAlert = input.string("HA Scalper Short", "Short Entry Alert", group=grpAlerts)
+longExitAlert = input.string("HA Scalper Long Exit", "Long Exit Alert", group=grpAlerts)
+shortExitAlert = input.string("HA Scalper Short Exit", "Short Exit Alert", group=grpAlerts)
+
+colLong = color.rgb(0, 200, 2)
+colShort = color.rgb(255, 57, 4)
+colEntry = color.rgb(255, 223, 0)
+colPanel = color.rgb(13, 15, 20)
+colHeader = color.rgb(19, 2, 50)
+
+haTicker = ticker.heikinashi(syminfo.tickerid)
+[haOpen, haHigh, haLow, haClose] = request.security(haTicker, timeframe.period, [open, high, low, close], barmerge.gaps_off, barmerge.lookahead_off)
+
+isOneMinute = timeframe.isminutes and timeframe.multiplier == 1
+timeframeOk = not requireOneMinute or isOneMinute
+inSession = not na(time(timeframe.period, tradeSession, sessionTimezone))
+
+currentDay = dayofmonth(time)
+var int storedDay = na
+var int tradesToday = 0
+if na(storedDay) or currentDay != storedDay
+    storedDay := currentDay
+    tradesToday := 0
+dailyTradeOk = tradesToday < maxTradesPerDay
+
+ema100 = ta.ema(close, emaLen)
+atr = math.max(nz(ta.atr(14), syminfo.mintick), syminfo.mintick)
+emaBuffer = atr * emaBufferAtr
+emaSlope = ema100 - ema100[emaSlopeBars]
+awayFromEma = math.abs(close - ema100) > emaBuffer
+aboveEma = close > ema100 + emaBuffer
+belowEma = close < ema100 - emaBuffer
+structureHigh = ta.highest(haHigh, structureLookback)
+structureLow = ta.lowest(haLow, structureLookback)
+longStructure = aboveEma and awayFromEma and (not requireEmaSlope or emaSlope > 0) and structureLow > ema100 - emaBuffer
+shortStructure = belowEma and awayFromEma and (not requireEmaSlope or emaSlope < 0) and structureHigh < ema100 + emaBuffer
+
+tick = syminfo.mintick
+flatTol = tick * flatToleranceTicks
+stopBuffer = tick * stopBufferTicks
+minRisk = tick * minRiskTicks
+
+bodyTop1 = math.max(haOpen[1], haClose[1])
+bodyBot1 = math.min(haOpen[1], haClose[1])
+upperWick1 = haHigh[1] - bodyTop1
+lowerWick1 = bodyBot1 - haLow[1]
+flatTop1 = upperWick1 <= flatTol
+flatBottom1 = lowerWick1 <= flatTol
+twoSidedWick1 = upperWick1 > flatTol and lowerWick1 > flatTol
+
+bodyTop2 = math.max(haOpen[2], haClose[2])
+bodyBot2 = math.min(haOpen[2], haClose[2])
+upperWick2 = haHigh[2] - bodyTop2
+lowerWick2 = bodyBot2 - haLow[2]
+flatTop2 = upperWick2 <= flatTol
+flatBottom2 = lowerWick2 <= flatTol
+twoSidedWick2 = upperWick2 > flatTol and lowerWick2 > flatTol
+
+longPullCandle1 = haClose[1] < haOpen[1] and flatTop1 and not twoSidedWick1
+longPullCandle2 = haClose[2] < haOpen[2] and flatTop2 and not twoSidedWick2
+shortSide1 = shortPullbackFlatSide == "No Lower Wick" ? flatBottom1 : shortPullbackFlatSide == "No Upper Wick" ? flatTop1 : (flatBottom1 or flatTop1)
+shortSide2 = shortPullbackFlatSide == "No Lower Wick" ? flatBottom2 : shortPullbackFlatSide == "No Upper Wick" ? flatTop2 : (flatBottom2 or flatTop2)
+shortPullCandle1 = haClose[1] > haOpen[1] and shortSide1 and not twoSidedWick1
+shortPullCandle2 = haClose[2] > haOpen[2] and shortSide2 and not twoSidedWick2
+longPullbackProgress = not requirePullbackProgress or (haClose[1] < haClose[2] and haClose[2] < haClose[3])
+shortPullbackProgress = not requirePullbackProgress or (haClose[1] > haClose[2] and haClose[2] > haClose[3])
+longPullbackReady = longPullCandle1 and longPullCandle2 and longPullbackProgress
+shortPullbackReady = shortPullCandle1 and shortPullCandle2 and shortPullbackProgress
+
+haRange = math.max(haHigh - haLow, tick)
+haBody = math.abs(haClose - haOpen)
+haUpperWick = haHigh - math.max(haOpen, haClose)
+haLowerWick = math.min(haOpen, haClose) - haLow
+dojiShape = haBody <= haRange * maxDojiBodyPct and haUpperWick >= haRange * minWickPct and haLowerWick >= haRange * minWickPct and haUpperWick >= haBody * wickToBodyMin and haLowerWick >= haBody * wickToBodyMin
+prevRange1 = math.max(haHigh[1] - haLow[1], tick)
+prevRange2 = math.max(haHigh[2] - haLow[2], tick)
+rangeExpansion = not requireRangeExpansion or haRange > prevRange1 or haRange > prevRange2
+volumeOk = not useVolumeFilter or volume > ta.sma(volume, volumeLen) * volumeMultiplier
+entryDoji = dojiShape and rangeExpansion and volumeOk
+
+longStopCandidate = (stopSource == "Heikin Ashi Wick" ? haLow : low) - stopBuffer
+shortStopCandidate = (stopSource == "Heikin Ashi Wick" ? haHigh : high) + stopBuffer
+longRisk = close - longStopCandidate
+shortRisk = shortStopCandidate - close
+longRiskOk = longRisk >= minRisk and longRisk <= atr * maxRiskAtr
+shortRiskOk = shortRisk >= minRisk and shortRisk <= atr * maxRiskAtr
+
+flat = strategy.position_size == 0
+longOpen = strategy.position_size > 0
+shortOpen = strategy.position_size < 0
+confirmed = barstate.isconfirmed
+
+longSignal = confirmed and timeframeOk and inSession and dailyTradeOk and flat and longStructure and longPullbackReady and entryDoji and longRiskOk
+shortSignal = confirmed and timeframeOk and inSession and dailyTradeOk and flat and shortStructure and shortPullbackReady and entryDoji and shortRiskOk
+
+var float entryPrice = na
+var float activeStop = na
+var float riskPoints = na
+var float target1 = na
+var float target2 = na
+var float target3 = na
+var int entryBar = na
+var line stopLine = na
+var line tp1Line = na
+var line tp2Line = na
+var line tp3Line = na
+
+if longSignal
+    entryPrice := close
+    activeStop := longStopCandidate
+    riskPoints := longRisk
+    target1 := entryPrice + riskPoints
+    target2 := entryPrice + riskPoints * 2.0
+    target3 := entryPrice + riskPoints * 3.0
+    entryBar := bar_index
+    if not na(stopLine)
+        line.delete(stopLine)
+    if not na(tp1Line)
+        line.delete(tp1Line)
+    if not na(tp2Line)
+        line.delete(tp2Line)
+    if not na(tp3Line)
+        line.delete(tp3Line)
+    if showLevels
+        stopLine := line.new(bar_index, activeStop, bar_index + 1, activeStop, extend=extend.right, color=color.new(colShort, 0), width=1)
+        tp1Line := line.new(bar_index, target1, bar_index + 1, target1, extend=extend.right, color=color.new(colLong, 0), width=1)
+        tp2Line := line.new(bar_index, target2, bar_index + 1, target2, extend=extend.right, color=color.new(colLong, 20), width=1)
+        tp3Line := line.new(bar_index, target3, bar_index + 1, target3, extend=extend.right, color=color.new(colLong, 40), width=1)
+    strategy.entry("Long", strategy.long, qty=contracts, alert_message=longEntryAlert)
+    if showLabels
+        label.new(bar_index, low - atr * 0.20, "L\nDoji", style=label.style_label_up, color=colEntry, textcolor=color.black, size=size.small)
+    tradesToday += 1
+
+if shortSignal
+    entryPrice := close
+    activeStop := shortStopCandidate
+    riskPoints := shortRisk
+    target1 := entryPrice - riskPoints
+    target2 := entryPrice - riskPoints * 2.0
+    target3 := entryPrice - riskPoints * 3.0
+    entryBar := bar_index
+    if not na(stopLine)
+        line.delete(stopLine)
+    if not na(tp1Line)
+        line.delete(tp1Line)
+    if not na(tp2Line)
+        line.delete(tp2Line)
+    if not na(tp3Line)
+        line.delete(tp3Line)
+    if showLevels
+        stopLine := line.new(bar_index, activeStop, bar_index + 1, activeStop, extend=extend.right, color=color.new(colShort, 0), width=1)
+        tp1Line := line.new(bar_index, target1, bar_index + 1, target1, extend=extend.right, color=color.new(colLong, 0), width=1)
+        tp2Line := line.new(bar_index, target2, bar_index + 1, target2, extend=extend.right, color=color.new(colLong, 20), width=1)
+        tp3Line := line.new(bar_index, target3, bar_index + 1, target3, extend=extend.right, color=color.new(colLong, 40), width=1)
+    strategy.entry("Short", strategy.short, qty=contracts, alert_message=shortEntryAlert)
+    if showLabels
+        label.new(bar_index, high + atr * 0.20, "S\nDoji", style=label.style_label_down, color=colEntry, textcolor=color.black, size=size.small)
+    tradesToday += 1
+
+barsInTrade = na(entryBar) ? 0 : bar_index - entryBar
+
+if longOpen and not na(riskPoints)
+    if moveStopToBEAt1R and high >= target1
+        activeStop := math.max(activeStop, entryPrice)
+    if lockOneRAfter2R and high >= target2
+        activeStop := math.max(activeStop, entryPrice + riskPoints)
+    if showLevels and not na(stopLine)
+        line.set_y1(stopLine, activeStop)
+        line.set_y2(stopLine, activeStop)
+    strategy.exit("L 1R", "Long", qty_percent=33, stop=activeStop, limit=target1, alert_message=longExitAlert)
+    strategy.exit("L 2R", "Long", qty_percent=33, stop=activeStop, limit=target2, alert_message=longExitAlert)
+    strategy.exit("L 3R", "Long", qty_percent=34, stop=activeStop, limit=target3, alert_message=longExitAlert)
+
+if shortOpen and not na(riskPoints)
+    if moveStopToBEAt1R and low <= target1
+        activeStop := math.min(activeStop, entryPrice)
+    if lockOneRAfter2R and low <= target2
+        activeStop := math.min(activeStop, entryPrice - riskPoints)
+    if showLevels and not na(stopLine)
+        line.set_y1(stopLine, activeStop)
+        line.set_y2(stopLine, activeStop)
+    strategy.exit("S 1R", "Short", qty_percent=33, stop=activeStop, limit=target1, alert_message=shortExitAlert)
+    strategy.exit("S 2R", "Short", qty_percent=33, stop=activeStop, limit=target2, alert_message=shortExitAlert)
+    strategy.exit("S 3R", "Short", qty_percent=34, stop=activeStop, limit=target3, alert_message=shortExitAlert)
+
+timeExit = confirmed and not flat and barsInTrade >= maxBarsInTrade
+sessionExit = confirmed and not flat and not inSession
+if timeExit or sessionExit
+    if longOpen
+        strategy.close("Long", comment=timeExit ? "Time Exit" : "Session Exit", alert_message=longExitAlert)
+    if shortOpen
+        strategy.close("Short", comment=timeExit ? "Time Exit" : "Session Exit", alert_message=shortExitAlert)
+    if showLabels
+        label.new(bar_index, close, timeExit ? "Time Exit" : "Session Exit", style=label.style_label_center, color=color.new(color.gray, 0), textcolor=color.white, size=size.tiny)
+    entryPrice := na
+    activeStop := na
+    riskPoints := na
+    target1 := na
+    target2 := na
+    target3 := na
+    entryBar := na
+
+if flat and not longSignal and not shortSignal
+    entryPrice := na
+    activeStop := na
+    riskPoints := na
+    target1 := na
+    target2 := na
+    target3 := na
+    entryBar := na
+
+plot(ema100, "100 EMA", color=color.new(color.white, 0), linewidth=2)
+plot(ema100 + emaBuffer, "EMA Upper Chop Zone", color=color.new(color.gray, 80))
+plot(ema100 - emaBuffer, "EMA Lower Chop Zone", color=color.new(color.gray, 80))
+haBiasColor = haClose >= haOpen ? color.new(colLong, 0) : color.new(colShort, 0)
+plotcandle(colorCandles ? haOpen : na, colorCandles ? haHigh : na, colorCandles ? haLow : na, colorCandles ? haClose : na, title="Heikin Ashi Logic Candles", color=haBiasColor, wickcolor=haBiasColor, bordercolor=haBiasColor, display=display.pane)
+bgcolor(not inSession ? color.new(color.gray, 93) : not awayFromEma ? color.new(color.orange, 90) : na, title="Sit Out Zone")
+
+plotshape(showSetupMarkers and longPullbackReady and longStructure, "Long Pullback Ready", shape.circle, location.belowbar, color=color.new(colLong, 20), size=size.tiny, text="PB")
+plotshape(showSetupMarkers and shortPullbackReady and shortStructure, "Short Pullback Ready", shape.circle, location.abovebar, color=color.new(colShort, 20), size=size.tiny, text="PB")
+plotshape(showSetupMarkers and entryDoji and longPullbackReady, "Long Doji Trigger", shape.diamond, location.belowbar, color=color.new(colEntry, 0), size=size.tiny, text="D")
+plotshape(showSetupMarkers and entryDoji and shortPullbackReady, "Short Doji Trigger", shape.diamond, location.abovebar, color=color.new(colEntry, 0), size=size.tiny, text="D")
+
+alertcondition(longSignal, "HA Pullback Long", "Heikin Ashi pullback doji long")
+alertcondition(shortSignal, "HA Pullback Short", "Heikin Ashi pullback doji short")
+alertcondition(timeExit or sessionExit, "HA Scalper Time/Session Exit", "Heikin Ashi scalper time or session exit")
+
+var table dash = table.new(position.bottom_right, 2, 9, border_width=1)
+if showDashboard and barstate.islast
+    winRate = strategy.closedtrades > 0 ? strategy.wintrades / strategy.closedtrades * 100.0 : na
+    pf = strategy.grossloss != 0 ? strategy.grossprofit / math.abs(strategy.grossloss) : na
+    status = not timeframeOk ? "Use 1m" : not inSession ? "Outside 10-12" : not awayFromEma ? "EMA Chop" : longStructure ? "Long Bias" : shortStructure ? "Short Bias" : "No Trend"
+    posText = longOpen ? "Long" : shortOpen ? "Short" : "Flat"
+    table.clear(dash, 0, 0, 1, 8)
+    table.cell(dash, 0, 0, "HA Scalper", bgcolor=colHeader, text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 0, status, bgcolor=colHeader, text_color=color.white, text_size=size.small)
+    table.cell(dash, 0, 1, "Position", bgcolor=colPanel, text_color=color.gray, text_size=size.tiny)
+    table.cell(dash, 1, 1, posText, bgcolor=colPanel, text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 0, 2, "Trades Today", bgcolor=colPanel, text_color=color.gray, text_size=size.tiny)
+    table.cell(dash, 1, 2, str.tostring(tradesToday) + " / " + str.tostring(maxTradesPerDay), bgcolor=colPanel, text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 0, 3, "Pullback", bgcolor=colPanel, text_color=color.gray, text_size=size.tiny)
+    table.cell(dash, 1, 3, longPullbackReady ? "Long Ready" : shortPullbackReady ? "Short Ready" : "Waiting", bgcolor=colPanel, text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 0, 4, "Doji", bgcolor=colPanel, text_color=color.gray, text_size=size.tiny)
+    table.cell(dash, 1, 4, entryDoji ? "Valid" : "Waiting", bgcolor=colPanel, text_color=entryDoji ? colEntry : color.white, text_size=size.tiny)
+    table.cell(dash, 0, 5, "Net Profit", bgcolor=colPanel, text_color=color.gray, text_size=size.tiny)
+    table.cell(dash, 1, 5, str.tostring(strategy.netprofit, format.mintick), bgcolor=colPanel, text_color=strategy.netprofit >= 0 ? colLong : colShort, text_size=size.tiny)
+    table.cell(dash, 0, 6, "Closed Trades", bgcolor=colPanel, text_color=color.gray, text_size=size.tiny)
+    table.cell(dash, 1, 6, str.tostring(strategy.closedtrades), bgcolor=colPanel, text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 0, 7, "Win Rate", bgcolor=colPanel, text_color=color.gray, text_size=size.tiny)
+    table.cell(dash, 1, 7, na(winRate) ? "-" : str.tostring(winRate, "0.0") + "%", bgcolor=colPanel, text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 0, 8, "Profit Factor", bgcolor=colPanel, text_color=color.gray, text_size=size.tiny)
+    table.cell(dash, 1, 8, na(pf) ? "-" : str.tostring(pf, "0.00"), bgcolor=colPanel, text_color=color.white, text_size=size.tiny)

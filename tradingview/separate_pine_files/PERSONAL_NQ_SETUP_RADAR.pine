@@ -53,8 +53,8 @@ showAllSetupHints = input.bool(false, "Show Smaller Setup Hints")
 showSmartOpportunities = input.bool(true, "Show Smart Opportunity Watch Boxes")
 strategyReportMode = input.string("All Detected Setups", "Strategy Report Entries", options=["Clean Signals Only", "Clean + Watch Boxes", "All Detected Setups"])
 forceStrategyReportOrders = input.bool(true, "Force Strategy Report Orders")
-reportMinScore = input.float(52, "Report Min Score", minval=0, maxval=100, step=1)
-reportMinEdge = input.float(2, "Report Min Edge", minval=0, maxval=40, step=1)
+reportMinScore = input.float(40, "Report Min Score", minval=0, maxval=100, step=1)
+reportMinEdge = input.float(0, "Report Min Edge", minval=0, maxval=40, step=1)
 reportTimeExitBars = input.int(12, "Report Time Exit Bars", minval=1, maxval=200)
 opportunityScoreBuffer = input.float(10, "Opportunity Score Buffer", minval=2, maxval=25, step=1)
 opportunityEdgeBuffer = input.float(4, "Opportunity Edge Buffer", minval=0, maxval=15, step=1)
@@ -320,17 +320,19 @@ reportWatchTrades = strategyReportMode == "Clean + Watch Boxes"
 reportAllDetectedSetups = strategyReportMode == "All Detected Setups"
 reportDirectionLong = longScore >= shortScore + reportMinEdge
 reportDirectionShort = shortScore > longScore + reportMinEdge
-reportBiasLong = reportDirectionLong and longScore >= reportMinScore and not doNotChaseLong
-reportBiasShort = reportDirectionShort and shortScore >= reportMinScore and not doNotChaseShort
+reportBiasLong = reportDirectionLong and longScore >= reportMinScore
+reportBiasShort = reportDirectionShort and shortScore >= reportMinScore
 opportunityCooldownOk = na(lastOpportunityBar) or bar_index - lastOpportunityBar > opportunityCooldownBars
 watchBase = showSmartOpportunities and confirmedOk and timeframeOk and inSession and opportunityCooldownOk and strategy.position_size == 0 and chopScore <= maxChop + 8 and cooldownOk
 watchLongCandidate = watchBase and not longSignal and locationLong and kamaOkLong and not doNotChaseLong and rewardOkLong and longScore >= minScore - opportunityScoreBuffer and edge >= minEdge - opportunityEdgeBuffer and longScore > shortScore
 watchShortCandidate = watchBase and not shortSignal and locationShort and kamaOkShort and not doNotChaseShort and rewardOkShort and shortScore >= minScore - opportunityScoreBuffer and edge <= -minEdge + opportunityEdgeBuffer and shortScore > longScore
-reportBaseGate = confirmedOk and timeframeOk and inSession and cooldownOk and strategy.position_size == 0
-detectedLongTrade = reportAllDetectedSetups and reportBaseGate and (forceStrategyReportOrders ? reportBiasLong : locationLong and longScore >= shortScore and not doNotChaseLong)
-detectedShortTrade = reportAllDetectedSetups and reportBaseGate and (forceStrategyReportOrders ? reportBiasShort : locationShort and shortScore > longScore and not doNotChaseShort)
-longTradeSignal = longSignal or (reportWatchTrades and watchLongCandidate) or detectedLongTrade
-shortTradeSignal = shortSignal or (reportWatchTrades and watchShortCandidate) or detectedShortTrade
+reportBaseGate = confirmedOk and cooldownOk and strategy.position_size == 0 and not na(atr)
+forcedLongTrade = forceStrategyReportOrders and reportBaseGate and reportBiasLong
+forcedShortTrade = forceStrategyReportOrders and reportBaseGate and not forcedLongTrade and reportBiasShort
+detectedLongTrade = not forceStrategyReportOrders and reportAllDetectedSetups and reportBaseGate and locationLong and longScore >= shortScore and not doNotChaseLong
+detectedShortTrade = not forceStrategyReportOrders and reportAllDetectedSetups and reportBaseGate and locationShort and shortScore > longScore and not doNotChaseShort
+longTradeSignal = forcedLongTrade or longSignal or (reportWatchTrades and watchLongCandidate) or detectedLongTrade
+shortTradeSignal = forcedShortTrade or shortSignal or (reportWatchTrades and watchShortCandidate) or detectedShortTrade
 watchLong = watchLongCandidate and not reportWatchTrades
 watchShort = watchShortCandidate and not reportWatchTrades
 watchLongTooltip = "Watch Long Opportunity\nSetup: " + longSetup + "\nEntry area: " + str.tostring(close, format.mintick) + "\nStop idea: " + str.tostring(longStop, format.mintick) + "\nTarget idea: " + str.tostring(longTarget, format.mintick) + "\nScore L/S: " + str.tostring(longScore, "#") + " / " + str.tostring(shortScore, "#") + "\nTrap L/S: " + str.tostring(trapLongScore, "#") + " / " + str.tostring(trapShortScore, "#") + "\nSAR: " + (sarBull ? "bullish" : "bearish") + "\nWhy not full signal: it is close, but still below the stricter LONG gate."

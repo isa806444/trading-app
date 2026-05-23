@@ -24,6 +24,7 @@ maxChop = input.float(68, "Max Chop Score", minval=20, maxval=100, step=1)
 cooldownBars = input.int(6, "Cooldown Bars", minval=0, maxval=200)
 strategyReportSync = input.bool(true, "Strategy Report Sync Fallback")
 reportSyncEveryBars = input.int(8, "Report Sync Bars Between Trades", minval=3, maxval=200)
+reportSyncHoldBars = input.int(3, "CMC Sync Hold Bars", minval=1, maxval=50)
 maxTradesPerDay = input.int(10, "Max Trades Per Day", minval=1, maxval=50)
 maxLossesPerDay = input.int(3, "Max Losses Per Day", minval=1, maxval=20)
 maxConsecutiveLosses = input.int(2, "Max Consecutive Losses", minval=1, maxval=10)
@@ -396,6 +397,7 @@ var float activeTarget = na
 var float activeRisk = na
 var float activeBest = na
 var int activeEntryBar = na
+var bool activeReportSyncTrade = false
 var line entryLine = na
 var line stopLine = na
 var line targetLine = na
@@ -414,6 +416,7 @@ if longTradeSignal
     activeRisk := longStopDist
     activeBest := high
     activeEntryBar := bar_index
+    activeReportSyncTrade := reportSyncLong and not longSignal
     activeSetup := setupLong
     activeMode := str.contains(setupLong, "Scalp") ? "Scalp" : str.contains(setupLong, "Trend") ? "Trend" : str.contains(setupLong, "Breakout") ? "Breakout" : "Reversal"
     strategy.entry("SAR Bull Buy", strategy.long, qty=longQty, alert_message=longAlert)
@@ -440,6 +443,7 @@ if shortTradeSignal
     activeRisk := shortStopDist
     activeBest := low
     activeEntryBar := bar_index
+    activeReportSyncTrade := reportSyncShort and not shortSignal
     activeSetup := setupShort
     activeMode := str.contains(setupShort, "Scalp") ? "Scalp" : str.contains(setupShort, "Trend") ? "Trend" : str.contains(setupShort, "Breakout") ? "Breakout" : "Reversal"
     strategy.entry("SAR Bear Sell", strategy.short, qty=shortQty, alert_message=shortAlert)
@@ -487,7 +491,8 @@ if strategy.position_size > 0
     if tradePaidFast and firstTargetContinue
         activeStop := math.max(activeStop, low - atr * trailMult)
     strategy.exit("SAR Bull Buy Risk", from_entry="SAR Bull Buy", stop=activeStop, limit=activeTarget, alert_message="LONG trailing stop/take-profit")
-    thesisFailed = panicCut or (slowPay and candleFailure) or flatTooLong or (firstTargetReject and keyProfitZone) or (liveTradeScore < 38 and longOpenR <= 0.15) or (close < vwap and close < emaFast and shortScore > longScore) or (sarBear and confirmShort > confirmLong + 6) or (bestR >= 0.8 and gb >= givebackR and not momentumLong) or (barsInTrade >= maxBarsWeakScalp and activeMode == "Scalp" and longOpenR < 0.20) or barsInTrade >= maxBarsAnyTrade
+    cmcSyncCloseLong = activeReportSyncTrade and barsInTrade >= reportSyncHoldBars
+    thesisFailed = cmcSyncCloseLong or panicCut or (slowPay and candleFailure) or flatTooLong or (firstTargetReject and keyProfitZone) or (liveTradeScore < 38 and longOpenR <= 0.15) or (close < vwap and close < emaFast and shortScore > longScore) or (sarBear and confirmShort > confirmLong + 6) or (bestR >= 0.8 and gb >= givebackR and not momentumLong) or (barsInTrade >= maxBarsWeakScalp and activeMode == "Scalp" and longOpenR < 0.20) or barsInTrade >= maxBarsAnyTrade
     if thesisFailed and confirmedOk
         strategy.close("SAR Bull Buy", alert_message="CLOSE LONG smart exit")
         label.new(bar_index, high, "SMART EXIT", style=label.style_label_down, color=color.new(color.yellow, 0), textcolor=color.black, size=size.tiny, tooltip="Close Long\nSetup: " + activeSetup + "\nLive score: " + str.tostring(liveTradeScore, "#") + "\nReason: speed stalled, opposite pressure appeared, target rejected, SAR/MTF flipped, spread risk rose, or time limit hit.")
@@ -517,18 +522,20 @@ if strategy.position_size < 0
     if tradePaidFast and firstTargetContinue
         activeStop := math.min(activeStop, high + atr * trailMult)
     strategy.exit("SAR Bear Sell Risk", from_entry="SAR Bear Sell", stop=activeStop, limit=activeTarget, alert_message="SHORT trailing stop/take-profit")
-    thesisFailed = panicCut or (slowPay and candleFailure) or flatTooLong or (firstTargetReject and keyProfitZone) or (liveTradeScore < 38 and shortOpenR <= 0.15) or (close > vwap and close > emaFast and longScore > shortScore) or (sarBull and confirmLong > confirmShort + 6) or (bestR >= 0.8 and gb >= givebackR and not momentumShort) or (barsInTrade >= maxBarsWeakScalp and activeMode == "Scalp" and shortOpenR < 0.20) or barsInTrade >= maxBarsAnyTrade
+    cmcSyncCloseShort = activeReportSyncTrade and barsInTrade >= reportSyncHoldBars
+    thesisFailed = cmcSyncCloseShort or panicCut or (slowPay and candleFailure) or flatTooLong or (firstTargetReject and keyProfitZone) or (liveTradeScore < 38 and shortOpenR <= 0.15) or (close > vwap and close > emaFast and longScore > shortScore) or (sarBull and confirmLong > confirmShort + 6) or (bestR >= 0.8 and gb >= givebackR and not momentumShort) or (barsInTrade >= maxBarsWeakScalp and activeMode == "Scalp" and shortOpenR < 0.20) or barsInTrade >= maxBarsAnyTrade
     if thesisFailed and confirmedOk
         strategy.close("SAR Bear Sell", alert_message="CLOSE SHORT smart exit")
         label.new(bar_index, low, "SMART EXIT", style=label.style_label_up, color=color.new(color.yellow, 0), textcolor=color.black, size=size.tiny, tooltip="Close Short\nSetup: " + activeSetup + "\nLive score: " + str.tostring(liveTradeScore, "#") + "\nReason: speed stalled, opposite pressure appeared, target rejected, SAR/MTF flipped, spread risk rose, or time limit hit.")
 
-if strategy.position_size == 0
+if strategy.position_size == 0 and not longTradeSignal and not shortTradeSignal
     activeEntry := na
     activeStop := na
     activeTarget := na
     activeRisk := na
     activeBest := na
     activeEntryBar := na
+    activeReportSyncTrade := false
 
 // ---------------- Visuals ----------------
 plot(sar, "Parabolic SAR", style=plot.style_cross, color=sarBull ? color.new(color.lime, 0) : color.new(color.red, 0), linewidth=2)

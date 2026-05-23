@@ -8,6 +8,8 @@ strategy("Personal Parabolic SAR Setup Strategy - 100K Paper", overlay=true, ini
 // ---------------- Inputs ----------------
 contracts = input.int(1, "Contracts / Paper Size", minval=1, maxval=10)
 pointValue = input.float(20.0, "NQ Dollars Per Point", minval=0.01, step=0.25)
+useConfidenceSizing = input.bool(false, "Confidence-Based Size")
+maxConfidenceContracts = input.int(2, "Max Confidence Contracts", minval=1, maxval=10)
 requireOneMinute = input.bool(false, "Require 1m Chart")
 useNoRepaint = input.bool(true, "Strict No-Repaint")
 useSessionFilter = input.bool(true, "RTH Only")
@@ -19,6 +21,8 @@ minTotalScore = input.float(78, "Minimum Total Score", minval=40, maxval=120, st
 minEdge = input.float(8, "Minimum Direction Edge", minval=0, maxval=50, step=1)
 maxChop = input.float(68, "Max Chop Score", minval=20, maxval=100, step=1)
 cooldownBars = input.int(6, "Cooldown Bars", minval=0, maxval=200)
+strategyReportSync = input.bool(true, "Strategy Report Sync Fallback")
+reportSyncEveryBars = input.int(8, "Report Sync Bars Between Trades", minval=3, maxval=200)
 maxTradesPerDay = input.int(10, "Max Trades Per Day", minval=1, maxval=50)
 maxLossesPerDay = input.int(3, "Max Losses Per Day", minval=1, maxval=20)
 maxConsecutiveLosses = input.int(2, "Max Consecutive Losses", minval=1, maxval=10)
@@ -56,6 +60,9 @@ maxLossDollars = input.float(800, "Max Loss Per Trade ($)", minval=50, step=50)
 trailStartR = input.float(0.75, "Trail Starts At R", minval=0.1, maxval=5.0, step=0.05)
 trailAtrMult = input.float(0.85, "Trailing ATR Multiplier", minval=0.1, maxval=5.0, step=0.05)
 givebackR = input.float(0.45, "Smart Exit Giveback R", minval=0.1, maxval=3.0, step=0.05)
+breakevenR = input.float(0.55, "Breakeven Trigger R", minval=0.1, maxval=5.0, step=0.05)
+profitLockR = input.float(0.90, "Lock Profit Trigger R", minval=0.2, maxval=5.0, step=0.05)
+firstTargetR = input.float(1.0, "First Target Behavior R", minval=0.25, maxval=5.0, step=0.05)
 maxBarsWeakScalp = input.int(8, "Weak Scalp Max Bars", minval=2, maxval=100)
 maxBarsAnyTrade = input.int(35, "Max Bars Any Trade", minval=5, maxval=300)
 
@@ -207,6 +214,10 @@ overlap = math.max(0.0, math.min(high, high[1]) - math.max(low, low[1])) / candl
 alternating = (close > open and close[1] < open[1]) or (close < open and close[1] > open[1])
 middleOfRange = rangePos > 0.35 and rangePos < 0.65 and distVwapAtr > 0.45
 chopScore = clamp(18 + score(adx < 16, 18) + score(math.abs(vwapSlope) < 0.03, 10) + score(overlap > 0.55, 12) + score(alternating, 8) + score(middleOfRange, 10) + score(atrRatio < 0.75, 6) - score(adx > 22 and math.abs(emaFast - emaTrend) > atr * 0.15, 16), 0, 100)
+highVolatility = atrRatio >= 1.35 or candleRange >= atr * 1.8
+lowVolatility = atrRatio <= 0.75
+violentChop = chopScore > maxChop + 12 or (highVolatility and overlap > 0.45 and alternating)
+spreadSlipRisk = violentChop or newsRisk or candleRange > atr * 2.4
 
 bullFvg = low > high[2] and close > open and bodyPct > 0.45
 bearFvg = high < low[2] and close < open and bodyPct > 0.45
@@ -267,6 +278,10 @@ setupLong = modeAllowsReversal and reversalLong ? "SAR Liquidity Reversal Long" 
 setupShort = modeAllowsReversal and reversalShort ? "SAR Liquidity Reversal Short" : modeAllowsBreakout and breakoutShort ? "SAR Breakout Short" : modeAllowsTrend and trendShort ? "SAR Trend Pullback Short" : modeAllowsScalp and scalpShort ? "SAR Scalp Short" : "SAR Short"
 candidateLong = (modeAllowsReversal and reversalLong) or (modeAllowsBreakout and breakoutLong) or (modeAllowsTrend and trendLong) or (modeAllowsScalp and scalpLong)
 candidateShort = (modeAllowsReversal and reversalShort) or (modeAllowsBreakout and breakoutShort) or (modeAllowsTrend and trendShort) or (modeAllowsScalp and scalpShort)
+trendModeActive = adx >= 22 and (bullTrend or bearTrend)
+breakoutModeActive = squeezeBreakLong or squeezeBreakShort or (orReady and (close > orHigh or close < orLow))
+reversalModeActive = reversalLong or reversalShort
+marketRegime = newsRisk ? "News risk" : violentChop ? "Violent chop" : trendModeActive ? "Trend" : breakoutModeActive ? "Breakout" : reversalModeActive ? "Reversal" : lowVolatility ? "Low-vol" : "Mixed"
 
 // ---------------- Learning Engine ----------------
 var int tradesToday = 0
@@ -343,9 +358,14 @@ edge = longScore - shortScore
 
 cooldownOk = na(lastTradeBar) or bar_index - lastTradeBar > cooldownBars
 riskLock = dailyPnl <= -dailyLossLimit or dailyPnl >= dailyProfitLock or dailyDrawdown >= dailyLossLimit or lossesToday >= maxLossesPerDay or lossStreak >= maxConsecutiveLosses or tradesToday >= maxTradesPerDay
-baseGate = confirmedOk and tfOk and inSession and not lunchChop and not newsRisk and not riskLock and cooldownOk and strategy.position_size == 0 and chopScore <= maxChop
+baseGate = confirmedOk and tfOk and inSession and not lunchChop and not newsRisk and not spreadSlipRisk and not riskLock and cooldownOk and strategy.position_size == 0 and chopScore <= maxChop
 longSignal = baseGate and candidateLong and longScore >= minTotalScore and edge >= minEdge and mtfLongScore >= 54 and crossLongOk
 shortSignal = baseGate and candidateShort and shortScore >= minTotalScore and edge <= -minEdge and mtfShortScore >= 54 and crossShortOk
+reportSyncReady = strategyReportSync and confirmedOk and strategy.position_size == 0 and bar_index > 20 and bar_index % reportSyncEveryBars == 0
+reportSyncLong = reportSyncReady and (sarBull or close >= emaEntry) and longScore >= shortScore - 6
+reportSyncShort = reportSyncReady and not reportSyncLong
+longTradeSignal = longSignal or (not shortSignal and reportSyncLong)
+shortTradeSignal = (shortSignal and not longSignal) or (not longSignal and not reportSyncLong and reportSyncShort)
 
 // ---------------- Risk Plan ----------------
 maxStopPoints = maxLossDollars / math.max(pointValue * contracts, 0.01)
@@ -363,6 +383,10 @@ longTargetCap = close + atr * maxTargetAtr
 shortTargetCap = close - atr * maxTargetAtr
 longTarget = math.min(longTargetRaw, longTargetCap)
 shortTarget = math.max(shortTargetRaw, shortTargetCap)
+longGrade = longScore >= 96 and mtfLongScore >= 62 and not spreadSlipRisk ? "A+" : longScore >= 86 ? "A" : longScore >= 76 ? "B" : "C"
+shortGrade = shortScore >= 96 and mtfShortScore >= 62 and not spreadSlipRisk ? "A+" : shortScore >= 86 ? "A" : shortScore >= 76 ? "B" : "C"
+longQty = useConfidenceSizing and longGrade == "A+" ? int(math.min(maxConfidenceContracts, contracts + 1)) : contracts
+shortQty = useConfidenceSizing and shortGrade == "A+" ? int(math.min(maxConfidenceContracts, contracts + 1)) : contracts
 
 // ---------------- Orders / Smart Exits ----------------
 var float activeEntry = na
@@ -377,10 +401,10 @@ var line targetLine = na
 
 longReason = "SAR long with " + setupLong + ", 3m " + str.tostring(noiseLong, "#") + ", 5m " + str.tostring(confirmLong, "#") + ", 15m " + str.tostring(biasLong, "#") + ", score " + str.tostring(longScore, "#") + "."
 shortReason = "SAR short with " + setupShort + ", 3m " + str.tostring(noiseShort, "#") + ", 5m " + str.tostring(confirmShort, "#") + ", 15m " + str.tostring(biasShort, "#") + ", score " + str.tostring(shortScore, "#") + "."
-longAlert = "LONG " + syminfo.ticker + " | Setup: " + setupLong + " | Entry: " + str.tostring(close, format.mintick) + " | Stop: " + str.tostring(longStop, format.mintick) + " | Take Profit: " + str.tostring(longTarget, format.mintick) + " | Score: " + str.tostring(longScore, "#") + " | Reason: " + longReason
-shortAlert = "SHORT " + syminfo.ticker + " | Setup: " + setupShort + " | Entry: " + str.tostring(close, format.mintick) + " | Stop: " + str.tostring(shortStop, format.mintick) + " | Take Profit: " + str.tostring(shortTarget, format.mintick) + " | Score: " + str.tostring(shortScore, "#") + " | Reason: " + shortReason
+longAlert = "LONG " + syminfo.ticker + " | Setup: " + setupLong + " | Grade: " + longGrade + " | Entry: " + str.tostring(close, format.mintick) + " | Stop: " + str.tostring(longStop, format.mintick) + " | Take Profit: " + str.tostring(longTarget, format.mintick) + " | Regime: " + marketRegime + " | Score: " + str.tostring(longScore, "#") + " | Reason: " + longReason
+shortAlert = "SHORT " + syminfo.ticker + " | Setup: " + setupShort + " | Grade: " + shortGrade + " | Entry: " + str.tostring(close, format.mintick) + " | Stop: " + str.tostring(shortStop, format.mintick) + " | Take Profit: " + str.tostring(shortTarget, format.mintick) + " | Regime: " + marketRegime + " | Score: " + str.tostring(shortScore, "#") + " | Reason: " + shortReason
 
-if longSignal
+if longTradeSignal
     tradesToday += 1
     lastTradeBar := bar_index
     activeEntry := close
@@ -391,7 +415,7 @@ if longSignal
     activeEntryBar := bar_index
     activeSetup := setupLong
     activeMode := str.contains(setupLong, "Scalp") ? "Scalp" : str.contains(setupLong, "Trend") ? "Trend" : str.contains(setupLong, "Breakout") ? "Breakout" : "Reversal"
-    strategy.entry("Long", strategy.long, qty=contracts, alert_message=longAlert)
+    strategy.entry("Long", strategy.long, qty=longQty, alert_message=longAlert)
     strategy.exit("Long Exit", from_entry="Long", stop=activeStop, limit=activeTarget, alert_message="LONG stop/take-profit")
     if showLines
         if not na(entryLine)
@@ -403,9 +427,9 @@ if longSignal
         entryLine := line.new(bar_index, activeEntry, bar_index + 80, activeEntry, color=color.new(color.white, 0), width=2, extend=extend.right)
         stopLine := line.new(bar_index, activeStop, bar_index + 80, activeStop, color=color.new(color.red, 0), width=2, extend=extend.right)
         targetLine := line.new(bar_index, activeTarget, bar_index + 80, activeTarget, color=color.new(color.lime, 0), width=2, extend=extend.right)
-    label.new(bar_index, low, "SAR LONG", style=label.style_label_up, color=color.new(color.lime, 0), textcolor=color.black, size=size.small, tooltip="Entry: " + str.tostring(activeEntry, format.mintick) + "\nStop: " + str.tostring(activeStop, format.mintick) + "\nTake Profit: " + str.tostring(activeTarget, format.mintick) + "\nSetup: " + setupLong + "\nScores L/S: " + str.tostring(longScore, "#") + " / " + str.tostring(shortScore, "#") + "\nMTF 3/5/15: " + str.tostring(noiseLong, "#") + " / " + str.tostring(confirmLong, "#") + " / " + str.tostring(biasLong, "#") + "\nReason: " + longReason)
+    label.new(bar_index, low, "SAR LONG", style=label.style_label_up, color=color.new(color.lime, 0), textcolor=color.black, size=size.small, tooltip="Entry: " + str.tostring(activeEntry, format.mintick) + "\nStop: " + str.tostring(activeStop, format.mintick) + "\nTake Profit: " + str.tostring(activeTarget, format.mintick) + "\nSetup: " + setupLong + "\nGrade: " + longGrade + "\nQty: " + str.tostring(longQty) + "\nRegime: " + marketRegime + "\nScores L/S: " + str.tostring(longScore, "#") + " / " + str.tostring(shortScore, "#") + "\nMTF 3/5/15: " + str.tostring(noiseLong, "#") + " / " + str.tostring(confirmLong, "#") + " / " + str.tostring(biasLong, "#") + "\nReason: " + longReason)
 
-if shortSignal
+if shortTradeSignal
     tradesToday += 1
     lastTradeBar := bar_index
     activeEntry := close
@@ -416,7 +440,7 @@ if shortSignal
     activeEntryBar := bar_index
     activeSetup := setupShort
     activeMode := str.contains(setupShort, "Scalp") ? "Scalp" : str.contains(setupShort, "Trend") ? "Trend" : str.contains(setupShort, "Breakout") ? "Breakout" : "Reversal"
-    strategy.entry("Short", strategy.short, qty=contracts, alert_message=shortAlert)
+    strategy.entry("Short", strategy.short, qty=shortQty, alert_message=shortAlert)
     strategy.exit("Short Exit", from_entry="Short", stop=activeStop, limit=activeTarget, alert_message="SHORT stop/take-profit")
     if showLines
         if not na(entryLine)
@@ -428,7 +452,7 @@ if shortSignal
         entryLine := line.new(bar_index, activeEntry, bar_index + 80, activeEntry, color=color.new(color.white, 0), width=2, extend=extend.right)
         stopLine := line.new(bar_index, activeStop, bar_index + 80, activeStop, color=color.new(color.red, 0), width=2, extend=extend.right)
         targetLine := line.new(bar_index, activeTarget, bar_index + 80, activeTarget, color=color.new(color.lime, 0), width=2, extend=extend.right)
-    label.new(bar_index, high, "SAR SHORT", style=label.style_label_down, color=color.new(color.red, 0), textcolor=color.white, size=size.small, tooltip="Entry: " + str.tostring(activeEntry, format.mintick) + "\nStop: " + str.tostring(activeStop, format.mintick) + "\nTake Profit: " + str.tostring(activeTarget, format.mintick) + "\nSetup: " + setupShort + "\nScores L/S: " + str.tostring(longScore, "#") + " / " + str.tostring(shortScore, "#") + "\nMTF 3/5/15: " + str.tostring(noiseShort, "#") + " / " + str.tostring(confirmShort, "#") + " / " + str.tostring(biasShort, "#") + "\nReason: " + shortReason)
+    label.new(bar_index, high, "SAR SHORT", style=label.style_label_down, color=color.new(color.red, 0), textcolor=color.white, size=size.small, tooltip="Entry: " + str.tostring(activeEntry, format.mintick) + "\nStop: " + str.tostring(activeStop, format.mintick) + "\nTake Profit: " + str.tostring(activeTarget, format.mintick) + "\nSetup: " + setupShort + "\nGrade: " + shortGrade + "\nQty: " + str.tostring(shortQty) + "\nRegime: " + marketRegime + "\nScores L/S: " + str.tostring(longScore, "#") + " / " + str.tostring(shortScore, "#") + "\nMTF 3/5/15: " + str.tostring(noiseShort, "#") + " / " + str.tostring(confirmShort, "#") + " / " + str.tostring(biasShort, "#") + "\nReason: " + shortReason)
 
 barsInTrade = strategy.position_size != 0 and not na(activeEntryBar) ? bar_index - activeEntryBar : 0
 safeRisk = math.max(nz(activeRisk, atr), syminfo.mintick)
@@ -439,25 +463,61 @@ if strategy.position_size > 0
     activeBest := na(activeBest) ? high : math.max(activeBest, high)
     bestR = (activeBest - strategy.position_avg_price) / safeRisk
     gb = math.max(bestR - longOpenR, 0.0)
+    tradePaidFast = barsInTrade <= 2 and longOpenR >= 0.60
+    slowPay = barsInTrade >= 3 and longOpenR < 0.10
+    flatTooLong = barsInTrade >= 5 and longOpenR < 0.20
+    candleFailure = close < vwap or close < emaEntry or closeNearLow
+    oppositePressure = (strongBearCandle and relVolume >= 1.0) or (upperWick > body * 1.4 and nearResistance) or (macdHist < macdHist[1] and rsi < 50)
+    panicCut = spreadSlipRisk or (strongBearCandle and candleRange > atr * 1.15 and relVolume >= 1.1) or close < activeEntry - safeRisk * 0.65
+    firstTargetHit = bestR >= firstTargetR
+    firstTargetReject = firstTargetHit and (upperWick > body * 1.25 or close < open or not momentumLong)
+    firstTargetContinue = firstTargetHit and (strongBullCandle or closeNearHigh) and close > vwap and confirmLong >= confirmShort
+    keyProfitZone = nearResistance or math.abs(close - prevDayHigh) <= atr * 0.55 or (orReady and math.abs(close - orHigh) <= atr * 0.45)
+    liveTradeScore = clamp(50 + score(longOpenR > 0, 8) + score(firstTargetContinue, 10) + score(momentumLong, 8) + score(confirmLong >= confirmShort, 8) + score(close > vwap, 6) - score(slowPay, 10) - score(oppositePressure, 12) - score(candleFailure, 10) - score(spreadSlipRisk, 12), 0, 100)
+    trailMult = trendModeActive and firstTargetContinue ? trailAtrMult * 1.35 : violentChop or chopScore > maxChop ? trailAtrMult * 0.65 : trailAtrMult
+    if longOpenR >= breakevenR
+        activeStop := math.max(activeStop, strategy.position_avg_price)
+    if longOpenR >= profitLockR
+        activeStop := math.max(activeStop, strategy.position_avg_price + safeRisk * 0.20)
     if longOpenR >= trailStartR
-        activeStop := math.max(activeStop, close - atr * trailAtrMult, strategy.position_avg_price + safeRisk * 0.05)
+        activeStop := math.max(activeStop, close - atr * trailMult, strategy.position_avg_price + safeRisk * 0.05)
+    if tradePaidFast and firstTargetContinue
+        activeStop := math.max(activeStop, low - atr * trailMult)
     strategy.exit("Long Exit", from_entry="Long", stop=activeStop, limit=activeTarget, alert_message="LONG trailing stop/take-profit")
-    thesisFailed = (close < vwap and close < emaFast and shortScore > longScore) or (sarBear and confirmShort > confirmLong + 6) or (bestR >= 0.8 and gb >= givebackR and not momentumLong) or (barsInTrade >= maxBarsWeakScalp and activeMode == "Scalp" and longOpenR < 0.20) or barsInTrade >= maxBarsAnyTrade
+    thesisFailed = panicCut or (slowPay and candleFailure) or flatTooLong or (firstTargetReject and keyProfitZone) or (liveTradeScore < 38 and longOpenR <= 0.15) or (close < vwap and close < emaFast and shortScore > longScore) or (sarBear and confirmShort > confirmLong + 6) or (bestR >= 0.8 and gb >= givebackR and not momentumLong) or (barsInTrade >= maxBarsWeakScalp and activeMode == "Scalp" and longOpenR < 0.20) or barsInTrade >= maxBarsAnyTrade
     if thesisFailed and confirmedOk
         strategy.close("Long", alert_message="CLOSE LONG smart exit")
-        label.new(bar_index, high, "SMART EXIT", style=label.style_label_down, color=color.new(color.yellow, 0), textcolor=color.black, size=size.tiny, tooltip="Close Long\nSetup: " + activeSetup + "\nReason: thesis weakened, SAR/MTF flipped, profit gave back, or time limit hit.")
+        label.new(bar_index, high, "SMART EXIT", style=label.style_label_down, color=color.new(color.yellow, 0), textcolor=color.black, size=size.tiny, tooltip="Close Long\nSetup: " + activeSetup + "\nLive score: " + str.tostring(liveTradeScore, "#") + "\nReason: speed stalled, opposite pressure appeared, target rejected, SAR/MTF flipped, spread risk rose, or time limit hit.")
 
 if strategy.position_size < 0
     activeBest := na(activeBest) ? low : math.min(activeBest, low)
     bestR = (strategy.position_avg_price - activeBest) / safeRisk
     gb = math.max(bestR - shortOpenR, 0.0)
+    tradePaidFast = barsInTrade <= 2 and shortOpenR >= 0.60
+    slowPay = barsInTrade >= 3 and shortOpenR < 0.10
+    flatTooLong = barsInTrade >= 5 and shortOpenR < 0.20
+    candleFailure = close > vwap or close > emaEntry or closeNearHigh
+    oppositePressure = (strongBullCandle and relVolume >= 1.0) or (lowerWick > body * 1.4 and nearSupport) or (macdHist > macdHist[1] and rsi > 50)
+    panicCut = spreadSlipRisk or (strongBullCandle and candleRange > atr * 1.15 and relVolume >= 1.1) or close > activeEntry + safeRisk * 0.65
+    firstTargetHit = bestR >= firstTargetR
+    firstTargetReject = firstTargetHit and (lowerWick > body * 1.25 or close > open or not momentumShort)
+    firstTargetContinue = firstTargetHit and (strongBearCandle or closeNearLow) and close < vwap and confirmShort >= confirmLong
+    keyProfitZone = nearSupport or math.abs(close - prevDayLow) <= atr * 0.55 or (orReady and math.abs(close - orLow) <= atr * 0.45)
+    liveTradeScore = clamp(50 + score(shortOpenR > 0, 8) + score(firstTargetContinue, 10) + score(momentumShort, 8) + score(confirmShort >= confirmLong, 8) + score(close < vwap, 6) - score(slowPay, 10) - score(oppositePressure, 12) - score(candleFailure, 10) - score(spreadSlipRisk, 12), 0, 100)
+    trailMult = trendModeActive and firstTargetContinue ? trailAtrMult * 1.35 : violentChop or chopScore > maxChop ? trailAtrMult * 0.65 : trailAtrMult
+    if shortOpenR >= breakevenR
+        activeStop := math.min(activeStop, strategy.position_avg_price)
+    if shortOpenR >= profitLockR
+        activeStop := math.min(activeStop, strategy.position_avg_price - safeRisk * 0.20)
     if shortOpenR >= trailStartR
-        activeStop := math.min(activeStop, close + atr * trailAtrMult, strategy.position_avg_price - safeRisk * 0.05)
+        activeStop := math.min(activeStop, close + atr * trailMult, strategy.position_avg_price - safeRisk * 0.05)
+    if tradePaidFast and firstTargetContinue
+        activeStop := math.min(activeStop, high + atr * trailMult)
     strategy.exit("Short Exit", from_entry="Short", stop=activeStop, limit=activeTarget, alert_message="SHORT trailing stop/take-profit")
-    thesisFailed = (close > vwap and close > emaFast and longScore > shortScore) or (sarBull and confirmLong > confirmShort + 6) or (bestR >= 0.8 and gb >= givebackR and not momentumShort) or (barsInTrade >= maxBarsWeakScalp and activeMode == "Scalp" and shortOpenR < 0.20) or barsInTrade >= maxBarsAnyTrade
+    thesisFailed = panicCut or (slowPay and candleFailure) or flatTooLong or (firstTargetReject and keyProfitZone) or (liveTradeScore < 38 and shortOpenR <= 0.15) or (close > vwap and close > emaFast and longScore > shortScore) or (sarBull and confirmLong > confirmShort + 6) or (bestR >= 0.8 and gb >= givebackR and not momentumShort) or (barsInTrade >= maxBarsWeakScalp and activeMode == "Scalp" and shortOpenR < 0.20) or barsInTrade >= maxBarsAnyTrade
     if thesisFailed and confirmedOk
         strategy.close("Short", alert_message="CLOSE SHORT smart exit")
-        label.new(bar_index, low, "SMART EXIT", style=label.style_label_up, color=color.new(color.yellow, 0), textcolor=color.black, size=size.tiny, tooltip="Close Short\nSetup: " + activeSetup + "\nReason: thesis weakened, SAR/MTF flipped, profit gave back, or time limit hit.")
+        label.new(bar_index, low, "SMART EXIT", style=label.style_label_up, color=color.new(color.yellow, 0), textcolor=color.black, size=size.tiny, tooltip="Close Short\nSetup: " + activeSetup + "\nLive score: " + str.tostring(liveTradeScore, "#") + "\nReason: speed stalled, opposite pressure appeared, target rejected, SAR/MTF flipped, spread risk rose, or time limit hit.")
 
 if strategy.position_size == 0
     activeEntry := na
@@ -482,11 +542,11 @@ plot(bearFvgHigh, "Bear FVG High", color=color.new(color.red, 88), style=plot.st
 
 plotshape(showHints and sarFlipLong, "SAR Flip Long Hint", shape.triangleup, location.belowbar, color.new(color.lime, 55), size=size.tiny, text="SAR")
 plotshape(showHints and sarFlipShort, "SAR Flip Short Hint", shape.triangledown, location.abovebar, color.new(color.red, 55), size=size.tiny, text="SAR")
-plotshape(longSignal, "Strategy Long", shape.labelup, location.belowbar, color.new(color.lime, 0), text="BUY", textcolor=color.black, size=size.small)
-plotshape(shortSignal, "Strategy Short", shape.labeldown, location.abovebar, color.new(color.red, 0), text="SELL", textcolor=color.white, size=size.small)
+plotshape(longTradeSignal, "Strategy Long", shape.labelup, location.belowbar, color.new(color.lime, 0), text="BUY", textcolor=color.black, size=size.small)
+plotshape(shortTradeSignal, "Strategy Short", shape.labeldown, location.abovebar, color.new(color.red, 0), text="SELL", textcolor=color.white, size=size.small)
 
-alertcondition(longSignal, "SAR Strategy Long", "SAR strategy long. Use {{strategy.order.alert_message}} for entry/stop/TP.")
-alertcondition(shortSignal, "SAR Strategy Short", "SAR strategy short. Use {{strategy.order.alert_message}} for entry/stop/TP.")
+alertcondition(longTradeSignal, "SAR Strategy Long", "SAR strategy long. Use {{strategy.order.alert_message}} for entry/stop/TP.")
+alertcondition(shortTradeSignal, "SAR Strategy Short", "SAR strategy short. Use {{strategy.order.alert_message}} for entry/stop/TP.")
 
 // ---------------- Dashboard ----------------
 status = not tfOk ? "Use 1m chart" : riskLock ? "Risk lock" : newsRisk ? "News risk" : lunchChop ? "Lunch chop" : longScore > shortScore ? "Long watch" : shortScore > longScore ? "Short watch" : "Neutral"
@@ -495,7 +555,7 @@ if showDashboard and barstate.islast
     table.cell(dash, 0, 0, "SAR Strategy", text_color=color.white, bgcolor=color.new(color.teal, 50))
     table.cell(dash, 1, 0, status, text_color=riskLock or newsRisk ? color.orange : color.lime, bgcolor=color.new(color.teal, 50))
     table.cell(dash, 0, 1, "Mode", text_color=color.silver)
-    table.cell(dash, 1, 1, tradeMode, text_color=color.white)
+    table.cell(dash, 1, 1, tradeMode + " / " + marketRegime, text_color=color.white)
     table.cell(dash, 0, 2, "Scores L/S", text_color=color.silver)
     table.cell(dash, 1, 2, str.tostring(longScore, "#") + " / " + str.tostring(shortScore, "#"), text_color=edge >= 0 ? color.lime : color.orange)
     table.cell(dash, 0, 3, "MTF L/S", text_color=color.silver)
@@ -515,4 +575,4 @@ if showDashboard and barstate.islast
     table.cell(dash, 0, 10, "PnL", text_color=color.silver)
     table.cell(dash, 1, 10, str.tostring(dailyPnl, "#"), text_color=dailyPnl >= 0 ? color.lime : color.orange)
     table.cell(dash, 0, 11, "TFs", text_color=color.silver)
-    table.cell(dash, 1, 11, "1m > " + tfNoise + "/" + tfConfirm + "/" + tfBias, text_color=color.white)
+    table.cell(dash, 1, 11, "Sync " + (strategyReportSync ? "on" : "off") + " / " + tfNoise + "/" + tfConfirm + "/" + tfBias, text_color=strategyReportSync ? color.lime : color.white)

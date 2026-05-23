@@ -1,0 +1,518 @@
+//@version=6
+strategy("Personal Parabolic SAR Setup Strategy - 100K Paper", overlay=true, initial_capital=100000, default_qty_type=strategy.fixed, default_qty_value=1, pyramiding=0, process_orders_on_close=true, calc_on_every_tick=false, calc_on_order_fills=true, commission_type=strategy.commission.cash_per_contract, commission_value=4.0, slippage=2, max_lines_count=120, max_labels_count=160)
+
+// Standalone personal Parabolic SAR strategy.
+// Built for 1m NQ execution with 3m/5m/15m confirmation.
+// No repaint mode uses confirmed chart bars and request.security(...lookahead_off).
+
+// ---------------- Inputs ----------------
+contracts = input.int(1, "Contracts / Paper Size", minval=1, maxval=10)
+pointValue = input.float(20.0, "NQ Dollars Per Point", minval=0.01, step=0.25)
+requireOneMinute = input.bool(false, "Require 1m Chart")
+useNoRepaint = input.bool(true, "Strict No-Repaint")
+useSessionFilter = input.bool(true, "RTH Only")
+tradeSession = input.session("0930-1600", "Trading Session")
+avoidLunch = input.bool(true, "Avoid Lunch Chop")
+
+tradeMode = input.string("Auto", "Trade Mode", options=["Auto", "Scalping", "Trend Following", "Reversal", "Breakout"])
+minTotalScore = input.float(78, "Minimum Total Score", minval=40, maxval=120, step=1)
+minEdge = input.float(8, "Minimum Direction Edge", minval=0, maxval=50, step=1)
+maxChop = input.float(68, "Max Chop Score", minval=20, maxval=100, step=1)
+cooldownBars = input.int(6, "Cooldown Bars", minval=0, maxval=200)
+maxTradesPerDay = input.int(10, "Max Trades Per Day", minval=1, maxval=50)
+maxLossesPerDay = input.int(3, "Max Losses Per Day", minval=1, maxval=20)
+maxConsecutiveLosses = input.int(2, "Max Consecutive Losses", minval=1, maxval=10)
+dailyLossLimit = input.float(1200, "Daily Loss Limit ($)", minval=100, step=50)
+dailyProfitLock = input.float(1800, "Daily Profit Lock ($)", minval=100, step=50)
+
+sarStart = input.float(0.02, "SAR Start", minval=0.001, maxval=1.0, step=0.001)
+sarIncrement = input.float(0.02, "SAR Increment", minval=0.001, maxval=1.0, step=0.001)
+sarMax = input.float(0.20, "SAR Max", minval=0.01, maxval=1.0, step=0.01)
+emaFastLen = input.int(9, "Fast EMA", minval=2, maxval=100)
+emaEntryLen = input.int(21, "Entry EMA", minval=5, maxval=200)
+emaTrendLen = input.int(50, "Trend EMA", minval=10, maxval=300)
+emaMacroLen = input.int(200, "Macro EMA", minval=50, maxval=600)
+atrLen = input.int(14, "ATR Length", minval=2, maxval=100)
+adxLen = input.int(14, "ADX Length", minval=2, maxval=100)
+adxSmoothing = input.int(14, "ADX Smoothing", minval=2, maxval=100)
+rsiLen = input.int(14, "RSI Length", minval=2, maxval=100)
+volLen = input.int(30, "Volume Baseline", minval=5, maxval=200)
+structureLen = input.int(30, "Structure Lookback", minval=10, maxval=200)
+
+tfNoise = input.timeframe("3", "Noise Filter TF")
+tfConfirm = input.timeframe("5", "Main Confirmation TF")
+tfBias = input.timeframe("15", "Bigger Bias TF")
+useCrossMarket = input.bool(true, "Cross-Market Confirmation")
+esSymbol = input.string("CME_MINI:ES1!", "ES Symbol")
+vixSymbol = input.string("CBOE:VIX", "VIX Symbol")
+dxySymbol = input.string("TVC:DXY", "DXY Symbol")
+qqqSymbol = input.string("NASDAQ:QQQ", "QQQ Symbol")
+semiSymbol = input.string("NASDAQ:SMH", "Semiconductor Symbol")
+
+stopAtrMult = input.float(1.10, "Base Stop ATR", minval=0.25, maxval=5.0, step=0.05)
+targetR = input.float(1.75, "Take Profit R", minval=0.5, maxval=8.0, step=0.25)
+maxTargetAtr = input.float(4.0, "Max TP ATR Stretch", minval=1.0, maxval=12.0, step=0.25)
+maxLossDollars = input.float(800, "Max Loss Per Trade ($)", minval=50, step=50)
+trailStartR = input.float(0.75, "Trail Starts At R", minval=0.1, maxval=5.0, step=0.05)
+trailAtrMult = input.float(0.85, "Trailing ATR Multiplier", minval=0.1, maxval=5.0, step=0.05)
+givebackR = input.float(0.45, "Smart Exit Giveback R", minval=0.1, maxval=3.0, step=0.05)
+maxBarsWeakScalp = input.int(8, "Weak Scalp Max Bars", minval=2, maxval=100)
+maxBarsAnyTrade = input.int(35, "Max Bars Any Trade", minval=5, maxval=300)
+
+useManualNewsFilter = input.bool(true, "Manual News Risk Windows")
+newsPreMinutes = input.int(5, "News Minutes Before", minval=0, maxval=120)
+newsPostMinutes = input.int(10, "News Minutes After", minval=0, maxval=180)
+news1Hour = input.int(8, "News 1 Hour NY", minval=0, maxval=23)
+news1Minute = input.int(30, "News 1 Minute NY", minval=0, maxval=59)
+news2Hour = input.int(10, "News 2 Hour NY", minval=0, maxval=23)
+news2Minute = input.int(0, "News 2 Minute NY", minval=0, maxval=59)
+news3Hour = input.int(14, "News 3 Hour NY", minval=0, maxval=23)
+news3Minute = input.int(0, "News 3 Minute NY", minval=0, maxval=59)
+
+showLines = input.bool(true, "Show Entry / Stop / TP Lines")
+showDashboard = input.bool(true, "Show Dashboard")
+showHints = input.bool(true, "Show Setup Markers")
+
+// ---------------- Helpers ----------------
+clamp(v, lo, hi) =>
+    math.min(math.max(v, lo), hi)
+
+score(cond, pts) =>
+    cond ? pts : 0.0
+
+safeDiv(num, den) =>
+    den == 0.0 ? 0.0 : num / den
+
+tfBrain() =>
+    _sar = ta.sar(sarStart, sarIncrement, sarMax)
+    _emaFast = ta.ema(close, emaFastLen)
+    _emaEntry = ta.ema(close, emaEntryLen)
+    _emaTrend = ta.ema(close, emaTrendLen)
+    _vwapRaw = ta.vwap(hlc3)
+    _vwap = na(_vwapRaw) ? _emaEntry : _vwapRaw
+    _atr = math.max(ta.atr(atrLen), syminfo.mintick)
+    _rsi = ta.rsi(close, rsiLen)
+    [_macd, _sig, _hist] = ta.macd(close, 12, 26, 9)
+    [_p, _m, _adx] = ta.dmi(adxLen, adxSmoothing)
+    _range = math.max(high - low, syminfo.mintick)
+    _longClose = (close - low) / _range
+    _shortClose = (high - close) / _range
+    _bullStack = close > _vwap and close > _sar and _emaFast > _emaEntry and _emaEntry >= _emaTrend
+    _bearStack = close < _vwap and close < _sar and _emaFast < _emaEntry and _emaEntry <= _emaTrend
+    _long = clamp(45 + score(_bullStack, 18) + score(_hist > _hist[1], 7) + score(_rsi > 50, 6) + score(_adx >= 18, 5) + score(_longClose > 0.62, 6), 0, 100)
+    _short = clamp(45 + score(_bearStack, 18) + score(_hist < _hist[1], 7) + score(_rsi < 50, 6) + score(_adx >= 18, 5) + score(_shortClose > 0.62, 6), 0, 100)
+    [_long, _short]
+
+marketContext() =>
+    _ema = ta.ema(close, 21)
+    _roc = ta.roc(close, 5)
+    _rsi = ta.rsi(close, 14)
+    close > _ema and _roc > 0 and _rsi > 50 ? 1.0 : close < _ema and _roc < 0 and _rsi < 50 ? -1.0 : 0.0
+
+// ---------------- Core Data ----------------
+confirmedOk = not useNoRepaint or barstate.isconfirmed
+tfOk = not requireOneMinute or timeframe.period == "1"
+inSession = not useSessionFilter or not na(time(timeframe.period, tradeSession))
+nyHour = hour(time, "America/New_York")
+nyMinute = minute(time, "America/New_York")
+minutesNow = nyHour * 60 + nyMinute
+newDay = ta.change(time("D")) != 0
+lunchChop = avoidLunch and minutesNow >= 690 and minutesNow <= 810
+
+newsWindow(h, m) =>
+    newsMin = h * 60 + m
+    minutesNow >= newsMin - newsPreMinutes and minutesNow <= newsMin + newsPostMinutes
+
+newsRisk = useManualNewsFilter and (newsWindow(news1Hour, news1Minute) or newsWindow(news2Hour, news2Minute) or newsWindow(news3Hour, news3Minute))
+
+sar = ta.sar(sarStart, sarIncrement, sarMax)
+sarBull = close > sar
+sarBear = close < sar
+sarFlipLong = sarBull and not sarBull[1]
+sarFlipShort = sarBear and not sarBear[1]
+
+emaFast = ta.ema(close, emaFastLen)
+emaEntry = ta.ema(close, emaEntryLen)
+emaTrend = ta.ema(close, emaTrendLen)
+emaMacro = ta.ema(close, emaMacroLen)
+atr = ta.atr(atrLen)
+atrBase = ta.sma(atr, 100)
+atrRatio = safeDiv(atr, atrBase)
+vwapRaw = ta.vwap(hlc3)
+vwap = na(vwapRaw) ? emaEntry : vwapRaw
+vwapSlope = safeDiv(vwap - nz(vwap[5], vwap), math.max(atr, syminfo.mintick))
+[macdLine, macdSignal, macdHist] = ta.macd(close, 12, 26, 9)
+rsi = ta.rsi(close, rsiLen)
+rsiSlope = rsi - nz(rsi[3], rsi)
+[plusDi, minusDi, adx] = ta.dmi(adxLen, adxSmoothing)
+relVolume = safeDiv(volume, math.max(ta.sma(volume, volLen), 1))
+
+candleRange = math.max(high - low, syminfo.mintick)
+body = math.abs(close - open)
+bodyPct = body / candleRange
+upperWick = high - math.max(open, close)
+lowerWick = math.min(open, close) - low
+closeNearHigh = (close - low) / candleRange >= 0.65
+closeNearLow = (high - close) / candleRange >= 0.65
+strongBullCandle = close > open and bodyPct >= 0.45 and closeNearHigh
+strongBearCandle = close < open and bodyPct >= 0.45 and closeNearLow
+pinLong = lowerWick >= math.max(body * 1.6, syminfo.mintick * 6) and closeNearHigh
+pinShort = upperWick >= math.max(body * 1.6, syminfo.mintick * 6) and closeNearLow
+engulfLong = close > open and close[1] < open[1] and close >= open[1] and open <= close[1]
+engulfShort = close < open and close[1] > open[1] and close <= open[1] and open >= close[1]
+
+priorHigh = ta.highest(high, structureLen)[1]
+priorLow = ta.lowest(low, structureLen)[1]
+swingHigh = ta.highest(high, 8)[1]
+swingLow = ta.lowest(low, 8)[1]
+rangeHigh = ta.highest(high, structureLen)
+rangeLow = ta.lowest(low, structureLen)
+rangeSpan = math.max(rangeHigh - rangeLow, syminfo.mintick)
+rangePos = (close - rangeLow) / rangeSpan
+distVwapAtr = math.abs(close - vwap) / math.max(atr, syminfo.mintick)
+[prevDayHigh, prevDayLow] = request.security(syminfo.tickerid, "D", [high[1], low[1]], barmerge.gaps_off, barmerge.lookahead_off)
+
+// ---------------- Opening Range / Levels ----------------
+var float orHigh = na
+var float orLow = na
+if newDay
+    orHigh := na
+    orLow := na
+
+orStart = 9 * 60 + 30
+orEnd = orStart + 15
+inOpeningRange = minutesNow >= orStart and minutesNow < orEnd
+afterOpeningRange = minutesNow >= orEnd
+if inOpeningRange
+    orHigh := na(orHigh) ? high : math.max(orHigh, high)
+    orLow := na(orLow) ? low : math.min(orLow, low)
+orReady = afterOpeningRange and not na(orHigh) and not na(orLow)
+
+nearResistance = math.abs(close - priorHigh) <= atr * 0.45 or math.abs(close - prevDayHigh) <= atr * 0.55 or (orReady and math.abs(close - orHigh) <= atr * 0.45)
+nearSupport = math.abs(close - priorLow) <= atr * 0.45 or math.abs(close - prevDayLow) <= atr * 0.55 or (orReady and math.abs(close - orLow) <= atr * 0.45)
+roundNum = math.round(close / 100.0) * 100.0
+nearRound = math.abs(close - roundNum) <= atr * 0.25
+
+// ---------------- Compression / FVG / Chop ----------------
+bbBasis = ta.sma(close, 20)
+bbDev = ta.stdev(close, 20) * 2.0
+bbUpper = bbBasis + bbDev
+bbLower = bbBasis - bbDev
+kcBasis = ta.ema(close, 20)
+kcRange = ta.atr(20) * 1.5
+squeezeOn = bbUpper < kcBasis + kcRange and bbLower > kcBasis - kcRange
+squeezeBreakLong = squeezeOn[1] and close > bbUpper and closeNearHigh and relVolume >= 0.95
+squeezeBreakShort = squeezeOn[1] and close < bbLower and closeNearLow and relVolume >= 0.95
+overlap = math.max(0.0, math.min(high, high[1]) - math.max(low, low[1])) / candleRange
+alternating = (close > open and close[1] < open[1]) or (close < open and close[1] > open[1])
+middleOfRange = rangePos > 0.35 and rangePos < 0.65 and distVwapAtr > 0.45
+chopScore = clamp(18 + score(adx < 16, 18) + score(math.abs(vwapSlope) < 0.03, 10) + score(overlap > 0.55, 12) + score(alternating, 8) + score(middleOfRange, 10) + score(atrRatio < 0.75, 6) - score(adx > 22 and math.abs(emaFast - emaTrend) > atr * 0.15, 16), 0, 100)
+
+bullFvg = low > high[2] and close > open and bodyPct > 0.45
+bearFvg = high < low[2] and close < open and bodyPct > 0.45
+var float bullFvgLow = na
+var float bullFvgHigh = na
+var float bearFvgLow = na
+var float bearFvgHigh = na
+if bullFvg
+    bullFvgLow := high[2]
+    bullFvgHigh := low
+if bearFvg
+    bearFvgLow := high
+    bearFvgHigh := low[2]
+inBullFvg = not na(bullFvgLow) and low <= bullFvgHigh and close >= bullFvgLow
+inBearFvg = not na(bearFvgHigh) and high >= bearFvgLow and close <= bearFvgHigh
+
+// ---------------- MTF / Cross-Market Confirmation ----------------
+[noiseLong, noiseShort] = request.security(syminfo.tickerid, tfNoise, tfBrain(), barmerge.gaps_off, barmerge.lookahead_off)
+[confirmLong, confirmShort] = request.security(syminfo.tickerid, tfConfirm, tfBrain(), barmerge.gaps_off, barmerge.lookahead_off)
+[biasLong, biasShort] = request.security(syminfo.tickerid, tfBias, tfBrain(), barmerge.gaps_off, barmerge.lookahead_off)
+
+esCtx = request.security(esSymbol, tfConfirm, marketContext(), barmerge.gaps_off, barmerge.lookahead_off, ignore_invalid_symbol=true)
+vixCtx = request.security(vixSymbol, tfConfirm, marketContext(), barmerge.gaps_off, barmerge.lookahead_off, ignore_invalid_symbol=true)
+dxyCtx = request.security(dxySymbol, tfConfirm, marketContext(), barmerge.gaps_off, barmerge.lookahead_off, ignore_invalid_symbol=true)
+qqqCtx = request.security(qqqSymbol, tfConfirm, marketContext(), barmerge.gaps_off, barmerge.lookahead_off, ignore_invalid_symbol=true)
+semiCtx = request.security(semiSymbol, tfConfirm, marketContext(), barmerge.gaps_off, barmerge.lookahead_off, ignore_invalid_symbol=true)
+crossLong = useCrossMarket ? nz(esCtx) * 2.0 + nz(qqqCtx) * 2.0 + nz(semiCtx) * 1.4 - nz(vixCtx) * 2.2 - nz(dxyCtx) * 0.8 : 0.0
+crossShort = -crossLong
+crossLongOk = not useCrossMarket or crossLong >= -2.0
+crossShortOk = not useCrossMarket or crossShort >= -2.0
+
+// ---------------- Setups ----------------
+bullTrend = close > vwap and close > emaEntry and emaFast > emaEntry and emaEntry >= emaTrend and emaTrend >= emaMacro
+bearTrend = close < vwap and close < emaEntry and emaFast < emaEntry and emaEntry <= emaTrend and emaTrend <= emaMacro
+trendLong = bullTrend and low <= emaFast + atr * 0.20 and closeNearHigh and sarBull
+trendShort = bearTrend and high >= emaFast - atr * 0.20 and closeNearLow and sarBear
+vwapReclaimLong = low <= vwap and close > vwap and closeNearHigh and sarBull
+vwapRejectShort = high >= vwap and close < vwap and closeNearLow and sarBear
+liquiditySweepLong = low < priorLow and close > priorLow and pinLong and sarBull
+liquiditySweepShort = high > priorHigh and close < priorHigh and pinShort and sarBear
+orBreakLong = orReady and close > orHigh and closeNearHigh and relVolume >= 0.95 and sarBull
+orBreakShort = orReady and close < orLow and closeNearLow and relVolume >= 0.95 and sarBear
+orFakeLong = orReady and low < orLow and close > orLow and pinLong and sarBull
+orFakeShort = orReady and high > orHigh and close < orHigh and pinShort and sarBear
+reversalLong = (liquiditySweepLong or orFakeLong or pinLong or engulfLong) and (nearSupport or inBullFvg or distVwapAtr > 1.0) and sarBull
+reversalShort = (liquiditySweepShort or orFakeShort or pinShort or engulfShort) and (nearResistance or inBearFvg or distVwapAtr > 1.0) and sarBear
+breakoutLong = (orBreakLong or squeezeBreakLong or close > priorHigh) and closeNearHigh and relVolume >= 0.95 and sarBull
+breakoutShort = (orBreakShort or squeezeBreakShort or close < priorLow) and closeNearLow and relVolume >= 0.95 and sarBear
+scalpLong = sarFlipLong and (vwapReclaimLong or strongBullCandle or engulfLong) and noiseLong >= 52
+scalpShort = sarFlipShort and (vwapRejectShort or strongBearCandle or engulfShort) and noiseShort >= 52
+
+modeAllowsScalp = tradeMode == "Auto" or tradeMode == "Scalping"
+modeAllowsTrend = tradeMode == "Auto" or tradeMode == "Trend Following"
+modeAllowsReversal = tradeMode == "Auto" or tradeMode == "Reversal"
+modeAllowsBreakout = tradeMode == "Auto" or tradeMode == "Breakout"
+
+setupLong = modeAllowsReversal and reversalLong ? "SAR Liquidity Reversal Long" : modeAllowsBreakout and breakoutLong ? "SAR Breakout Long" : modeAllowsTrend and trendLong ? "SAR Trend Pullback Long" : modeAllowsScalp and scalpLong ? "SAR Scalp Long" : "SAR Long"
+setupShort = modeAllowsReversal and reversalShort ? "SAR Liquidity Reversal Short" : modeAllowsBreakout and breakoutShort ? "SAR Breakout Short" : modeAllowsTrend and trendShort ? "SAR Trend Pullback Short" : modeAllowsScalp and scalpShort ? "SAR Scalp Short" : "SAR Short"
+candidateLong = (modeAllowsReversal and reversalLong) or (modeAllowsBreakout and breakoutLong) or (modeAllowsTrend and trendLong) or (modeAllowsScalp and scalpLong)
+candidateShort = (modeAllowsReversal and reversalShort) or (modeAllowsBreakout and breakoutShort) or (modeAllowsTrend and trendShort) or (modeAllowsScalp and scalpShort)
+
+// ---------------- Learning Engine ----------------
+var int tradesToday = 0
+var int winsToday = 0
+var int lossesToday = 0
+var int lossStreak = 0
+var int reviewedClosedTrades = 0
+var int lastTradeBar = na
+var float dayStartEquity = strategy.equity
+var float dayPeakEquity = strategy.equity
+var float longPenalty = 0.0
+var float shortPenalty = 0.0
+var float scalpPenalty = 0.0
+var float trendPenalty = 0.0
+var float reversalPenalty = 0.0
+var float breakoutPenalty = 0.0
+var string activeSetup = ""
+var string activeMode = ""
+
+if newDay
+    tradesToday := 0
+    winsToday := 0
+    lossesToday := 0
+    lossStreak := 0
+    dayStartEquity := strategy.equity
+    dayPeakEquity := strategy.equity
+
+dayPeakEquity := math.max(dayPeakEquity, strategy.equity)
+dailyPnl = strategy.equity - dayStartEquity
+dailyDrawdown = dayPeakEquity - strategy.equity
+
+if strategy.closedtrades > reviewedClosedTrades
+    idx = strategy.closedtrades - 1
+    pnl = strategy.closedtrades.profit(idx)
+    if pnl > 0
+        winsToday += 1
+        lossStreak := 0
+        longPenalty := math.max(0, longPenalty - 1.0)
+        shortPenalty := math.max(0, shortPenalty - 1.0)
+        scalpPenalty := math.max(0, scalpPenalty - 0.75)
+        trendPenalty := math.max(0, trendPenalty - 0.75)
+        reversalPenalty := math.max(0, reversalPenalty - 0.75)
+        breakoutPenalty := math.max(0, breakoutPenalty - 0.75)
+    else
+        lossesToday += 1
+        lossStreak += 1
+        if strategy.closedtrades.entry_id(idx) == "Long"
+            longPenalty := math.min(16, longPenalty + 3.0)
+        if strategy.closedtrades.entry_id(idx) == "Short"
+            shortPenalty := math.min(16, shortPenalty + 3.0)
+        if activeMode == "Scalp"
+            scalpPenalty := math.min(16, scalpPenalty + 3.0)
+        if activeMode == "Trend"
+            trendPenalty := math.min(16, trendPenalty + 3.0)
+        if activeMode == "Reversal"
+            reversalPenalty := math.min(16, reversalPenalty + 3.0)
+        if activeMode == "Breakout"
+            breakoutPenalty := math.min(16, breakoutPenalty + 3.0)
+    reviewedClosedTrades := strategy.closedtrades
+
+learningLongPenalty = longPenalty + (setupLong == "SAR Scalp Long" ? scalpPenalty : setupLong == "SAR Trend Pullback Long" ? trendPenalty : setupLong == "SAR Breakout Long" ? breakoutPenalty : reversalPenalty)
+learningShortPenalty = shortPenalty + (setupShort == "SAR Scalp Short" ? scalpPenalty : setupShort == "SAR Trend Pullback Short" ? trendPenalty : setupShort == "SAR Breakout Short" ? breakoutPenalty : reversalPenalty)
+
+// ---------------- Scoring / Gates ----------------
+momentumLong = macdHist > macdHist[1] and macdLine >= macdSignal and rsi >= 50 and rsiSlope >= -1
+momentumShort = macdHist < macdHist[1] and macdLine <= macdSignal and rsi <= 50 and rsiSlope <= 1
+volumeLong = relVolume >= 0.85 and (strongBullCandle or closeNearHigh or pinLong)
+volumeShort = relVolume >= 0.85 and (strongBearCandle or closeNearLow or pinShort)
+mtfLongScore = noiseLong * 0.20 + confirmLong * 0.45 + biasLong * 0.35
+mtfShortScore = noiseShort * 0.20 + confirmShort * 0.45 + biasShort * 0.35
+longScore = clamp(42 + score(sarBull, 8) + score(sarFlipLong, 8) + score(close > vwap, 8) + score(bullTrend, 12) + score(momentumLong, 10) + score(volumeLong, 8) + score(strongBullCandle or pinLong or engulfLong, 8) + score(candidateLong, 14) + score(nearSupport or inBullFvg or nearRound, 5) + score(mtfLongScore >= 58, 10) + score(crossLongOk, 5) - score(chopScore > maxChop, 14) - score(distVwapAtr > 2.8 and not breakoutLong, 10) - learningLongPenalty, 0, 120)
+shortScore = clamp(42 + score(sarBear, 8) + score(sarFlipShort, 8) + score(close < vwap, 8) + score(bearTrend, 12) + score(momentumShort, 10) + score(volumeShort, 8) + score(strongBearCandle or pinShort or engulfShort, 8) + score(candidateShort, 14) + score(nearResistance or inBearFvg or nearRound, 5) + score(mtfShortScore >= 58, 10) + score(crossShortOk, 5) - score(chopScore > maxChop, 14) - score(distVwapAtr > 2.8 and not breakoutShort, 10) - learningShortPenalty, 0, 120)
+edge = longScore - shortScore
+
+cooldownOk = na(lastTradeBar) or bar_index - lastTradeBar > cooldownBars
+riskLock = dailyPnl <= -dailyLossLimit or dailyPnl >= dailyProfitLock or dailyDrawdown >= dailyLossLimit or lossesToday >= maxLossesPerDay or lossStreak >= maxConsecutiveLosses or tradesToday >= maxTradesPerDay
+baseGate = confirmedOk and tfOk and inSession and not lunchChop and not newsRisk and not riskLock and cooldownOk and strategy.position_size == 0 and chopScore <= maxChop
+longSignal = baseGate and candidateLong and longScore >= minTotalScore and edge >= minEdge and mtfLongScore >= 54 and crossLongOk
+shortSignal = baseGate and candidateShort and shortScore >= minTotalScore and edge <= -minEdge and mtfShortScore >= 54 and crossShortOk
+
+// ---------------- Risk Plan ----------------
+maxStopPoints = maxLossDollars / math.max(pointValue * contracts, 0.01)
+longStructureStop = math.min(low, swingLow) - syminfo.mintick * 4
+shortStructureStop = math.max(high, swingHigh) + syminfo.mintick * 4
+longRawStop = math.min(close - atr * stopAtrMult, longStructureStop)
+shortRawStop = math.max(close + atr * stopAtrMult, shortStructureStop)
+longStopDist = math.min(math.max(close - longRawStop, atr * 0.35), maxStopPoints)
+shortStopDist = math.min(math.max(shortRawStop - close, atr * 0.35), maxStopPoints)
+longStop = close - longStopDist
+shortStop = close + shortStopDist
+longTargetRaw = close + longStopDist * targetR
+shortTargetRaw = close - shortStopDist * targetR
+longTargetCap = close + atr * maxTargetAtr
+shortTargetCap = close - atr * maxTargetAtr
+longTarget = math.min(longTargetRaw, longTargetCap)
+shortTarget = math.max(shortTargetRaw, shortTargetCap)
+
+// ---------------- Orders / Smart Exits ----------------
+var float activeEntry = na
+var float activeStop = na
+var float activeTarget = na
+var float activeRisk = na
+var float activeBest = na
+var int activeEntryBar = na
+var line entryLine = na
+var line stopLine = na
+var line targetLine = na
+
+longReason = "SAR long with " + setupLong + ", 3m " + str.tostring(noiseLong, "#") + ", 5m " + str.tostring(confirmLong, "#") + ", 15m " + str.tostring(biasLong, "#") + ", score " + str.tostring(longScore, "#") + "."
+shortReason = "SAR short with " + setupShort + ", 3m " + str.tostring(noiseShort, "#") + ", 5m " + str.tostring(confirmShort, "#") + ", 15m " + str.tostring(biasShort, "#") + ", score " + str.tostring(shortScore, "#") + "."
+longAlert = "LONG " + syminfo.ticker + " | Setup: " + setupLong + " | Entry: " + str.tostring(close, format.mintick) + " | Stop: " + str.tostring(longStop, format.mintick) + " | Take Profit: " + str.tostring(longTarget, format.mintick) + " | Score: " + str.tostring(longScore, "#") + " | Reason: " + longReason
+shortAlert = "SHORT " + syminfo.ticker + " | Setup: " + setupShort + " | Entry: " + str.tostring(close, format.mintick) + " | Stop: " + str.tostring(shortStop, format.mintick) + " | Take Profit: " + str.tostring(shortTarget, format.mintick) + " | Score: " + str.tostring(shortScore, "#") + " | Reason: " + shortReason
+
+if longSignal
+    tradesToday += 1
+    lastTradeBar := bar_index
+    activeEntry := close
+    activeStop := longStop
+    activeTarget := longTarget
+    activeRisk := longStopDist
+    activeBest := high
+    activeEntryBar := bar_index
+    activeSetup := setupLong
+    activeMode := str.contains(setupLong, "Scalp") ? "Scalp" : str.contains(setupLong, "Trend") ? "Trend" : str.contains(setupLong, "Breakout") ? "Breakout" : "Reversal"
+    strategy.entry("Long", strategy.long, qty=contracts, alert_message=longAlert)
+    strategy.exit("Long Exit", from_entry="Long", stop=activeStop, limit=activeTarget, alert_message="LONG stop/take-profit")
+    if showLines
+        if not na(entryLine)
+            line.delete(entryLine)
+        if not na(stopLine)
+            line.delete(stopLine)
+        if not na(targetLine)
+            line.delete(targetLine)
+        entryLine := line.new(bar_index, activeEntry, bar_index + 80, activeEntry, color=color.new(color.white, 0), width=2, extend=extend.right)
+        stopLine := line.new(bar_index, activeStop, bar_index + 80, activeStop, color=color.new(color.red, 0), width=2, extend=extend.right)
+        targetLine := line.new(bar_index, activeTarget, bar_index + 80, activeTarget, color=color.new(color.lime, 0), width=2, extend=extend.right)
+    label.new(bar_index, low, "SAR LONG", style=label.style_label_up, color=color.new(color.lime, 0), textcolor=color.black, size=size.small, tooltip="Entry: " + str.tostring(activeEntry, format.mintick) + "\nStop: " + str.tostring(activeStop, format.mintick) + "\nTake Profit: " + str.tostring(activeTarget, format.mintick) + "\nSetup: " + setupLong + "\nScores L/S: " + str.tostring(longScore, "#") + " / " + str.tostring(shortScore, "#") + "\nMTF 3/5/15: " + str.tostring(noiseLong, "#") + " / " + str.tostring(confirmLong, "#") + " / " + str.tostring(biasLong, "#") + "\nReason: " + longReason)
+
+if shortSignal
+    tradesToday += 1
+    lastTradeBar := bar_index
+    activeEntry := close
+    activeStop := shortStop
+    activeTarget := shortTarget
+    activeRisk := shortStopDist
+    activeBest := low
+    activeEntryBar := bar_index
+    activeSetup := setupShort
+    activeMode := str.contains(setupShort, "Scalp") ? "Scalp" : str.contains(setupShort, "Trend") ? "Trend" : str.contains(setupShort, "Breakout") ? "Breakout" : "Reversal"
+    strategy.entry("Short", strategy.short, qty=contracts, alert_message=shortAlert)
+    strategy.exit("Short Exit", from_entry="Short", stop=activeStop, limit=activeTarget, alert_message="SHORT stop/take-profit")
+    if showLines
+        if not na(entryLine)
+            line.delete(entryLine)
+        if not na(stopLine)
+            line.delete(stopLine)
+        if not na(targetLine)
+            line.delete(targetLine)
+        entryLine := line.new(bar_index, activeEntry, bar_index + 80, activeEntry, color=color.new(color.white, 0), width=2, extend=extend.right)
+        stopLine := line.new(bar_index, activeStop, bar_index + 80, activeStop, color=color.new(color.red, 0), width=2, extend=extend.right)
+        targetLine := line.new(bar_index, activeTarget, bar_index + 80, activeTarget, color=color.new(color.lime, 0), width=2, extend=extend.right)
+    label.new(bar_index, high, "SAR SHORT", style=label.style_label_down, color=color.new(color.red, 0), textcolor=color.white, size=size.small, tooltip="Entry: " + str.tostring(activeEntry, format.mintick) + "\nStop: " + str.tostring(activeStop, format.mintick) + "\nTake Profit: " + str.tostring(activeTarget, format.mintick) + "\nSetup: " + setupShort + "\nScores L/S: " + str.tostring(longScore, "#") + " / " + str.tostring(shortScore, "#") + "\nMTF 3/5/15: " + str.tostring(noiseShort, "#") + " / " + str.tostring(confirmShort, "#") + " / " + str.tostring(biasShort, "#") + "\nReason: " + shortReason)
+
+barsInTrade = strategy.position_size != 0 and not na(activeEntryBar) ? bar_index - activeEntryBar : 0
+safeRisk = math.max(nz(activeRisk, atr), syminfo.mintick)
+longOpenR = strategy.position_size > 0 ? (close - strategy.position_avg_price) / safeRisk : 0.0
+shortOpenR = strategy.position_size < 0 ? (strategy.position_avg_price - close) / safeRisk : 0.0
+
+if strategy.position_size > 0
+    activeBest := na(activeBest) ? high : math.max(activeBest, high)
+    bestR = (activeBest - strategy.position_avg_price) / safeRisk
+    gb = math.max(bestR - longOpenR, 0.0)
+    if longOpenR >= trailStartR
+        activeStop := math.max(activeStop, close - atr * trailAtrMult, strategy.position_avg_price + safeRisk * 0.05)
+    strategy.exit("Long Exit", from_entry="Long", stop=activeStop, limit=activeTarget, alert_message="LONG trailing stop/take-profit")
+    thesisFailed = (close < vwap and close < emaFast and shortScore > longScore) or (sarBear and confirmShort > confirmLong + 6) or (bestR >= 0.8 and gb >= givebackR and not momentumLong) or (barsInTrade >= maxBarsWeakScalp and activeMode == "Scalp" and longOpenR < 0.20) or barsInTrade >= maxBarsAnyTrade
+    if thesisFailed and confirmedOk
+        strategy.close("Long", alert_message="CLOSE LONG smart exit")
+        label.new(bar_index, high, "SMART EXIT", style=label.style_label_down, color=color.new(color.yellow, 0), textcolor=color.black, size=size.tiny, tooltip="Close Long\nSetup: " + activeSetup + "\nReason: thesis weakened, SAR/MTF flipped, profit gave back, or time limit hit.")
+
+if strategy.position_size < 0
+    activeBest := na(activeBest) ? low : math.min(activeBest, low)
+    bestR = (strategy.position_avg_price - activeBest) / safeRisk
+    gb = math.max(bestR - shortOpenR, 0.0)
+    if shortOpenR >= trailStartR
+        activeStop := math.min(activeStop, close + atr * trailAtrMult, strategy.position_avg_price - safeRisk * 0.05)
+    strategy.exit("Short Exit", from_entry="Short", stop=activeStop, limit=activeTarget, alert_message="SHORT trailing stop/take-profit")
+    thesisFailed = (close > vwap and close > emaFast and longScore > shortScore) or (sarBull and confirmLong > confirmShort + 6) or (bestR >= 0.8 and gb >= givebackR and not momentumShort) or (barsInTrade >= maxBarsWeakScalp and activeMode == "Scalp" and shortOpenR < 0.20) or barsInTrade >= maxBarsAnyTrade
+    if thesisFailed and confirmedOk
+        strategy.close("Short", alert_message="CLOSE SHORT smart exit")
+        label.new(bar_index, low, "SMART EXIT", style=label.style_label_up, color=color.new(color.yellow, 0), textcolor=color.black, size=size.tiny, tooltip="Close Short\nSetup: " + activeSetup + "\nReason: thesis weakened, SAR/MTF flipped, profit gave back, or time limit hit.")
+
+if strategy.position_size == 0
+    activeEntry := na
+    activeStop := na
+    activeTarget := na
+    activeRisk := na
+    activeBest := na
+    activeEntryBar := na
+
+// ---------------- Visuals ----------------
+plot(sar, "Parabolic SAR", style=plot.style_cross, color=sarBull ? color.new(color.lime, 0) : color.new(color.red, 0), linewidth=2)
+plot(vwap, "VWAP", color=color.new(color.white, 0), linewidth=2)
+plot(emaFast, "Fast EMA", color=color.new(color.orange, 0))
+plot(emaEntry, "Entry EMA", color=color.new(color.blue, 0), linewidth=2)
+plot(emaTrend, "Trend EMA", color=color.new(color.fuchsia, 0), linewidth=2)
+plot(orHigh, "Opening Range High", color=color.new(color.lime, 65), style=plot.style_linebr)
+plot(orLow, "Opening Range Low", color=color.new(color.red, 65), style=plot.style_linebr)
+plot(prevDayHigh, "Prior Day High", color=color.new(color.lime, 35), style=plot.style_linebr)
+plot(prevDayLow, "Prior Day Low", color=color.new(color.red, 35), style=plot.style_linebr)
+plot(bullFvgLow, "Bull FVG Low", color=color.new(color.lime, 88), style=plot.style_linebr)
+plot(bearFvgHigh, "Bear FVG High", color=color.new(color.red, 88), style=plot.style_linebr)
+
+plotshape(showHints and sarFlipLong, "SAR Flip Long Hint", shape.triangleup, location.belowbar, color.new(color.lime, 55), size=size.tiny, text="SAR")
+plotshape(showHints and sarFlipShort, "SAR Flip Short Hint", shape.triangledown, location.abovebar, color.new(color.red, 55), size=size.tiny, text="SAR")
+plotshape(longSignal, "Strategy Long", shape.labelup, location.belowbar, color.new(color.lime, 0), text="BUY", textcolor=color.black, size=size.small)
+plotshape(shortSignal, "Strategy Short", shape.labeldown, location.abovebar, color.new(color.red, 0), text="SELL", textcolor=color.white, size=size.small)
+
+alertcondition(longSignal, "SAR Strategy Long", "SAR strategy long. Use {{strategy.order.alert_message}} for entry/stop/TP.")
+alertcondition(shortSignal, "SAR Strategy Short", "SAR strategy short. Use {{strategy.order.alert_message}} for entry/stop/TP.")
+
+// ---------------- Dashboard ----------------
+status = not tfOk ? "Use 1m chart" : riskLock ? "Risk lock" : newsRisk ? "News risk" : lunchChop ? "Lunch chop" : longScore > shortScore ? "Long watch" : shortScore > longScore ? "Short watch" : "Neutral"
+var table dash = table.new(position.top_right, 2, 12, bgcolor=color.new(color.black, 12), border_color=color.new(color.white, 72), border_width=1)
+if showDashboard and barstate.islast
+    table.cell(dash, 0, 0, "SAR Strategy", text_color=color.white, bgcolor=color.new(color.teal, 50))
+    table.cell(dash, 1, 0, status, text_color=riskLock or newsRisk ? color.orange : color.lime, bgcolor=color.new(color.teal, 50))
+    table.cell(dash, 0, 1, "Mode", text_color=color.silver)
+    table.cell(dash, 1, 1, tradeMode, text_color=color.white)
+    table.cell(dash, 0, 2, "Scores L/S", text_color=color.silver)
+    table.cell(dash, 1, 2, str.tostring(longScore, "#") + " / " + str.tostring(shortScore, "#"), text_color=edge >= 0 ? color.lime : color.orange)
+    table.cell(dash, 0, 3, "MTF L/S", text_color=color.silver)
+    table.cell(dash, 1, 3, str.tostring(mtfLongScore, "#") + " / " + str.tostring(mtfShortScore, "#"), text_color=mtfLongScore >= mtfShortScore ? color.lime : color.orange)
+    table.cell(dash, 0, 4, "SAR", text_color=color.silver)
+    table.cell(dash, 1, 4, sarBull ? "Bull" : "Bear", text_color=sarBull ? color.lime : color.orange)
+    table.cell(dash, 0, 5, "VWAP", text_color=color.silver)
+    table.cell(dash, 1, 5, close > vwap ? "Above" : "Below", text_color=close > vwap ? color.lime : color.orange)
+    table.cell(dash, 0, 6, "Chop", text_color=color.silver)
+    table.cell(dash, 1, 6, str.tostring(chopScore, "#"), text_color=chopScore <= maxChop ? color.lime : color.orange)
+    table.cell(dash, 0, 7, "Cross", text_color=color.silver)
+    table.cell(dash, 1, 7, str.tostring(crossLong, "#.##"), text_color=crossLong >= 0 ? color.lime : color.orange)
+    table.cell(dash, 0, 8, "Learning", text_color=color.silver)
+    table.cell(dash, 1, 8, "L " + str.tostring(longPenalty, "#") + " S " + str.tostring(shortPenalty, "#"), text_color=color.white)
+    table.cell(dash, 0, 9, "Day", text_color=color.silver)
+    table.cell(dash, 1, 9, str.tostring(tradesToday) + " W" + str.tostring(winsToday) + " L" + str.tostring(lossesToday), text_color=color.white)
+    table.cell(dash, 0, 10, "PnL", text_color=color.silver)
+    table.cell(dash, 1, 10, str.tostring(dailyPnl, "#"), text_color=dailyPnl >= 0 ? color.lime : color.orange)
+    table.cell(dash, 0, 11, "TFs", text_color=color.silver)
+    table.cell(dash, 1, 11, "1m > " + tfNoise + "/" + tfConfirm + "/" + tfBias, text_color=color.white)

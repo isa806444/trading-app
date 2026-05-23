@@ -1,5 +1,6 @@
 //@version=6
-strategy("Personal Parabolic SAR Setup Strategy - 100K Paper", overlay=true, initial_capital=100000, default_qty_type=strategy.fixed, default_qty_value=1, pyramiding=0, process_orders_on_close=true, calc_on_every_tick=false, calc_on_order_fills=true, commission_type=strategy.commission.cash_per_contract, commission_value=4.0, slippage=2, max_lines_count=120, max_labels_count=160)
+//@strategy_alert_message {{strategy.order.alert_message}}
+strategy("Personal Parabolic SAR Setup Strategy - 100K Paper", shorttitle="SAR Strategy", overlay=true, initial_capital=100000, default_qty_type=strategy.fixed, default_qty_value=1, pyramiding=0, margin_long=10, margin_short=10, process_orders_on_close=false, calc_on_every_tick=true, calc_on_order_fills=true, commission_type=strategy.commission.cash_per_contract, commission_value=4.0, slippage=2, max_lines_count=120, max_labels_count=160)
 
 // Standalone personal Parabolic SAR strategy.
 // Built for 1m NQ execution with 3m/5m/15m confirmation.
@@ -328,9 +329,9 @@ if strategy.closedtrades > reviewedClosedTrades
     else
         lossesToday += 1
         lossStreak += 1
-        if strategy.closedtrades.entry_id(idx) == "Long"
+        if strategy.closedtrades.entry_id(idx) == "SAR Bull Buy"
             longPenalty := math.min(16, longPenalty + 3.0)
-        if strategy.closedtrades.entry_id(idx) == "Short"
+        if strategy.closedtrades.entry_id(idx) == "SAR Bear Sell"
             shortPenalty := math.min(16, shortPenalty + 3.0)
         if activeMode == "Scalp"
             scalpPenalty := math.min(16, scalpPenalty + 3.0)
@@ -415,8 +416,9 @@ if longTradeSignal
     activeEntryBar := bar_index
     activeSetup := setupLong
     activeMode := str.contains(setupLong, "Scalp") ? "Scalp" : str.contains(setupLong, "Trend") ? "Trend" : str.contains(setupLong, "Breakout") ? "Breakout" : "Reversal"
-    strategy.entry("Long", strategy.long, qty=longQty, alert_message=longAlert)
-    strategy.exit("Long Exit", from_entry="Long", stop=activeStop, limit=activeTarget, alert_message="LONG stop/take-profit")
+    strategy.entry("SAR Bull Buy", strategy.long, qty=longQty, alert_message=longAlert)
+    strategy.exit("SAR Bull Buy Risk", from_entry="SAR Bull Buy", stop=activeStop, limit=activeTarget, alert_message="LONG stop/take-profit")
+    alert(longAlert, alert.freq_once_per_bar_close)
     if showLines
         if not na(entryLine)
             line.delete(entryLine)
@@ -440,8 +442,9 @@ if shortTradeSignal
     activeEntryBar := bar_index
     activeSetup := setupShort
     activeMode := str.contains(setupShort, "Scalp") ? "Scalp" : str.contains(setupShort, "Trend") ? "Trend" : str.contains(setupShort, "Breakout") ? "Breakout" : "Reversal"
-    strategy.entry("Short", strategy.short, qty=shortQty, alert_message=shortAlert)
-    strategy.exit("Short Exit", from_entry="Short", stop=activeStop, limit=activeTarget, alert_message="SHORT stop/take-profit")
+    strategy.entry("SAR Bear Sell", strategy.short, qty=shortQty, alert_message=shortAlert)
+    strategy.exit("SAR Bear Sell Risk", from_entry="SAR Bear Sell", stop=activeStop, limit=activeTarget, alert_message="SHORT stop/take-profit")
+    alert(shortAlert, alert.freq_once_per_bar_close)
     if showLines
         if not na(entryLine)
             line.delete(entryLine)
@@ -483,10 +486,10 @@ if strategy.position_size > 0
         activeStop := math.max(activeStop, close - atr * trailMult, strategy.position_avg_price + safeRisk * 0.05)
     if tradePaidFast and firstTargetContinue
         activeStop := math.max(activeStop, low - atr * trailMult)
-    strategy.exit("Long Exit", from_entry="Long", stop=activeStop, limit=activeTarget, alert_message="LONG trailing stop/take-profit")
+    strategy.exit("SAR Bull Buy Risk", from_entry="SAR Bull Buy", stop=activeStop, limit=activeTarget, alert_message="LONG trailing stop/take-profit")
     thesisFailed = panicCut or (slowPay and candleFailure) or flatTooLong or (firstTargetReject and keyProfitZone) or (liveTradeScore < 38 and longOpenR <= 0.15) or (close < vwap and close < emaFast and shortScore > longScore) or (sarBear and confirmShort > confirmLong + 6) or (bestR >= 0.8 and gb >= givebackR and not momentumLong) or (barsInTrade >= maxBarsWeakScalp and activeMode == "Scalp" and longOpenR < 0.20) or barsInTrade >= maxBarsAnyTrade
     if thesisFailed and confirmedOk
-        strategy.close("Long", alert_message="CLOSE LONG smart exit")
+        strategy.close("SAR Bull Buy", alert_message="CLOSE LONG smart exit")
         label.new(bar_index, high, "SMART EXIT", style=label.style_label_down, color=color.new(color.yellow, 0), textcolor=color.black, size=size.tiny, tooltip="Close Long\nSetup: " + activeSetup + "\nLive score: " + str.tostring(liveTradeScore, "#") + "\nReason: speed stalled, opposite pressure appeared, target rejected, SAR/MTF flipped, spread risk rose, or time limit hit.")
 
 if strategy.position_size < 0
@@ -513,10 +516,10 @@ if strategy.position_size < 0
         activeStop := math.min(activeStop, close + atr * trailMult, strategy.position_avg_price - safeRisk * 0.05)
     if tradePaidFast and firstTargetContinue
         activeStop := math.min(activeStop, high + atr * trailMult)
-    strategy.exit("Short Exit", from_entry="Short", stop=activeStop, limit=activeTarget, alert_message="SHORT trailing stop/take-profit")
+    strategy.exit("SAR Bear Sell Risk", from_entry="SAR Bear Sell", stop=activeStop, limit=activeTarget, alert_message="SHORT trailing stop/take-profit")
     thesisFailed = panicCut or (slowPay and candleFailure) or flatTooLong or (firstTargetReject and keyProfitZone) or (liveTradeScore < 38 and shortOpenR <= 0.15) or (close > vwap and close > emaFast and longScore > shortScore) or (sarBull and confirmLong > confirmShort + 6) or (bestR >= 0.8 and gb >= givebackR and not momentumShort) or (barsInTrade >= maxBarsWeakScalp and activeMode == "Scalp" and shortOpenR < 0.20) or barsInTrade >= maxBarsAnyTrade
     if thesisFailed and confirmedOk
-        strategy.close("Short", alert_message="CLOSE SHORT smart exit")
+        strategy.close("SAR Bear Sell", alert_message="CLOSE SHORT smart exit")
         label.new(bar_index, low, "SMART EXIT", style=label.style_label_up, color=color.new(color.yellow, 0), textcolor=color.black, size=size.tiny, tooltip="Close Short\nSetup: " + activeSetup + "\nLive score: " + str.tostring(liveTradeScore, "#") + "\nReason: speed stalled, opposite pressure appeared, target rejected, SAR/MTF flipped, spread risk rose, or time limit hit.")
 
 if strategy.position_size == 0

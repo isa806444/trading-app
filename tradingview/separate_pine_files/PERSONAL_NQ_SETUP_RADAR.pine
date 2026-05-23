@@ -10,6 +10,7 @@ tradeQty = input.int(1, "Contracts / Paper Size", minval=1, maxval=10)
 useNoRepaint = input.bool(true, "Strict No-Repaint")
 useSessionFilter = input.bool(true, "RTH Only")
 tradeSession = input.session("0930-1600", "Trading Session")
+requireStrategyTimeframe = input.bool(false, "Require Specific Chart TF")
 requiredStrategyTimeframe = input.timeframe("1", "Required Strategy Chart TF")
 openingRangeMinutes = input.int(15, "Opening Range Minutes", minval=5, maxval=60)
 
@@ -22,6 +23,11 @@ emaFastLen = input.int(21, "Fast EMA", minval=5, maxval=100)
 emaMidLen = input.int(50, "Trend EMA", minval=10, maxval=200)
 emaSlowLen = input.int(200, "Macro EMA", minval=50, maxval=500)
 kamaLen = input.int(20, "KAMA / Efficiency Length", minval=5, maxval=80)
+showParabolicSar = input.bool(true, "Show Parabolic SAR")
+useParabolicSarConfirm = input.bool(true, "Parabolic SAR Confirmation")
+sarStart = input.float(0.02, "SAR Start", minval=0.001, maxval=1.0, step=0.001)
+sarIncrement = input.float(0.02, "SAR Increment", minval=0.001, maxval=1.0, step=0.001)
+sarMax = input.float(0.20, "SAR Max", minval=0.01, maxval=1.0, step=0.01)
 atrLen = input.int(14, "ATR Length", minval=2, maxval=100)
 adxLen = input.int(14, "ADX Length", minval=2, maxval=100)
 adxSmoothing = input.int(14, "ADX Smoothing", minval=2, maxval=100)
@@ -82,7 +88,7 @@ doji(o, c, h, l) =>
 
 // ---------------- Core Data ----------------
 confirmedOk = not useNoRepaint or barstate.isconfirmed
-timeframeOk = timeframe.period == requiredStrategyTimeframe
+timeframeOk = not requireStrategyTimeframe or timeframe.period == requiredStrategyTimeframe
 inSession = not useSessionFilter or not na(time(timeframe.period, tradeSession))
 nyHour = hour(time, "America/New_York")
 nyMinute = minute(time, "America/New_York")
@@ -100,6 +106,11 @@ kamaSc = math.pow(kamaEr * (kamaFast - kamaSlow) + kamaSlow, 2)
 var float kamaValue = na
 kamaValue := na(kamaValue[1]) ? close : kamaValue[1] + kamaSc * (close - kamaValue[1])
 kamaSlope = (kamaValue - nz(kamaValue[3], kamaValue)) / math.max(atr, syminfo.mintick)
+sarValue = ta.sar(sarStart, sarIncrement, sarMax)
+sarBull = close > sarValue
+sarBear = close < sarValue
+sarFlipLong = sarBull and sarBear[1]
+sarFlipShort = sarBear and sarBull[1]
 atrBase = ta.sma(atr, 100)
 atrRatio = atrBase > 0 ? atr / atrBase : 1.0
 vwapRaw = ta.vwap(hlc3)
@@ -226,6 +237,8 @@ kamaRejectShort = useKamaReclaimSetup and high >= kamaValue and close < kamaValu
 
 confluenceLong = useConfluenceSetup and bullTrend and low <= math.max(emaFast, vwap) + atr * 0.20 and close > math.max(emaFast, vwap) and closeNearHigh and relVolume >= 0.70
 confluenceShort = useConfluenceSetup and bearTrend and high >= math.min(emaFast, vwap) - atr * 0.20 and close < math.min(emaFast, vwap) and closeNearLow and relVolume >= 0.70
+sarFlipSetupLong = useParabolicSarConfirm and sarFlipLong and closeNearHigh and relVolume >= 0.70 and chopScore <= maxChop
+sarFlipSetupShort = useParabolicSarConfirm and sarFlipShort and closeNearLow and relVolume >= 0.70 and chopScore <= maxChop
 
 barsSinceLongTrap = ta.barssince(fakeBreakoutLong or liquiditySweepLong or orFakeoutLong)
 barsSinceShortTrap = ta.barssince(fakeBreakoutShort or liquiditySweepShort or orFakeoutShort)
@@ -240,27 +253,29 @@ patternEventLong = chartPatternLong and not chartPatternLong[1]
 patternEventShort = chartPatternShort and not chartPatternShort[1]
 
 // ---------------- Scoring ----------------
-locationLong = vwapReclaimLong or trendPullbackLong or fakeBreakoutLong or orFakeoutLong or liquiditySweepLong or compressionBreakoutLong or powerTrendLong or kamaReclaimLong or confluenceLong or secondEntryLong or chartPatternLong
-locationShort = vwapRejectShort or trendPullbackShort or fakeBreakoutShort or orFakeoutShort or liquiditySweepShort or compressionBreakoutShort or powerTrendShort or kamaRejectShort or confluenceShort or secondEntryShort or chartPatternShort
+locationLong = vwapReclaimLong or trendPullbackLong or fakeBreakoutLong or orFakeoutLong or liquiditySweepLong or compressionBreakoutLong or powerTrendLong or kamaReclaimLong or confluenceLong or sarFlipSetupLong or secondEntryLong or chartPatternLong
+locationShort = vwapRejectShort or trendPullbackShort or fakeBreakoutShort or orFakeoutShort or liquiditySweepShort or compressionBreakoutShort or powerTrendShort or kamaRejectShort or confluenceShort or sarFlipSetupShort or secondEntryShort or chartPatternShort
 kamaOkLong = not useKamaFilter or close >= kamaValue or kamaSlope > 0
 kamaOkShort = not useKamaFilter or close <= kamaValue or kamaSlope < 0
 doNotChaseLong = distVwapAtr > 2.6 or (close > priorHigh and upperWick > body * 1.7) or (rangePosition > 0.90 and not powerBull)
 doNotChaseShort = distVwapAtr > 2.6 or (close < priorLow and lowerWick > body * 1.7) or (rangePosition < 0.10 and not powerBear)
+sarOkLong = not useParabolicSarConfirm or sarBull or sarFlipSetupLong or fakeBreakoutLong or liquiditySweepLong
+sarOkShort = not useParabolicSarConfirm or sarBear or sarFlipSetupShort or fakeBreakoutShort or liquiditySweepShort
 
-longScore = clamp(40 + score(bullTrend, 12) + score(powerBull, 10) + score(close > vwap, 8) + score(vwapSlope > 0, 5) + score(relVolume >= 1.0, 7) + score(closeNearHigh, 6) + score(kamaOkLong, 6) + score(vwapReclaimLong, 12) + score(trendPullbackLong, 12) + score(fakeBreakoutLong or orFakeoutLong or liquiditySweepLong, 14) + score(orBreakoutLong, 10) + score(compressionBreakoutLong, 12) + score(powerTrendLong, 12) + score(kamaReclaimLong or confluenceLong, 10) + score(secondEntryLong, 9) + score(chartPatternLong, 10) - score(chopScore > maxChop, 14) - score(doNotChaseLong, 12) - score(bearTrend, 10), 0, 100)
-shortScore = clamp(40 + score(bearTrend, 12) + score(powerBear, 10) + score(close < vwap, 8) + score(vwapSlope < 0, 5) + score(relVolume >= 1.0, 7) + score(closeNearLow, 6) + score(kamaOkShort, 6) + score(vwapRejectShort, 12) + score(trendPullbackShort, 12) + score(fakeBreakoutShort or orFakeoutShort or liquiditySweepShort, 14) + score(orBreakoutShort, 10) + score(compressionBreakoutShort, 12) + score(powerTrendShort, 12) + score(kamaRejectShort or confluenceShort, 10) + score(secondEntryShort, 9) + score(chartPatternShort, 10) - score(chopScore > maxChop, 14) - score(doNotChaseShort, 12) - score(bullTrend, 10), 0, 100)
+longScore = clamp(40 + score(bullTrend, 12) + score(powerBull, 10) + score(close > vwap, 8) + score(vwapSlope > 0, 5) + score(relVolume >= 1.0, 7) + score(closeNearHigh, 6) + score(kamaOkLong, 6) + score(sarBull, 5) + score(sarFlipSetupLong, 8) + score(vwapReclaimLong, 12) + score(trendPullbackLong, 12) + score(fakeBreakoutLong or orFakeoutLong or liquiditySweepLong, 14) + score(orBreakoutLong, 10) + score(compressionBreakoutLong, 12) + score(powerTrendLong, 12) + score(kamaReclaimLong or confluenceLong, 10) + score(secondEntryLong, 9) + score(chartPatternLong, 10) - score(chopScore > maxChop, 14) - score(doNotChaseLong, 12) - score(useParabolicSarConfirm and sarBear, 5) - score(bearTrend, 10), 0, 100)
+shortScore = clamp(40 + score(bearTrend, 12) + score(powerBear, 10) + score(close < vwap, 8) + score(vwapSlope < 0, 5) + score(relVolume >= 1.0, 7) + score(closeNearLow, 6) + score(kamaOkShort, 6) + score(sarBear, 5) + score(sarFlipSetupShort, 8) + score(vwapRejectShort, 12) + score(trendPullbackShort, 12) + score(fakeBreakoutShort or orFakeoutShort or liquiditySweepShort, 14) + score(orBreakoutShort, 10) + score(compressionBreakoutShort, 12) + score(powerTrendShort, 12) + score(kamaRejectShort or confluenceShort, 10) + score(secondEntryShort, 9) + score(chartPatternShort, 10) - score(chopScore > maxChop, 14) - score(doNotChaseShort, 12) - score(useParabolicSarConfirm and sarBull, 5) - score(bullTrend, 10), 0, 100)
 trapLongScore = clamp(28 + score(fakeBreakoutLong, 22) + score(orFakeoutLong, 20) + score(liquiditySweepLong, 22) + score(secondEntryLong, 12) + score(lowerWick > upperWick, 8) + score(closeNearHigh, 8) + score(relVolume >= 1.0, 7) + score(close > vwap, 5) + score(kamaOkLong, 5) - score(chopScore > maxChop, 8) - score(doNotChaseLong, 8), 0, 100)
 trapShortScore = clamp(28 + score(fakeBreakoutShort, 22) + score(orFakeoutShort, 20) + score(liquiditySweepShort, 22) + score(secondEntryShort, 12) + score(upperWick > lowerWick, 8) + score(closeNearLow, 8) + score(relVolume >= 1.0, 7) + score(close < vwap, 5) + score(kamaOkShort, 5) - score(chopScore > maxChop, 8) - score(doNotChaseShort, 8), 0, 100)
 edge = longScore - shortScore
 
-longSetup = chartPatternLong ? chartPatternLongName : confluenceLong ? "EMA/VWAP Confluence Long" : kamaReclaimLong ? "KAMA Reclaim Long" : secondEntryLong ? "Second Entry Trap Long" : vwapReclaimLong ? "VWAP Reclaim Long" : trendPullbackLong ? "Trend Pullback Long" : fakeBreakoutLong ? "Fake Breakdown Reclaim" : orFakeoutLong ? "Opening Range Fakeout Long" : orBreakoutLong ? "Opening Range Breakout Long" : liquiditySweepLong ? "Liquidity Sweep Reversal Long" : compressionBreakoutLong ? "Compression Breakout Long" : powerTrendLong ? "Power Trend Runner Long" : "Long Setup"
-shortSetup = chartPatternShort ? chartPatternShortName : confluenceShort ? "EMA/VWAP Confluence Short" : kamaRejectShort ? "KAMA Rejection Short" : secondEntryShort ? "Second Entry Trap Short" : vwapRejectShort ? "VWAP Rejection Short" : trendPullbackShort ? "Trend Pullback Short" : fakeBreakoutShort ? "Fake Breakout Short" : orFakeoutShort ? "Opening Range Fakeout Short" : orBreakoutShort ? "Opening Range Breakdown Short" : liquiditySweepShort ? "Liquidity Sweep Reversal Short" : compressionBreakoutShort ? "Compression Breakdown Short" : powerTrendShort ? "Power Trend Runner Short" : "Short Setup"
+longSetup = chartPatternLong ? chartPatternLongName : confluenceLong ? "EMA/VWAP Confluence Long" : kamaReclaimLong ? "KAMA Reclaim Long" : sarFlipSetupLong ? "Parabolic SAR Flip Long" : secondEntryLong ? "Second Entry Trap Long" : vwapReclaimLong ? "VWAP Reclaim Long" : trendPullbackLong ? "Trend Pullback Long" : fakeBreakoutLong ? "Fake Breakdown Reclaim" : orFakeoutLong ? "Opening Range Fakeout Long" : orBreakoutLong ? "Opening Range Breakout Long" : liquiditySweepLong ? "Liquidity Sweep Reversal Long" : compressionBreakoutLong ? "Compression Breakout Long" : powerTrendLong ? "Power Trend Runner Long" : "Long Setup"
+shortSetup = chartPatternShort ? chartPatternShortName : confluenceShort ? "EMA/VWAP Confluence Short" : kamaRejectShort ? "KAMA Rejection Short" : sarFlipSetupShort ? "Parabolic SAR Flip Short" : secondEntryShort ? "Second Entry Trap Short" : vwapRejectShort ? "VWAP Rejection Short" : trendPullbackShort ? "Trend Pullback Short" : fakeBreakoutShort ? "Fake Breakout Short" : orFakeoutShort ? "Opening Range Fakeout Short" : orBreakoutShort ? "Opening Range Breakdown Short" : liquiditySweepShort ? "Liquidity Sweep Reversal Short" : compressionBreakoutShort ? "Compression Breakdown Short" : powerTrendShort ? "Power Trend Runner Short" : "Short Setup"
 
 longTrapReason = fakeBreakoutLong ? "Trap: sellers broke prior low, but price reclaimed it with a strong lower wick." : orFakeoutLong ? "Trap: sellers pushed below the opening range low, then price closed back above it." : liquiditySweepLong ? "Trap: sell stops under liquidity were swept, then buyers stepped back in." : secondEntryLong ? "Trap: first reclaim held and the second push confirmed buyers still control it." : ""
 shortTrapReason = fakeBreakoutShort ? "Trap: buyers broke prior high, but price rejected back below it with a strong upper wick." : orFakeoutShort ? "Trap: buyers pushed above the opening range high, then price closed back below it." : liquiditySweepShort ? "Trap: buy stops over liquidity were swept, then sellers stepped back in." : secondEntryShort ? "Trap: first rejection held and the second push confirmed sellers still control it." : ""
 trapScoreText = "Trap L/S Scores: " + str.tostring(trapLongScore, "#") + " / " + str.tostring(trapShortScore, "#")
-longReason = str.length(longTrapReason) > 0 ? longTrapReason + " " + trapScoreText : chartPatternLong ? "Pattern: " + chartPatternLongName + " with score/volume confirmation." : confluenceLong ? "Confluence: EMA, VWAP, and trend bias are stacked under price." : kamaReclaimLong ? "KAMA reclaim: price recovered the adaptive trend line with momentum." : vwapReclaimLong ? "VWAP reclaim: price flushed into VWAP and closed back above it." : trendPullbackLong ? "Trend pullback: bullish trend held the fast EMA support." : compressionBreakoutLong ? "Compression breakout: squeeze released upward with volume." : powerTrendLong ? "Power trend: strong trend momentum is still expanding." : "Long setup passed the score gate."
-shortReason = str.length(shortTrapReason) > 0 ? shortTrapReason + " " + trapScoreText : chartPatternShort ? "Pattern: " + chartPatternShortName + " with score/volume confirmation." : confluenceShort ? "Confluence: EMA, VWAP, and trend bias are stacked above price." : kamaRejectShort ? "KAMA rejection: price failed the adaptive trend line with momentum." : vwapRejectShort ? "VWAP rejection: price tested VWAP and closed back below it." : trendPullbackShort ? "Trend pullback: bearish trend held the fast EMA resistance." : compressionBreakoutShort ? "Compression breakdown: squeeze released downward with volume." : powerTrendShort ? "Power trend: strong bearish momentum is still expanding." : "Short setup passed the score gate."
+longReason = str.length(longTrapReason) > 0 ? longTrapReason + " " + trapScoreText : chartPatternLong ? "Pattern: " + chartPatternLongName + " with score/volume confirmation." : confluenceLong ? "Confluence: EMA, VWAP, and trend bias are stacked under price." : kamaReclaimLong ? "KAMA reclaim: price recovered the adaptive trend line with momentum." : sarFlipSetupLong ? "Parabolic SAR flip: SAR moved below price while candle confirmation stayed bullish." : vwapReclaimLong ? "VWAP reclaim: price flushed into VWAP and closed back above it." : trendPullbackLong ? "Trend pullback: bullish trend held the fast EMA support." : compressionBreakoutLong ? "Compression breakout: squeeze released upward with volume." : powerTrendLong ? "Power trend: strong trend momentum is still expanding." : "Long setup passed the score gate."
+shortReason = str.length(shortTrapReason) > 0 ? shortTrapReason + " " + trapScoreText : chartPatternShort ? "Pattern: " + chartPatternShortName + " with score/volume confirmation." : confluenceShort ? "Confluence: EMA, VWAP, and trend bias are stacked above price." : kamaRejectShort ? "KAMA rejection: price failed the adaptive trend line with momentum." : sarFlipSetupShort ? "Parabolic SAR flip: SAR moved above price while candle confirmation stayed bearish." : vwapRejectShort ? "VWAP rejection: price tested VWAP and closed back below it." : trendPullbackShort ? "Trend pullback: bearish trend held the fast EMA resistance." : compressionBreakoutShort ? "Compression breakdown: squeeze released downward with volume." : powerTrendShort ? "Power trend: strong bearish momentum is still expanding." : "Short setup passed the score gate."
 
 // ---------------- Risk Plan ----------------
 longStopStructure = math.min(nz(swingLow, low), low) - syminfo.mintick * 2
@@ -289,12 +304,12 @@ rewardOkShort = (close - shortTarget) / shortRisk >= minRewardR or powerTrendSho
 var int lastSignalBar = na
 cooldownOk = na(lastSignalBar) or bar_index - lastSignalBar > cooldownBars
 baseGate = confirmedOk and timeframeOk and inSession and cooldownOk and chopScore <= maxChop and strategy.position_size == 0
-longSignal = baseGate and longScore >= minScore and edge >= minEdge and locationLong and kamaOkLong and not doNotChaseLong and rewardOkLong
-shortSignal = baseGate and shortScore >= minScore and edge <= -minEdge and locationShort and kamaOkShort and not doNotChaseShort and rewardOkShort
+longSignal = baseGate and longScore >= minScore and edge >= minEdge and locationLong and kamaOkLong and sarOkLong and not doNotChaseLong and rewardOkLong
+shortSignal = baseGate and shortScore >= minScore and edge <= -minEdge and locationShort and kamaOkShort and sarOkShort and not doNotChaseShort and rewardOkShort
 longAlert = "LONG " + syminfo.ticker + " | Setup: " + longSetup + " | Entry: " + str.tostring(close, format.mintick) + " | Stop: " + str.tostring(longStop, format.mintick) + " | Take Profit: " + str.tostring(longTarget, format.mintick) + " | Score: " + str.tostring(longScore, "#") + " | Edge: " + str.tostring(edge, "#") + " | Reason: " + longReason
 shortAlert = "SHORT " + syminfo.ticker + " | Setup: " + shortSetup + " | Entry: " + str.tostring(close, format.mintick) + " | Stop: " + str.tostring(shortStop, format.mintick) + " | Take Profit: " + str.tostring(shortTarget, format.mintick) + " | Score: " + str.tostring(shortScore, "#") + " | Edge: " + str.tostring(edge, "#") + " | Reason: " + shortReason
-longTooltip = "Setup: " + longSetup + "\nEntry: " + str.tostring(close, format.mintick) + "\nStop Loss: " + str.tostring(longStop, format.mintick) + "\nTake Profit: " + str.tostring(longTarget, format.mintick) + "\nScore L/S: " + str.tostring(longScore, "#") + " / " + str.tostring(shortScore, "#") + "\nTrap L/S: " + str.tostring(trapLongScore, "#") + " / " + str.tostring(trapShortScore, "#") + "\nEdge: " + str.tostring(edge, "#") + "\nReason: " + longReason
-shortTooltip = "Setup: " + shortSetup + "\nEntry: " + str.tostring(close, format.mintick) + "\nStop Loss: " + str.tostring(shortStop, format.mintick) + "\nTake Profit: " + str.tostring(shortTarget, format.mintick) + "\nScore L/S: " + str.tostring(longScore, "#") + " / " + str.tostring(shortScore, "#") + "\nTrap L/S: " + str.tostring(trapLongScore, "#") + " / " + str.tostring(trapShortScore, "#") + "\nEdge: " + str.tostring(edge, "#") + "\nReason: " + shortReason
+longTooltip = "Setup: " + longSetup + "\nEntry: " + str.tostring(close, format.mintick) + "\nStop Loss: " + str.tostring(longStop, format.mintick) + "\nTake Profit: " + str.tostring(longTarget, format.mintick) + "\nScore L/S: " + str.tostring(longScore, "#") + " / " + str.tostring(shortScore, "#") + "\nTrap L/S: " + str.tostring(trapLongScore, "#") + " / " + str.tostring(trapShortScore, "#") + "\nSAR: " + (sarBull ? "Bullish below price" : "Bearish above price") + "\nEdge: " + str.tostring(edge, "#") + "\nReason: " + longReason
+shortTooltip = "Setup: " + shortSetup + "\nEntry: " + str.tostring(close, format.mintick) + "\nStop Loss: " + str.tostring(shortStop, format.mintick) + "\nTake Profit: " + str.tostring(shortTarget, format.mintick) + "\nScore L/S: " + str.tostring(longScore, "#") + " / " + str.tostring(shortScore, "#") + "\nTrap L/S: " + str.tostring(trapLongScore, "#") + " / " + str.tostring(trapShortScore, "#") + "\nSAR: " + (sarBear ? "Bearish above price" : "Bullish below price") + "\nEdge: " + str.tostring(edge, "#") + "\nReason: " + shortReason
 
 var int lastOpportunityBar = na
 reportWatchTrades = strategyReportMode == "Clean + Watch Boxes"
@@ -304,14 +319,14 @@ watchBase = showSmartOpportunities and confirmedOk and timeframeOk and inSession
 watchLongCandidate = watchBase and not longSignal and locationLong and kamaOkLong and not doNotChaseLong and rewardOkLong and longScore >= minScore - opportunityScoreBuffer and edge >= minEdge - opportunityEdgeBuffer and longScore > shortScore
 watchShortCandidate = watchBase and not shortSignal and locationShort and kamaOkShort and not doNotChaseShort and rewardOkShort and shortScore >= minScore - opportunityScoreBuffer and edge <= -minEdge + opportunityEdgeBuffer and shortScore > longScore
 reportBaseGate = confirmedOk and timeframeOk and inSession and cooldownOk and strategy.position_size == 0
-detectedLongTrade = reportAllDetectedSetups and reportBaseGate and locationLong and longScore >= shortScore
-detectedShortTrade = reportAllDetectedSetups and reportBaseGate and locationShort and shortScore > longScore
+detectedLongTrade = reportAllDetectedSetups and reportBaseGate and locationLong and longScore >= shortScore and not doNotChaseLong
+detectedShortTrade = reportAllDetectedSetups and reportBaseGate and locationShort and shortScore > longScore and not doNotChaseShort
 longTradeSignal = longSignal or (reportWatchTrades and watchLongCandidate) or detectedLongTrade
 shortTradeSignal = shortSignal or (reportWatchTrades and watchShortCandidate) or detectedShortTrade
 watchLong = watchLongCandidate and not reportWatchTrades
 watchShort = watchShortCandidate and not reportWatchTrades
-watchLongTooltip = "Watch Long Opportunity\nSetup: " + longSetup + "\nEntry area: " + str.tostring(close, format.mintick) + "\nStop idea: " + str.tostring(longStop, format.mintick) + "\nTarget idea: " + str.tostring(longTarget, format.mintick) + "\nScore L/S: " + str.tostring(longScore, "#") + " / " + str.tostring(shortScore, "#") + "\nTrap L/S: " + str.tostring(trapLongScore, "#") + " / " + str.tostring(trapShortScore, "#") + "\nWhy not full signal: it is close, but still below the stricter LONG gate."
-watchShortTooltip = "Watch Short Opportunity\nSetup: " + shortSetup + "\nEntry area: " + str.tostring(close, format.mintick) + "\nStop idea: " + str.tostring(shortStop, format.mintick) + "\nTarget idea: " + str.tostring(shortTarget, format.mintick) + "\nScore L/S: " + str.tostring(longScore, "#") + " / " + str.tostring(shortScore, "#") + "\nTrap L/S: " + str.tostring(trapLongScore, "#") + " / " + str.tostring(trapShortScore, "#") + "\nWhy not full signal: it is close, but still below the stricter SHORT gate."
+watchLongTooltip = "Watch Long Opportunity\nSetup: " + longSetup + "\nEntry area: " + str.tostring(close, format.mintick) + "\nStop idea: " + str.tostring(longStop, format.mintick) + "\nTarget idea: " + str.tostring(longTarget, format.mintick) + "\nScore L/S: " + str.tostring(longScore, "#") + " / " + str.tostring(shortScore, "#") + "\nTrap L/S: " + str.tostring(trapLongScore, "#") + " / " + str.tostring(trapShortScore, "#") + "\nSAR: " + (sarBull ? "bullish" : "bearish") + "\nWhy not full signal: it is close, but still below the stricter LONG gate."
+watchShortTooltip = "Watch Short Opportunity\nSetup: " + shortSetup + "\nEntry area: " + str.tostring(close, format.mintick) + "\nStop idea: " + str.tostring(shortStop, format.mintick) + "\nTarget idea: " + str.tostring(shortTarget, format.mintick) + "\nScore L/S: " + str.tostring(longScore, "#") + " / " + str.tostring(shortScore, "#") + "\nTrap L/S: " + str.tostring(trapLongScore, "#") + " / " + str.tostring(trapShortScore, "#") + "\nSAR: " + (sarBear ? "bearish" : "bullish") + "\nWhy not full signal: it is close, but still below the stricter SHORT gate."
 
 var float activeEntry = na
 var float activeStop = na
@@ -456,6 +471,7 @@ plot(emaMid, "Trend EMA", color=color.new(color.blue, 0), linewidth=2)
 plot(emaSlow, "Macro EMA", color=color.new(color.fuchsia, 0), linewidth=2)
 plot(kamaValue, "KAMA", color=color.new(color.yellow, 0), linewidth=2)
 plot(vwap, "VWAP", color=color.new(color.white, 0), linewidth=2)
+plot(showParabolicSar ? sarValue : na, "Parabolic SAR", style=plot.style_cross, color=sarBull ? color.new(color.lime, 0) : color.new(color.red, 0), linewidth=2)
 plot(orHigh, "Opening Range High", color=color.new(color.lime, 55), style=plot.style_linebr)
 plot(orLow, "Opening Range Low", color=color.new(color.red, 55), style=plot.style_linebr)
 plot(showPreviousDayLines ? prevDayHigh : na, "Previous Day High", color=color.new(color.lime, 15), linewidth=2, style=plot.style_linebr)
@@ -492,9 +508,9 @@ alertcondition(strategy.position_size > 0 and close < activeStop, title="Long St
 alertcondition(strategy.position_size < 0 and close > activeStop, title="Short Stop Area", message="SHORT stop area touched.")
 
 // ---------------- Dashboard ----------------
-status = not timeframeOk ? "Switch chart to 1m" : not inSession ? "Outside session" : chopScore > maxChop ? "Chop / wait" : longScore > shortScore ? "Long watch" : shortScore > longScore ? "Short watch" : "Neutral"
+status = not timeframeOk ? "Switch chart to " + requiredStrategyTimeframe : not inSession ? "Outside session" : chopScore > maxChop ? "Chop / wait" : longScore > shortScore ? "Long watch" : shortScore > longScore ? "Short watch" : "Neutral"
 bestSetup = longScore >= shortScore ? longSetup : shortSetup
-var table dash = table.new(position.top_right, 2, 10, bgcolor=color.new(color.black, 12), border_color=color.new(color.white, 72), border_width=1)
+var table dash = table.new(position.top_right, 2, 11, bgcolor=color.new(color.black, 12), border_color=color.new(color.white, 72), border_width=1)
 if showDashboard and barstate.islast
     table.cell(dash, 0, 0, "Setup Radar", text_color=color.white, bgcolor=color.new(color.teal, 55))
     table.cell(dash, 1, 0, status, text_color=timeframeOk and chopScore <= maxChop ? color.lime : color.orange, bgcolor=color.new(color.teal, 55))
@@ -514,5 +530,7 @@ if showDashboard and barstate.islast
     table.cell(dash, 1, 7, str.tostring(trapLongScore, "#") + " / " + str.tostring(trapShortScore, "#"), text_color=trapLongScore >= trapShortScore ? color.lime : color.orange)
     table.cell(dash, 0, 8, "Risk Lines", text_color=color.silver)
     table.cell(dash, 1, 8, strategy.position_size == 0 ? "Waiting" : "Active", text_color=strategy.position_size == 0 ? color.silver : color.lime)
-    table.cell(dash, 0, 9, "Chart TF", text_color=color.silver)
-    table.cell(dash, 1, 9, timeframe.period + " / needs " + requiredStrategyTimeframe, text_color=timeframeOk ? color.lime : color.orange)
+    table.cell(dash, 0, 9, "SAR", text_color=color.silver)
+    table.cell(dash, 1, 9, sarBull ? "Bull" : "Bear", text_color=sarBull ? color.lime : color.orange)
+    table.cell(dash, 0, 10, "Chart TF", text_color=color.silver)
+    table.cell(dash, 1, 10, requireStrategyTimeframe ? timeframe.period + " / needs " + requiredStrategyTimeframe : timeframe.period + " / any", text_color=timeframeOk ? color.lime : color.orange)

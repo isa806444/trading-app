@@ -1,0 +1,138 @@
+//@version=6
+//@strategy_alert_message {{strategy.order.alert_message}}
+strategy("Clean TP-SL Strategy", shorttitle="Clean TP-SL", overlay=true, initial_capital=100000, default_qty_type=strategy.fixed, default_qty_value=1, pyramiding=0, margin_long=10, margin_short=10, process_orders_on_close=true, calc_on_every_tick=false, calc_on_order_fills=true, commission_type=strategy.commission.cash_per_contract, commission_value=4.0, slippage=2, max_labels_count=500, max_lines_count=500)
+
+grpSignal = "Signal"
+fastLen = input.int(10, "Fast EMA", minval=2, maxval=500, group=grpSignal)
+slowLen = input.int(30, "Slow EMA", minval=3, maxval=1000, group=grpSignal)
+minBarsBetweenSignals = input.int(6, "Minimum Bars Between Signals", minval=0, maxval=500, group=grpSignal)
+rsiLen = input.int(14, "RSI Length", minval=2, maxval=100, group=grpSignal)
+rsiBias = input.int(5, "RSI Bias", minval=-40, maxval=40, group=grpSignal)
+tradePreference = input.string("All Trades", "Trading Preference", options=["All Trades", "Only Buy Trades", "Only Sell Trades"], group=grpSignal)
+
+grpRisk = "Risk"
+contracts = input.float(1.0, "Contracts", minval=0.01, step=0.01, group=grpRisk)
+atrLen = input.int(14, "ATR Length", minval=2, maxval=100, group=grpRisk)
+stopAtr = input.float(2.1, "Stop Loss ATR", minval=0.05, step=0.05, group=grpRisk)
+riskReward = input.float(3.5, "Risk Reward", minval=0.05, step=0.05, group=grpRisk)
+maxTradeBars = input.int(500, "Max Trade Duration Bars", minval=1, maxval=5000, group=grpRisk)
+
+grpSession = "Session"
+useTimeFilter = input.bool(false, "Enable Trading Time Filter", group=grpSession)
+tradeSession = input.session("0000-0000", "Trading Session", group=grpSession)
+closeOnSessionEnd = input.bool(false, "Close At Session End", group=grpSession)
+showSessionBg = input.bool(true, "Highlight Non-Trading Time", group=grpSession)
+
+grpVisual = "Visuals"
+showLevels = input.bool(true, "Show Entry / Stop / Target Lines", group=grpVisual)
+showLabels = input.bool(true, "Show Trade Labels", group=grpVisual)
+buyColor = input.color(color.rgb(255, 223, 0), "Buy Color", group=grpVisual)
+sellColor = input.color(color.rgb(255, 57, 4), "Sell Color", group=grpVisual)
+profitColor = input.color(color.rgb(0, 200, 2), "Profit Color", group=grpVisual)
+lossColor = input.color(color.rgb(255, 57, 4), "Loss Color", group=grpVisual)
+
+allowLongs = tradePreference == "All Trades" or tradePreference == "Only Buy Trades"
+allowShorts = tradePreference == "All Trades" or tradePreference == "Only Sell Trades"
+inSession = not useTimeFilter or not na(time(timeframe.period, tradeSession))
+sessionEnded = useTimeFilter and closeOnSessionEnd and inSession[1] and not inSession
+
+fastEma = ta.ema(close, fastLen)
+slowEma = ta.ema(close, slowLen)
+atr = math.max(ta.atr(atrLen), syminfo.mintick)
+rsi = ta.rsi(close, rsiLen)
+
+var int lastLongBar = na
+var int lastShortBar = na
+longCooldownOk = na(lastLongBar) or bar_index - lastLongBar >= minBarsBetweenSignals
+shortCooldownOk = na(lastShortBar) or bar_index - lastShortBar >= minBarsBetweenSignals
+
+longSignal = barstate.isconfirmed and inSession and allowLongs and ta.crossover(fastEma, slowEma) and rsi > 50 + rsiBias and longCooldownOk and strategy.position_size == 0
+shortSignal = barstate.isconfirmed and inSession and allowShorts and ta.crossunder(fastEma, slowEma) and rsi < 50 - rsiBias and shortCooldownOk and strategy.position_size == 0
+
+var float activeEntry = na
+var float activeStop = na
+var float activeTarget = na
+var int activeEntryBar = na
+var line entryLine = na
+var line stopLine = na
+var line targetLine = na
+
+longStop = close - stopAtr * atr
+longTarget = close + stopAtr * riskReward * atr
+shortStop = close + stopAtr * atr
+shortTarget = close - stopAtr * riskReward * atr
+
+longMessage = "BUY " + syminfo.ticker + " | Entry: " + str.tostring(close, format.mintick) + " | Stop: " + str.tostring(longStop, format.mintick) + " | Take Profit: " + str.tostring(longTarget, format.mintick) + " | Reason: EMA cross up + RSI confirmation"
+shortMessage = "SELL " + syminfo.ticker + " | Entry: " + str.tostring(close, format.mintick) + " | Stop: " + str.tostring(shortStop, format.mintick) + " | Take Profit: " + str.tostring(shortTarget, format.mintick) + " | Reason: EMA cross down + RSI confirmation"
+
+if longSignal
+    lastLongBar := bar_index
+    activeEntry := close
+    activeStop := longStop
+    activeTarget := longTarget
+    activeEntryBar := bar_index
+    strategy.entry("Long", strategy.long, qty=contracts, alert_message=longMessage)
+    strategy.exit("Long Exit", from_entry="Long", stop=activeStop, limit=activeTarget, alert_message="EXIT LONG | Stop or target hit")
+    if showLevels
+        if not na(entryLine)
+            line.delete(entryLine)
+        if not na(stopLine)
+            line.delete(stopLine)
+        if not na(targetLine)
+            line.delete(targetLine)
+        entryLine := line.new(bar_index, activeEntry, bar_index + 50, activeEntry, extend=extend.right, color=color.new(color.white, 0), width=2)
+        stopLine := line.new(bar_index, activeStop, bar_index + 50, activeStop, extend=extend.right, color=color.new(lossColor, 0), width=2)
+        targetLine := line.new(bar_index, activeTarget, bar_index + 50, activeTarget, extend=extend.right, color=color.new(profitColor, 0), width=2)
+    if showLabels
+        label.new(bar_index, low, "BUY", style=label.style_label_up, color=buyColor, textcolor=color.black, tooltip=longMessage)
+
+if shortSignal
+    lastShortBar := bar_index
+    activeEntry := close
+    activeStop := shortStop
+    activeTarget := shortTarget
+    activeEntryBar := bar_index
+    strategy.entry("Short", strategy.short, qty=contracts, alert_message=shortMessage)
+    strategy.exit("Short Exit", from_entry="Short", stop=activeStop, limit=activeTarget, alert_message="EXIT SHORT | Stop or target hit")
+    if showLevels
+        if not na(entryLine)
+            line.delete(entryLine)
+        if not na(stopLine)
+            line.delete(stopLine)
+        if not na(targetLine)
+            line.delete(targetLine)
+        entryLine := line.new(bar_index, activeEntry, bar_index + 50, activeEntry, extend=extend.right, color=color.new(color.white, 0), width=2)
+        stopLine := line.new(bar_index, activeStop, bar_index + 50, activeStop, extend=extend.right, color=color.new(lossColor, 0), width=2)
+        targetLine := line.new(bar_index, activeTarget, bar_index + 50, activeTarget, extend=extend.right, color=color.new(profitColor, 0), width=2)
+    if showLabels
+        label.new(bar_index, high, "SELL", style=label.style_label_down, color=sellColor, textcolor=color.white, tooltip=shortMessage)
+
+barsInTrade = strategy.position_size != 0 and not na(activeEntryBar) ? bar_index - activeEntryBar : 0
+timeExit = strategy.position_size != 0 and barsInTrade >= maxTradeBars
+
+if timeExit and strategy.position_size > 0
+    strategy.close("Long", comment="Duration Exit", alert_message="EXIT LONG | Max duration hit")
+
+if timeExit and strategy.position_size < 0
+    strategy.close("Short", comment="Duration Exit", alert_message="EXIT SHORT | Max duration hit")
+
+if sessionEnded and strategy.position_size > 0
+    strategy.close("Long", comment="Session End", alert_message="EXIT LONG | Session ended")
+
+if sessionEnded and strategy.position_size < 0
+    strategy.close("Short", comment="Session End", alert_message="EXIT SHORT | Session ended")
+
+if strategy.position_size == 0 and not longSignal and not shortSignal
+    activeEntry := na
+    activeStop := na
+    activeTarget := na
+    activeEntryBar := na
+
+plot(fastEma, "Fast EMA", color=color.new(buyColor, 0), linewidth=2)
+plot(slowEma, "Slow EMA", color=color.new(sellColor, 0), linewidth=2)
+plotshape(longSignal, "Buy Signal", shape.labelup, location.belowbar, color=buyColor, text="BUY", textcolor=color.black, size=size.small)
+plotshape(shortSignal, "Sell Signal", shape.labeldown, location.abovebar, color=sellColor, text="SELL", textcolor=color.white, size=size.small)
+bgcolor(useTimeFilter and showSessionBg and not inSession ? color.new(lossColor, 92) : na)
+
+alertcondition(longSignal, "Buy Alert", "Clean TP-SL buy. Use {{strategy.order.alert_message}} for entry, stop, and take profit.")
+alertcondition(shortSignal, "Sell Alert", "Clean TP-SL sell. Use {{strategy.order.alert_message}} for entry, stop, and take profit.")

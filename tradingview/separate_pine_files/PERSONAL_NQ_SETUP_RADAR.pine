@@ -1,5 +1,5 @@
 //@version=6
-strategy("Personal NQ Setup Radar - VWAP / KAMA / Liquidity", overlay=true, initial_capital=100000, default_qty_type=strategy.fixed, default_qty_value=1, pyramiding=0, process_orders_on_close=false, calc_on_every_tick=true, calc_on_order_fills=true, commission_type=strategy.commission.cash_per_contract, commission_value=4.0, slippage=2, max_lines_count=80, max_labels_count=120)
+strategy("Personal NQ Setup Radar Strategy v2 - Report Synced", overlay=true, initial_capital=100000, default_qty_type=strategy.fixed, default_qty_value=1, pyramiding=0, process_orders_on_close=true, calc_on_every_tick=true, calc_on_order_fills=true, commission_type=strategy.commission.cash_per_contract, commission_value=4.0, slippage=2, max_lines_count=80, max_labels_count=120)
 
 // Personal TradingView-only setup radar.
 // It marks clean setups, draws entry/stop/TP, and closes when the setup thesis weakens.
@@ -52,7 +52,6 @@ showDashboard = input.bool(true, "Show Dashboard")
 showAllSetupHints = input.bool(false, "Show Smaller Setup Hints")
 showSmartOpportunities = input.bool(true, "Show Smart Opportunity Watch Boxes")
 strategyReportMode = input.string("All Detected Setups", "Strategy Report Entries", options=["Clean Signals Only", "Clean + Watch Boxes", "All Detected Setups"])
-forceStrategyReportOrders = input.bool(true, "Force Strategy Report Orders")
 reportMinScore = input.float(40, "Report Min Score", minval=0, maxval=100, step=1)
 reportMinEdge = input.float(0, "Report Min Edge", minval=0, maxval=40, step=1)
 reportTimeExitBars = input.int(12, "Report Time Exit Bars", minval=1, maxval=200)
@@ -326,6 +325,7 @@ opportunityCooldownOk = na(lastOpportunityBar) or bar_index - lastOpportunityBar
 watchBase = showSmartOpportunities and confirmedOk and timeframeOk and inSession and opportunityCooldownOk and strategy.position_size == 0 and chopScore <= maxChop + 8 and cooldownOk
 watchLongCandidate = watchBase and not longSignal and locationLong and kamaOkLong and not doNotChaseLong and rewardOkLong and longScore >= minScore - opportunityScoreBuffer and edge >= minEdge - opportunityEdgeBuffer and longScore > shortScore
 watchShortCandidate = watchBase and not shortSignal and locationShort and kamaOkShort and not doNotChaseShort and rewardOkShort and shortScore >= minScore - opportunityScoreBuffer and edge <= -minEdge + opportunityEdgeBuffer and shortScore > longScore
+forceStrategyReportOrders = true
 reportBaseGate = confirmedOk and cooldownOk and strategy.position_size == 0 and not na(atr)
 forcedLongTrade = forceStrategyReportOrders and reportBaseGate and reportBiasLong
 forcedShortTrade = forceStrategyReportOrders and reportBaseGate and not forcedLongTrade and reportBiasShort
@@ -417,7 +417,7 @@ if strategy.position_size > 0
         if closeLong and confirmedOk
             strategy.close("Long", alert_message="CLOSE LONG " + activeSetup)
             label.new(bar_index, high, "CLOSE", style=label.style_label_down, color=color.new(color.yellow, 0), textcolor=color.black, size=size.tiny, tooltip="Close Long\nSetup: " + activeSetup + "\nReason: thesis weakened or risk/target logic fired.")
-    if forceStrategyReportOrders and barsInTrade >= reportTimeExitBars and confirmedOk
+    if barsInTrade >= reportTimeExitBars and confirmedOk
         strategy.close("Long", alert_message="CLOSE LONG report time exit")
 
 if strategy.position_size < 0
@@ -433,7 +433,7 @@ if strategy.position_size < 0
         if closeShort and confirmedOk
             strategy.close("Short", alert_message="CLOSE SHORT " + activeSetup)
             label.new(bar_index, low, "CLOSE", style=label.style_label_up, color=color.new(color.yellow, 0), textcolor=color.black, size=size.tiny, tooltip="Close Short\nSetup: " + activeSetup + "\nReason: thesis weakened or risk/target logic fired.")
-    if forceStrategyReportOrders and barsInTrade >= reportTimeExitBars and confirmedOk
+    if barsInTrade >= reportTimeExitBars and confirmedOk
         strategy.close("Short", alert_message="CLOSE SHORT report time exit")
 
 if strategy.position_size == 0
